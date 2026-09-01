@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Record a ruling — a decision taken on the human's behalf — in both places
+# it needs to live: the plan's append-only rulings log, and .local/decisions/
+# where every other skill's decisions are indexed.
+#
+# Legacy behaviour recited rulings once in a final chat message and deleted
+# the ledger. A ruling that dies with its workspace was a decision made in
+# secret; this writes it at the moment it is made.
+#
+# Usage: exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>"
+#   TASK_ID may be a task ID, 'preflight', or 'final'
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -eq 5 ] || exec_die 'usage: exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>"'
+
+plan=$1
+task_id=$2
+decision=$3
+why=$4
+cost=$5
+
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+plan_id=$(exec_frontmatter "$plan" id)
+init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
+dir=$(exec_workspace_dir "$plan")
+stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# 1. Append to the plan's rulings log.
+{
+  echo
+  echo "## $task_id — $stamp"
+  echo
+  echo "**Decided:** $decision"
+  echo
+  echo "**Why:** $why"
+  echo
+  echo "**Cost if wrong:** $cost"
+} >> "$dir/rulings.md"
+
+# 2. Mirror into .local/decisions/ using that store's sequence convention.
+root=$(exec_root)
+ldir="$root/.local/decisions"
+mkdir -p "$ldir"
+
+max=0
+for f in "$ldir"/[0-9][0-9][0-9][0-9]-*.md; do
+  [ -f "$f" ] || continue
+  n=$((10#$(basename "$f" | cut -c1-4)))
+  [ "$n" -gt "$max" ] && max=$n
+done
+seq=$((max + 1))
+
+slug=$(echo "$task_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\{1,\}/-/g')
+fname=$(printf '%04d-%s-%s-ruling.md' "$seq" "$(date -u +%Y%m%dT%H%M%SZ)" "$slug")
+
+cat > "$ldir/$fname" <<EOF
+---
+schema: colossal.local-context/v1
+kind: decision
+sequence: $seq
+created_at: $stamp
+updated_at: $stamp
+status: active
+project: $(basename "$root")
+topic: ${task_id}-ruling
+scope: project
+source: executor-execution
+confidence: confirmed
+sensitivity: internal
+supersedes: null
+review_after: null
+---
+
+# Ruling — $task_id
+
+**Statement:** $decision
+
+**Why it matters:** $why
+
+**Evidence / provenance:** Ruled during execution of \`${plan_id:-$plan}\`${init:+ (initiative \`$init\`)}.
+Observed in the plan text and the review findings for \`$task_id\`; recorded at
+the moment of decision, not reconstructed.
+
+**Constraints and consequences:** $cost
+
+**Supersession:** A later decision that reverses this one writes a new record
+with \`supersedes\` pointing here. The plan's rulings log at
+\`${dir#"$root"/}/rulings.md\` holds the same entry in execution order.
+EOF
+
+echo "$dir/rulings.md"
+echo "$ldir/$fname"

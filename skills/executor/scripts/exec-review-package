@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Build a review package — commit list, stat summary, and the net diff with
+# extended context — written to a file the reviewer reads in one call. The
+# diff never enters the controller's context.
+#
+# Named per task and per review round, so a re-review after fixes gets a
+# distinct file and the diff a given verdict judged stays recoverable.
+#
+# Usage: exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]
+#   TASK  task number (e.g. 3), or the literal 'final' for whole-branch
+#   ROUND review round, default 01
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -ge 4 ] && [ $# -le 5 ] || exec_die "usage: exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]"
+
+plan=$1
+task=$2
+base=$3
+head=$4
+round=$(exec_pad2 "${5:-1}")
+
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+git rev-parse --verify --quiet "$base" >/dev/null || exec_die "bad BASE: $base"
+git rev-parse --verify --quiet "$head" >/dev/null || exec_die "bad HEAD: $head"
+
+plan_id=$(exec_frontmatter "$plan" id)
+dir=$(exec_workspace_dir "$plan")
+b7=$(git rev-parse --short "$base")
+h7=$(git rev-parse --short "$head")
+
+if [ "$task" = "final" ]; then
+  label="${plan_id:-$(basename "$plan" .md)}-final"
+  scope="whole branch"
+else
+  task_id=$(exec_task_id "$plan" "$task")
+  [ -n "$task_id" ] || task_id="${plan_id:-plan}-T$(exec_pad2 "$task")"
+  label="${task_id}-R${round}"
+  scope="task $task, review round $round"
+fi
+
+out="$dir/reviews/diffs/${label}-${b7}..${h7}.diff"
+
+{
+  echo "# Review package — $label"
+  echo "# Scope: $scope"
+  echo "# Range: ${base}..${head}"
+  echo
+  echo "## Commits"
+  git log --oneline "${base}..${head}"
+  echo
+  echo "## Files changed"
+  git diff --stat "${base}..${head}"
+  echo
+  echo "## Diff"
+  git diff -U10 "${base}..${head}"
+} > "$out"
+
+commits=$(git rev-list --count "${base}..${head}")
+echo "$out"
+echo "# ${commits} commit(s), $(wc -c < "$out" | tr -d ' ') bytes" >&2

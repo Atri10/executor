@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Extract one task's full text into a brief file the implementer reads in a
+# single call, so task text never passes through the controller's context.
+#
+# The brief carries an identity header: initiative, plan, task, and spec IDs
+# plus the plan path. A subagent that reads only this file still knows exactly
+# what it is working on and can trace its lineage without opening the plan.
+#
+# Usage: exec-brief PLAN_FILE TASK_NUMBER [OUTFILE]
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -ge 2 ] && [ $# -le 3 ] || exec_die "usage: exec-brief PLAN_FILE TASK_NUMBER [OUTFILE]"
+
+plan=$1
+n=$2
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+plan_id=$(exec_frontmatter "$plan" id)
+spec_id=$(exec_frontmatter "$plan" spec)
+task_id=$(exec_task_id "$plan" "$n")
+
+if [ -z "$task_id" ]; then
+  if [ -n "$plan_id" ]; then
+    exec_die "Task $n in $plan has no task ID in its heading.
+Expected: '### Task $n: <name> — \`${plan_id}-T$(exec_pad2 "$n")\`'
+A plan without task IDs cannot be executed by executor-execution."
+  fi
+  task_id="task-$(exec_pad2 "$n")"   # legacy plan, no IDs anywhere
+fi
+
+if [ $# -eq 3 ]; then
+  out=$3
+else
+  dir=$(exec_workspace_dir "$plan")
+  out="$dir/briefs/${task_id}-brief.md"
+fi
+
+body=$(awk -v n="$n" '
+  /^```/ { infence = !infence }
+  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
+    intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
+  }
+  intask { print }
+' "$plan")
+
+[ -n "$body" ] || exec_die "task $n not found in $plan (no heading matching 'Task $n')"
+
+{
+  echo "<!-- Executor brief — generated, do not edit by hand -->"
+  echo
+  echo "**Task:** \`$task_id\`  "
+  echo "**Plan:** \`${plan_id:-(legacy)}\` — \`$plan\`  "
+  echo "**Spec:** \`${spec_id:-(none)}\`"
+  echo
+  echo "This brief is your requirements. Exact values in it are verbatim —"
+  echo "numbers, strings, signatures, and test cases are copied, not paraphrased."
+  echo
+  echo "---"
+  echo
+  echo "$body"
+} > "$out"
+
+echo "$out"

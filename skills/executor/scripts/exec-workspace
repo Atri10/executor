@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Resolve and ensure a plan's execution workspace, printing its absolute path.
+#
+# Keyed by the plan's `id:` frontmatter, not its filename, so renaming a plan
+# never orphans its artifacts. A plan predating the Executor has no id: and
+# falls back to .executor/legacy/<basename>/, preserving old behaviour.
+#
+# Also seeds the ledger, rulings, preflight, and dispatch files so every run
+# has the same shape and no skill has to invent one.
+#
+# Usage: exec-workspace PLAN_FILE
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -eq 1 ] || exec_die "usage: exec-workspace PLAN_FILE"
+
+plan=$1
+dir=$(exec_workspace_dir "$plan")
+
+plan_id=$(exec_frontmatter "$plan" id)
+spec_id=$(exec_frontmatter "$plan" spec)
+[ -n "$plan_id" ] || plan_id="(no id: — legacy plan)"
+[ -n "$spec_id" ] || spec_id="(none)"
+
+if [ ! -f "$dir/progress.md" ]; then
+  cat > "$dir/progress.md" <<EOF
+# Executor ledger
+plan: $plan_id
+plan_file: $plan
+spec: $spec_id
+
+<!-- One line per state change. A ledger whose plan: line names a different
+     plan is not yours — leave it and start your own. -->
+EOF
+fi
+
+[ -f "$dir/rulings.md" ] || cat > "$dir/rulings.md" <<EOF
+# Rulings — $plan_id
+
+<!-- Append-only. Every decision taken on the human's behalf, written the
+     moment it is made and mirrored into .local/decisions/. -->
+EOF
+
+[ -f "$dir/preflight-scan.md" ] || cat > "$dir/preflight-scan.md" <<EOF
+# Preflight conflict scan — $plan_id
+
+<!-- One row per task pair sharing a file or interface, one row per task for
+     self-consistency, and a ruling beside every finding. -->
+
+| Tasks | Shared surface | Produced vs consumed | Finding | Ruling |
+|---|---|---|---|---|
+EOF
+
+[ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
+# Dispatch log — $plan_id
+
+| Task | Role | Model | Agent | Started | Outcome |
+|---|---|---|---|---|---|
+EOF
+
+# Run registry row, created on first resolution of this plan.
+store=$(exec_run_store)
+reg="$store/INDEX.md"
+if [ ! -f "$reg" ]; then
+  {
+    echo "# Executor Runs"
+    echo
+    echo "| Plan ID | Initiative | Status | Tasks | Started | Finished | Workspace |"
+    echo "|---|---|---|---|---|---|---|"
+  } > "$reg"
+fi
+if ! grep -q "^| $plan_id |" "$reg" 2>/dev/null; then
+  init=$(exec_initiative_of "$plan_id" 2>/dev/null || echo "—")
+  rel=${dir#"$store/"}
+  awk -v row="| $plan_id | $init | running | 0/? | $(date -u +%Y-%m-%d) | — | \`$rel/\` |" '
+    { print }
+    /^\|---/ && !done { print row; done = 1 }
+  ' "$reg" > "$reg.tmp" && mv "$reg.tmp" "$reg"
+fi
+
+echo "$dir"

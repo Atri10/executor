@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# Initiative lifecycle: allocate, resolve, and advance phases.
+#
+# Usage:
+#   exec-initiative new "<title>"                    scaffold a new initiative
+#   exec-initiative resolve INIT-0004                print its folder path
+#   exec-initiative phase INIT-0004 <phase> entered|passed|skipped [note]
+#   exec-initiative status INIT-0004 <status>        active|complete|superseded|abandoned|paused
+#   exec-initiative list                             print the registry
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+PHASES="intake discovery architecture design specification planning execution review verification handoff"
+
+usage() {
+  sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+today()   { date -u +%Y-%m-%d; }
+
+slugify() {
+  echo "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//' \
+    | cut -c1-48
+}
+
+# Next free INIT-NNNN. Lists immediately before allocating; a collision means
+# another agent won the race, so we take the next number rather than overwrite.
+next_initiative_id() {
+  local store=$1 max=0 n
+  if [ -d "$store" ]; then
+    for d in "$store"/INIT-[0-9][0-9][0-9][0-9]*; do
+      [ -d "$d" ] || continue
+      n=$(basename "$d" | sed -n 's/^INIT-\([0-9][0-9][0-9][0-9]\).*/\1/p')
+      [ -n "$n" ] || continue
+      n=$((10#$n))
+      [ "$n" -gt "$max" ] && max=$n
+    done
+  fi
+  printf 'INIT-%04d' "$((max + 1))"
+}
+
+ensure_registry() {
+  local store=$1 idx="$1/INDEX.md"
+  mkdir -p "$store"
+  if [ ! -f "$idx" ]; then
+    {
+      echo "# Executor Initiatives"
+      echo
+      echo "| ID | Title | Status | Phase | Folder | Updated |"
+      echo "|---|---|---|---|---|---|"
+    } > "$idx"
+  fi
+  echo "$idx"
+}
+
+# Allocation must be a critical section, not an atomic file create.
+#
+# First attempt used `mkdir "$store/$id-$slug"` as the claim. That only
+# collides when two callers pick the SAME slug — two concurrent `new` calls
+# with different titles both compute the same next number and both succeed,
+# because their paths differ. Observed: 8 concurrent calls produced 8
+# directories but only 7 distinct IDs.
+#
+# The read-allocate-create-append sequence has to be serialised as a whole.
+# `mkdir` of a fixed lock path is the mutex; `new` is rare enough that
+# serialising it costs nothing.
+registry_lock() {
+  local store=$1 lock="$store/.registry.lock" waited=0
+  mkdir -p "$store"
+  while ! mkdir "$lock" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 100 ]; then          # ~10s: assume the holder died
+      rm -rf "$lock"
+      continue
+    fi
+    sleep 0.1
+  done
+}
+
+registry_unlock() { rmdir "$1/.registry.lock" 2>/dev/null || true; }
+
+append_registry_row() {
+  local idx=$1 row=$2
+  awk -v row="$row" '
+    { print }
+    /^\|---/ && !done { print row; done = 1 }
+  ' "$idx" > "$idx.tmp" && mv "$idx.tmp" "$idx"
+}
+
+cmd_new() {
+  local title=${1:-}
+  [ -n "$title" ] || usage
+  local store idx id slug dir stamp
+  store=$(exec_docs_store)
+  slug=$(slugify "$title")
+
+  # Everything from reading the highest existing number to appending the
+  # registry row happens under one lock. Releasing on signal too, so a killed
+  # run cannot wedge the next caller for ten seconds.
+  registry_lock "$store"
+  trap 'registry_unlock "$store"' EXIT INT TERM
+
+  idx=$(ensure_registry "$store")
+  id=$(next_initiative_id "$store")
+  dir="$store/$id-$slug"
+  [ -e "$dir" ] && exec_die "initiative folder already exists: $dir"
+
+  mkdir -p "$dir"/{discovery,architecture,design,specs,risks,verification,plans,brainstorm/sessions}
+  stamp=$(now_utc)
+
+  cat > "$dir/charter.md" <<EOF
+---
+id: $id-CHTR-01
+initiative: $id
+kind: charter
+title: $title
+status: draft
+created_at: $stamp
+updated_at: $stamp
+supersedes: null
+superseded_by: null
+phase: intake
+skipped_phases: []
+depends_on: []
+supersedes_initiative: null
+superseded_by_initiative: null
+related: []
+owner: TBD
+---
+
+# $title
+
+## Problem
+
+<!-- What is wrong today, stated so someone outside the team recognises it. -->
+
+## Why now
+
+## Goals
+
+## Non-goals
+
+## Success criteria
+
+<!-- Observable and measurable. "Faster" is not a criterion; "p99 under 200ms
+     at 10k tenants" is. -->
+
+## Scope boundaries
+
+## Constraints
+
+## Stakeholders
+EOF
+
+  cat > "$dir/INDEX.md" <<EOF
+# $id — $title
+
+**Status:** active · **Phase:** intake · **Owner:** TBD
+
+## Dependencies
+
+_None declared._
+
+## Documents
+
+| ID | Kind | Title | Status | Path |
+|---|---|---|---|---|
+| $id-CHTR-01 | charter | $title | draft | \`charter.md\` |
+
+## Phase log
+
+| Phase | Entered | Gate passed | Notes |
+|---|---|---|---|
+| intake | $(today) | — | |
+EOF
+
+  # Registry row, newest first, inserted under the header separator — still
+  # inside the critical section, so a concurrent `new` cannot drop it.
+  append_registry_row "$idx" \
+    "| $id | $title | active | intake | \`$id-$slug/\` | $(today) |"
+
+  registry_unlock "$store"
+  trap - EXIT INT TERM
+
+  printf '%s\t%s\n' "$id" "$dir"
+}
+
+cmd_resolve() {
+  local id=${1:-}
+  [ -n "$id" ] || usage
+  exec_initiative_dir "$id"
+}
+
+cmd_phase() {
+  local id=${1:-} phase=${2:-} event=${3:-} note=${4:-}
+  [ -n "$id" ] && [ -n "$phase" ] && [ -n "$event" ] || usage
+  case " $PHASES " in *" $phase "*) ;; *) exec_die "unknown phase: $phase (want one of: $PHASES)" ;; esac
+  case "$event" in entered|passed|skipped) ;; *) exec_die "event must be entered, passed, or skipped" ;; esac
+
+  local dir idx
+  dir=$(exec_initiative_dir "$id")
+  idx="$dir/INDEX.md"
+  [ -f "$idx" ] || exec_die "no INDEX.md in $dir"
+
+  if grep -q "^| $phase |" "$idx"; then
+    awk -v phase="$phase" -v event="$event" -v d="$(today)" -v note="$note" '
+      BEGIN { FS = OFS = "|" }
+      $0 ~ "^\\| " phase " \\|" {
+        if (event == "entered") { $3 = " " d " " }
+        else if (event == "passed") { $4 = " " d " " }
+        else { $3 = " — "; $4 = " **skipped** " }
+        if (note != "") { $5 = " " note " " }
+        print; next
+      }
+      { print }
+    ' "$idx" > "$idx.tmp" && mv "$idx.tmp" "$idx"
+  else
+    local entered="—" passed="—"
+    case "$event" in
+      entered) entered=$(today) ;;
+      passed)  passed=$(today) ;;
+      skipped) passed="**skipped**" ;;
+    esac
+    printf '| %s | %s | %s | %s |\n' "$phase" "$entered" "$passed" "$note" >> "$idx"
+  fi
+
+  # Header line and registry row both track the current phase.
+  sed -i.bak -E "s/(\*\*Phase:\*\* )[a-z]+/\1$phase/" "$idx" && rm -f "$idx.bak"
+  local store reg
+  store=$(exec_docs_store); reg="$store/INDEX.md"
+  [ -f "$reg" ] && awk -v id="$id" -v phase="$phase" -v d="$(today)" '
+    BEGIN { FS = OFS = "|" }
+    $0 ~ "^\\| " id " \\|" { $5 = " " phase " "; $7 = " " d " "; print; next }
+    { print }
+  ' "$reg" > "$reg.tmp" && mv "$reg.tmp" "$reg"
+
+  echo "$id: $phase $event"
+}
+
+cmd_status() {
+  local id=${1:-} status=${2:-}
+  [ -n "$id" ] && [ -n "$status" ] || usage
+  case "$status" in active|complete|superseded|abandoned|paused) ;; *)
+    exec_die "status must be active, complete, superseded, abandoned, or paused" ;;
+  esac
+  local dir idx store reg
+  dir=$(exec_initiative_dir "$id"); idx="$dir/INDEX.md"
+  sed -i.bak -E "s/(\*\*Status:\*\* )[a-z]+/\1$status/" "$idx" && rm -f "$idx.bak"
+  store=$(exec_docs_store); reg="$store/INDEX.md"
+  [ -f "$reg" ] && awk -v id="$id" -v s="$status" -v d="$(today)" '
+    BEGIN { FS = OFS = "|" }
+    $0 ~ "^\\| " id " \\|" { $4 = " " s " "; $7 = " " d " "; print; next }
+    { print }
+  ' "$reg" > "$reg.tmp" && mv "$reg.tmp" "$reg"
+  echo "$id: $status"
+}
+
+cmd_list() {
+  local reg
+  reg="$(exec_docs_store)/INDEX.md"
+  [ -f "$reg" ] || exec_die "no initiative registry yet"
+  cat "$reg"
+}
+
+case "${1:-}" in
+  new)      shift; cmd_new "$@" ;;
+  resolve)  shift; cmd_resolve "$@" ;;
+  phase)    shift; cmd_phase "$@" ;;
+  status)   shift; cmd_status "$@" ;;
+  list)     shift; cmd_list "$@" ;;
+  *)        usage ;;
+esac

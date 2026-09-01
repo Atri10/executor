@@ -1,0 +1,7 @@
+# Executor execution store — self-ignoring by default.
+# The user may delete or narrow this file to commit the execution record;
+# see skills/executor/references/safety.md before doing so.
+.executor/*
+
+# macOS
+.DS_Store

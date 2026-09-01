@@ -1,0 +1,577 @@
+---
+name: executor-planning
+description: Turns an approved Executor spec into one or more plans of ID-bearing, independently testable tasks — file map, exact interface signatures, bite-sized TDD steps with real code, a cross-task dependency map, and an execution-mode gate. Use after a spec passes its phase gate and before any implementation begins, or when an existing plan must be split, extended, or repaired so `executor-execution` can dispatch it.
+---
+
+# Planning
+
+Turn `INIT-NNNN-SPEC-nn` into `INIT-NNNN-Pnn`: a document whose every task
+carries an ID, exact file paths, real code in every code step, exact
+signatures, and a dependency map. Planning ends when the human picks an
+execution mode.
+
+**Write for an engineer with zero context for this codebase and questionable
+taste.** Assume a skilled developer who knows almost nothing about our
+toolset or problem domain, and who does not know good test design well.
+Document which files they touch, what code goes in them, what tests prove
+it, and how to run those tests. DRY. YAGNI. TDD. Frequent commits.
+
+That framing is not politeness. Under `executor-execution` each task is
+dispatched to a **fresh subagent that reads only its own brief** — the task's
+verbatim text plus an identity header. Anything you leave implicit is
+unavailable to the person implementing it.
+
+## Before You Write Anything
+
+| Read | Why |
+|---|---|
+| `skill://executor` | ID grammar, citation rule, phase gates, rulings policy |
+| `executor/references/frontmatter.md` | plan frontmatter is contract, not style |
+| `executor/references/layout.md` | plans live in `plans/`, nothing else |
+| `executor/references/indexes.md` | the two index updates planning owns |
+| The spec `INIT-NNNN-SPEC-nn` | the plan argues from it; you copy from it |
+| Its `INIT-NNNN-IFCE-nn` | every signature you write comes from here |
+| The ADRs the spec lists in `decisions:` | a plan that reopens a decided question is a defect |
+
+**Prerequisites.** The spec's phase gate passed (`status: active`, phase log
+row for `specification` has a gate date). No approved spec → stop; route to
+`executor-spec`. No interface document and the work spans components → stop;
+route to `executor-architecture`. Planning does not invent structure.
+
+**The citation rule is absolute.** Every ID in a plan begins with this
+plan's own initiative. A task needing something from `INIT-0002` states the
+requirement in its own words; the dependency lives only in the charter /
+initiative INDEX `depends_on`.
+
+### Citing spec requirements and constraints
+
+A spec's individual requirements and global constraints are addressable IDs.
+Use them; never write prose like "requirement 7".
+
+| Token | Means |
+|---|---|
+| `INIT-0004-SPEC-01-R07` | requirement 7 of that spec |
+| `INIT-0004-SPEC-01-C03` | global constraint 3 of that spec |
+
+These never collide with review rounds: a round ID always carries a `-T<nn>-`
+segment before its `-R<nn>` (`INIT-0004-P01-T03-R02`), while a requirement
+hangs off `-SPEC-<nn>-`. Requirement IDs are what make the spec-coverage
+check mechanical instead of impressionistic.
+
+## Step 1 — Allocate the plan ID
+
+Plans are numbered per-initiative from `01`: `INIT-0004-P01`,
+`INIT-0004-P02`. Allocate by **listing `plans/` immediately before writing**
+and taking the next free number.
+
+```bash
+scripts/exec-initiative resolve INIT-0004        # → the initiative folder
+ls "$(scripts/exec-initiative resolve INIT-0004)/plans/"
+```
+
+**Do not use `exec-id INIT-0004 P` for plan IDs.** It prints
+`INIT-0004-P-01` (a hyphen the grammar does not have) and its scan pattern
+misses existing `INIT-0004-P01` files, so it returns `-01` forever. Use it
+for `ADR`, `IFCE`, `SPEC`, and the other two-segment kinds, where it is
+correct.
+
+On a collision — another agent took your number while you were writing —
+take the next one, write your file, and note the race in the initiative's
+`INDEX.md`. Never overwrite.
+
+File path: `<initiative>/plans/INIT-0004-P01-<topic-slug>.md`. The slug is
+cosmetic; every script resolves through the `id:` frontmatter field, so
+renaming the file never orphans its workspace.
+
+## Step 2 — One plan or several
+
+Split into `P01`, `P02`, … when the spec covers subsystems that can ship
+independently. **Each plan must produce working, testable software on its
+own** — a plan that leaves the tree broken until its successor lands is not
+a plan, it is half of one.
+
+| Split when | Keep as one plan when |
+|---|---|
+| Two subsystems with a stable seam between them | Tasks share a file and interleave |
+| The second half depends on operational feedback from the first | The split is only "the plan feels long" |
+| Different reviewers own the halves | Neither half is independently testable |
+
+When you split, the **first** plan carries an explicit ordering statement,
+and every later plan carries an `## Assumes` section naming exactly what it
+takes from its predecessors, **with exact signatures**:
+
+```markdown
+## Assumes
+
+`INIT-0004-P01` has landed and provides:
+
+- `placeCell(tenantId: str, weight: int) -> CellId` in `src/cells/placement.py`
+- `class CellId(NamedTuple): region: str; index: int` in `src/cells/types.py`
+
+If either signature differs from the above when this plan starts, stop and
+repair the plan — do not adapt around it.
+```
+
+Ordering statement in `P01`: `Execution order: P01 → P02 → P03. P02 does not
+start until P01's final review is clean.`
+
+Also split the spec's requirements across plans explicitly — each plan names
+the requirement IDs it covers (`Covers: R01-R06, R11`), so no requirement
+falls into the gap between two plans.
+
+Cross-plan references are IDs inside the same initiative, so they are legal.
+References to another *initiative's* plan are not.
+
+## Step 3 — Map the files before defining tasks
+
+This is where decomposition gets locked in. Write the file map first; tasks
+fall out of it.
+
+- Design units with clear boundaries and well-defined interfaces. **One
+  clear responsibility per file.**
+- You reason best about code you can hold in context at once, and edits are
+  more reliable in focused files. **Prefer smaller, focused files** over
+  large ones that do too much.
+- **Files that change together live together.** Split by responsibility, not
+  by technical layer.
+- **In existing codebases, follow established patterns.** If the codebase
+  uses large files, do not unilaterally restructure — but if a file you are
+  modifying has grown unwieldy, including a split in the plan is reasonable.
+
+Each task then produces self-contained changes that make sense
+independently.
+
+## Step 4 — Right-size the tasks
+
+**A task is the smallest unit that carries its own test cycle and is worth a
+fresh reviewer's gate.**
+
+| Rule | Consequence |
+|---|---|
+| Fold setup, configuration, scaffolding, and documentation into the task whose deliverable needs them | a "set up the config" task has nothing a reviewer can reject |
+| Split only where a reviewer could meaningfully reject one task while approving its neighbour | otherwise the split adds two dispatches and no signal |
+| Every task ends with an independently testable deliverable | the review gate has something to test |
+| Number contiguously from 1 within the plan | `exec-brief PLAN N` finds a task by its heading ordinal |
+
+Tasks are `T01`…`Tnn` **per plan**. `P02` starts again at `T01`; the plan
+segment keeps the IDs distinct.
+
+## Step 5 — Write the plan
+
+### Document order is load-bearing
+
+`exec-brief` extracts a task by scanning from its `Task N` heading to the
+**next `Task` heading or end of file**. Verified: a `## Dependency Map`
+section placed after the last task is copied verbatim into that task's
+brief, and the implementer reads it as their requirements.
+
+**Every plan-level section comes before the first task heading. After the
+first task heading there are only tasks.**
+
+Section order, top to bottom:
+
+1. frontmatter
+2. header (goal, architecture, tech stack, spec, covers)
+3. Global Constraints
+4. Interfaces
+5. Assumes — `P02` and later only
+6. File Map
+7. Dependency Map
+8. `## Tasks`, then `### Task 1` … `### Task N` and nothing else
+
+### Frontmatter
+
+Common fields plus the plan block, per the frontmatter contract. Timestamps
+are real UTC from an executed command, never invented.
+
+```yaml
+---
+id: INIT-0004-P01
+initiative: INIT-0004
+kind: plan
+title: Cell router
+status: draft
+created_at: 2026-09-01T14:55:52Z
+updated_at: 2026-09-01T14:55:52Z
+supersedes: null
+superseded_by: null
+spec: INIT-0004-SPEC-01
+interfaces: [INIT-0004-IFCE-01]
+tasks: 7
+execution_mode: null
+workspace: .executor/INIT-0004/P01
+---
+```
+
+| Field | Rule |
+|---|---|
+| `id` | matches the filename's ID segment; scripts resolve the workspace from it |
+| `spec` | the one spec this plan argues from; copied into every brief header |
+| `interfaces` | every IFCE document a task's signatures came from |
+| `tasks` | the actual count of `### Task` headings — fix it when you add one |
+| `execution_mode` | `null` until the human picks; then `subagent` or `inline` |
+| `workspace` | `.executor/<INIT>/<Pnn>` — must equal what `exec-workspace` computes from `id`, or the field is a lie |
+| `status` | `draft` while writing, `active` when the human picks a mode |
+
+### Header
+
+```markdown
+# Cell router — implementation plan
+
+> **For agentic workers:** dispatch this plan with `executor-execution`.
+> Steps use checkbox (`- [ ]`) syntax for tracking. Do not begin Task 1
+> before the preflight scan is written.
+
+**Goal:** [one sentence describing what this builds]
+
+**Architecture:** [2-3 sentences about the approach, pointing at
+`INIT-0004-ARCH-01`]
+
+**Tech Stack:** [key technologies and libraries, with version floors]
+
+**Spec:** `INIT-0004-SPEC-01` — `specs/INIT-0004-SPEC-01-cell-placement.md`
+
+**Covers:** `R01`-`R06`, `R11` of `INIT-0004-SPEC-01`
+```
+
+The spec travels with the plan because the plan argues from it; a reviewer
+reads both.
+
+### Global Constraints
+
+Project-wide requirements — version floors, dependency limits, naming and
+copy rules, platform requirements — one line each, **exact values copied
+verbatim from the spec**, each tagged with its constraint ID. Never
+paraphrased, never summarised.
+
+```markdown
+## Global Constraints
+
+Every task's requirements implicitly include this block.
+
+- `C01` — Python >= 3.11; no new runtime dependencies beyond `pydantic>=2.6`.
+- `C02` — All public functions carry type annotations; `mypy --strict` passes.
+- `C03` — User-visible strings use the exact copy in `INIT-0004-SPEC-01 §4`.
+- `C04` — No network calls in unit tests.
+```
+
+IDs are the spec's own (`INIT-0004-SPEC-01-C03`, shortened to `C03` inside
+this block since the plan names its spec once, at the top). A reviewer
+rejecting on a constraint cites the ID, not a quotation.
+
+**The leak you must close:** a brief carries only the task's own text, so
+this block does not travel with it. Any constraint a task can violate inside
+its own code — a version it pins, a string it writes, a dependency it adds —
+is **also stated verbatim inside that task's steps**, with its ID. The block
+stays for the reviewer and the human; the duplicate is for the implementer
+who sees nothing else.
+
+### Interfaces
+
+Name the IFCE document, then reproduce the signatures this plan touches.
+
+```markdown
+## Interfaces
+
+Source of truth: `INIT-0004-IFCE-01` —
+`architecture/INIT-0004-IFCE-01-service-contracts.md`. Signatures below are
+copied verbatim. If the code diverges from them, the code is wrong.
+
+- `placeCell(tenantId: str, weight: int) -> CellId`
+- `evictCell(cell: CellId, reason: EvictReason) -> None`
+- `class EvictReason(StrEnum): DRAIN; OVERLOAD; MANUAL`
+```
+
+**A signature that does not exist yet is an architecture gap.** Stop, go back
+to `executor-architecture`, get the interface defined, then resume. Do not
+invent a signature in a plan — an invented signature is a decision made
+without an ADR, discovered at review time by two tasks that built
+incompatible halves of one seam.
+
+### Dependency Map
+
+One row per pair of tasks sharing a file or an interface. This is the input
+to `executor-execution`'s preflight scan; produce it here rather than making
+the controller derive it from prose.
+
+```markdown
+## Dependency Map
+
+| Producer | Consumer | Shared surface | What flows across it |
+|---|---|---|---|
+| T02 | T04 | `src/cells/types.py` | `CellId` NamedTuple definition |
+| T02 | T05 | `src/cells/types.py` | `CellId` NamedTuple definition |
+| T03 | T05 | `placeCell()` | signature and `CellError` raise contract |
+| T04 | T06 | `src/cells/router.py` | `Router.dispatch()` added, T06 extends it |
+
+No pair outside this table shares a file or a symbol.
+```
+
+| Rule | Why |
+|---|---|
+| **Producer is ordered before consumer** — always | a consumer dispatched first has nothing to import |
+| One row per *pair*, not per file | the controller needs the direction, not an inventory |
+| Two tasks writing the same file appear here even with no symbol shared | that is a merge conflict, and the controller must serialise them |
+| The closing "no pair outside this table" line is required | it turns an omission into a falsifiable claim |
+
+If the table shows a cycle — T04 needs T06 and T06 needs T04 — the task
+boundary is wrong. Merge them or move the shared symbol into an earlier
+task. Do not ship a cyclic plan and let the controller discover it.
+
+### Task structure
+
+Heading format, exactly:
+
+```markdown
+### Task 3: Cell placement scoring — `INIT-0004-P01-T03`
+```
+
+| Constraint | Failure if broken |
+|---|---|
+| Heading starts `### Task <N>:` with the literal word `Task` and the ordinal | `exec-brief PLAN N` cannot find the task |
+| The ID matches `INIT-NNNN-Pnn-Tnn` and sits on the heading line | `exec-brief` **errors out**; the plan cannot be executed |
+| The `Tnn` digits equal the heading ordinal, zero-padded | brief, report, diff, and verdict filenames name a different task than the one dispatched |
+| Task IDs are unique within the plan | two tasks overwrite one brief |
+
+Full task shape:
+
+````markdown
+### Task 3: Cell placement scoring — `INIT-0004-P01-T03`
+
+**Implements:** `INIT-0004-SPEC-01-R04`, `INIT-0004-SPEC-01-R05`
+**Constraints restated here:** `C01` (Python >= 3.11), `C02` (`mypy --strict`)
+
+**Files:**
+- Create: `src/cells/scoring.py`
+- Modify: `src/cells/placement.py:88-104`
+- Test: `tests/cells/test_scoring.py`
+
+**Interfaces:**
+- Consumes: `class CellId(NamedTuple): region: str; index: int` from
+  `src/cells/types.py` (Task 2)
+- Produces: `score(cell: CellId, load: int) -> float` — returns 0.0..1.0,
+  raises `ValueError` when `load < 0`. Task 5 calls this.
+
+**Requirements:** scores are pure functions of the arguments — no clock, no
+I/O (`INIT-0004-SPEC-01-R05`).
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+def test_score_is_zero_for_unloaded_cell():
+    assert score(CellId("eu-west", 3), 0) == 0.0
+
+def test_score_rejects_negative_load():
+    with pytest.raises(ValueError):
+        score(CellId("eu-west", 3), -1)
+```
+
+- [ ] **Step 2: Run the test and see it fail**
+
+Run: `pytest tests/cells/test_scoring.py -v`
+Expected: FAIL — `NameError: name 'score' is not defined`
+
+- [ ] **Step 3: Write the minimal implementation**
+
+```python
+def score(cell: CellId, load: int) -> float:
+    if load < 0:
+        raise ValueError(f"load must be non-negative, got {load}")
+    return min(load / CELL_CAPACITY, 1.0)
+```
+
+- [ ] **Step 4: Run the test and see it pass**
+
+Run: `pytest tests/cells/test_scoring.py -v`
+Expected: PASS — 2 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/cells/scoring.py tests/cells/test_scoring.py
+git commit -m "feat(cells): add placement scoring"
+```
+````
+
+**Steps are bite-sized — one action, 2-5 minutes each — in TDD rhythm:**
+write the failing test → run it and see it fail → minimal implementation →
+run it and see it pass → commit. Every code step carries a fenced code
+block. Every run step names the exact command and the exact expected output.
+
+**The Interfaces block is how an implementer who sees only their own task
+learns what neighbours expose.** Consumes lists exact signatures of what it
+uses from earlier tasks; Produces lists exact names, parameter types, return
+types, and error behaviour later tasks rely on. Every Produces entry that a
+later task consumes appears in the Dependency Map, and vice versa.
+
+**The Implements line is what the reviewer grades against.** A task
+implementing no requirement is scope you invented; a requirement implemented
+by no task is a coverage gap. Both are caught by the ID, not by reading.
+
+## No Placeholders
+
+Every step contains the actual content the engineer needs. These are **plan
+failures** — never write them:
+
+- "TBD", "TODO", "implement later", "fill in details"
+- "Add appropriate error handling" / "add validation" / "handle edge cases"
+- "Write tests for the above" without the actual test code
+- "Similar to Task N" instead of repeating the code — **the engineer may be
+  reading tasks out of order**, and under `executor-execution` they are
+  reading exactly one task and nothing else
+- Steps that describe *what* to do without showing *how* — code steps
+  require code blocks
+- References to types, functions, or methods defined in no task and in no
+  interface document
+
+A placeholder is not a shortcut you pay for later. It is a question the
+implementer answers at 2 a.m. with the worst plausible guess, which the
+reviewer then rejects, which costs one full dispatch round.
+
+## Self-Review
+
+After the plan is complete, read it against the spec with fresh eyes. This is
+a checklist you run yourself — not a subagent dispatch. Fix findings inline;
+no re-review needed.
+
+**1. Spec coverage.** Walk the spec's requirement IDs in order — `R01`,
+`R02`, … — and name the task that implements each. Write the mapping down;
+an unmapped requirement gets a task, and a task mapped to nothing gets
+deleted or justified.
+
+| Requirement | Task |
+|---|---|
+| `R01` | T01 |
+| `R02` | T01 |
+| `R03` | T02 |
+| `R04` | T03 |
+| `R05` | T03 |
+| `R06` | T04 |
+| `R11` | T07 |
+
+**2. Placeholder scan.** Search the plan for every pattern in the section
+above. Fix each hit.
+
+**3. Type consistency.** Do the types, signatures, and property names used in
+later tasks match what earlier tasks defined? `clearLayers()` in Task 3 and
+`clearFullLayers()` in Task 7 is a bug — the second dispatch fails on an
+import error and burns a review round.
+
+**4. Interface fidelity.** Every signature in every Interfaces block is
+character-identical to `INIT-0004-IFCE-nn`. A paraphrase is a defect.
+
+**5. Dependency map completeness.** Every Produces entry that another task
+consumes has a row. Every shared file has a row. No cycles. Producers
+precede consumers in task order.
+
+**6. Citation check.** Every ID in the document starts with this
+initiative's ID. `id`, `spec`, `interfaces`, the ID in every task heading,
+and every `R`/`C` token resolve inside this initiative.
+
+**7. ID extraction — run it.** The definitive check, using the three-argument
+form, which writes to the path you give and does **not** create the
+execution workspace:
+
+```bash
+for n in $(seq 1 7); do
+  scripts/exec-brief docs/executor/INIT-0004-.../plans/INIT-0004-P01-....md \
+    "$n" /tmp/brief-check.md >/dev/null || echo "TASK $n FAILS"
+  grep -m1 '^\*\*Task:\*\*' /tmp/brief-check.md
+done
+cd /tmp && rm -f brief-check.md
+```
+
+Every task prints its own `INIT-0004-P01-Tnn` and none errors. A task that
+errors cannot be dispatched. A task printing the wrong `Tnn` means the
+heading ordinal and the ID disagree.
+
+**8. Trailing-content check.** The last task's brief ends with the last
+task's last step. If it contains a plan-level section, move that section
+above the first task heading.
+
+## Rulings Do Not Apply Here
+
+A **ruling** is an execution-time concept: the controller decides something
+without the human *while a plan is running*, and `exec-ruling` records it
+into that plan's `rulings.md`. It requires a plan file, and a workspace, and
+a task in flight.
+
+A decision taken while planning — a structure choice, a library pick, a
+boundary you moved — is an **ADR** (`INIT-0004-ADR-nn`), written into
+`architecture/`, registered in the initiative INDEX, with the human in the
+loop. Do not call `exec-ruling` before execution starts.
+
+If planning surfaces a decision the architecture never made, that is the
+signal to stop planning: write the ADR (or route to
+`executor-architecture`), then resume. Planning around an unmade decision
+buries it in a task where no reviewer will recognise it as a decision.
+
+## Execution Handoff
+
+The planning phase gate is the human picking an execution mode. Everything
+below happens in one change.
+
+**1. Update the initiative INDEX** (`<initiative>/INDEX.md`) — append the
+documents row and update the phase log:
+
+```markdown
+| INIT-0004-P01 | plan | Cell router | active | `plans/INIT-0004-P01-cell-router.md` |
+```
+
+**2. Update the spec's `plans:` field** to include this plan's ID, and bump
+its `updated_at`. The spec and the plan point at each other or the graph is
+broken in one direction.
+
+**3. Record the phase transition:**
+
+```bash
+scripts/exec-initiative phase INIT-0004 planning entered "P01 drafted, 7 tasks"
+```
+
+**4. Commit atomically** — plan, initiative INDEX, spec cross-link, one
+commit:
+
+```bash
+git add docs/executor/INIT-0004-cloud-tenant-cells
+git commit -m "docs(INIT-0004): add plan P01 — cell router"
+```
+
+**5. Offer the two execution modes:**
+
+> **Plan complete: `INIT-0004-P01` — 7 tasks, saved to
+> `plans/INIT-0004-P01-cell-router.md`. Two execution options:**
+>
+> **1. Subagent-driven (recommended)** — `executor-execution` dispatches a
+> fresh subagent per task with a generated brief, packages a diff, and runs
+> an independent reviewer per task. Isolated context, written verdicts.
+>
+> **2. Inline** — I execute the tasks in this session, committing per task.
+> Faster for a short plan; no independent review and no context isolation.
+>
+> **Which approach?**
+
+**6. Record the choice** in the plan's `execution_mode` (`subagent` or
+`inline`), flip `status` to `active`, bump `updated_at`, and pass the gate:
+
+```bash
+scripts/exec-initiative phase INIT-0004 planning passed "subagent mode"
+```
+
+Then hand to `executor-execution`. **Once execution starts it runs to
+completion without check-ins** — approval happens at phase boundaries, not
+inside them. That is exactly why every defect above must be caught here.
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "The implementer can look up the signature" | They read one brief. Copy it in, or they invent one. |
+| "Task 5 is similar to Task 3" | Briefs are dispatched independently and out of order. Repeat the code. |
+| "I'll add the task IDs when execution starts" | `exec-brief` errors out; the plan is undispatchable until you do. |
+| "The dependency map is obvious from the tasks" | Obvious to you, holding all seven. The controller serialises dispatch from that table. |
+| "The interface isn't defined yet, I'll approximate" | That is an architecture gap and an unwritten ADR. Stop and go back. |
+| "Global Constraints cover it, no need to repeat" | The block never reaches the brief. Restate anything a task can violate. |
+| "Citing requirement numbers in prose is the same thing" | `R07` is greppable and reviewable; "requirement 7" drifts the moment the spec is renumbered. |
+| "One giant task is simpler to review" | A reviewer cannot reject half of it, so they approve all of it. |
+| "'Add error handling' is clear enough" | It is the single most rejected step in review. Write the raise and the test. |
+| "I'll fix the type mismatch during execution" | It surfaces as an import error mid-dispatch and costs a full review round. |
