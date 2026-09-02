@@ -242,16 +242,18 @@ selection is reviewable after the fact and a resumed controller can find a
 live agent:
 
 ```markdown
-| Task | Role | Model | Agent | Started | Outcome |
-|---|---|---|---|---|---|
-| INIT-0004-P01-T03 | implementer | cheap | impl-t03-a | 2026-09-01T14:20Z | DONE |
-| INIT-0004-P01-T03 | reviewer R01 | standard | rev-t03-r1 | 2026-09-01T14:41Z | 2 findings |
-| INIT-0004-P01-T03 | implementer fix R01 | cheap (resumed impl-t03-a) | impl-t03-a | 2026-09-01T14:52Z | DONE |
+| Task | Role | Model | Agent | Started | Outcome | Context |
+|---|---|---|---|---|---|---|
+| INIT-0004-P01-T03 | implementer | cheap | impl-t03-a | 2026-09-01T14:20Z | DONE | briefs/T03-brief.md + briefs/T03-context.md |
+| INIT-0004-P01-T03 | reviewer R01 | standard | rev-t03-r1 | 2026-09-01T14:41Z | 2 findings | reviews/diffs/T03-R01-*.diff |
+| INIT-0004-P01-T03 | implementer fix R01 | cheap (resumed impl-t03-a) | impl-t03-a | 2026-09-01T14:52Z | DONE | verdict T03-R01 + report |
 ```
 
-Two uses, both load-bearing: model-selection decisions become reviewable
-after the fact, and a resumed controller finds a live agent to resume
-instead of replacing it.
+Three uses, all load-bearing: model-selection decisions become reviewable
+after the fact, a resumed controller finds a live agent to resume instead of
+replacing it, and **the Context column records exactly what each agent
+received** — so when a run goes sideways, "bad context or bad model?" has a
+one-line answer instead of a guess.
 
 ## Context Discipline
 
@@ -338,13 +340,39 @@ reviewed, or resumed. If that happens, the plan is defective: rule on it, add
 the IDs to the plan's task headings per the frontmatter contract, record the
 ruling, and continue.
 
+**Generate the context file** — the seam contracts, existing surface,
+constraints, and parked rulings the brief cannot carry:
+
+```bash
+../executor/scripts/exec-context "$PLAN" 3
+# → /repo/.executor/INIT-0004/P01/briefs/INIT-0004-P01-T03-context.md
+```
+
+`exec-context` assembles, deterministically and from the plan and the
+workspace:
+
+1. **Provided by earlier tasks** — the plan's Interfaces section verbatim,
+   so the implementer consumes exact signatures instead of inventing them.
+2. **Existing surface** — the symbol skeleton of every file this task
+   modifies, extracted from HEAD, so the implementer starts without
+   exploring the codebase.
+3. **Global constraints** — the plan's binding block, one source instead of
+   a controller-pasted copy.
+4. **Rulings touching this task** — rulings whose task ID or named files
+   intersect this task, matched mechanically from `rulings.md`.
+
+The dispatch prompt points at the context file path. The controller never
+pastes its contents into its own context — the file is the deliverable.
+
 **Compose the dispatch** from [implementer-prompt.md](implementer-prompt.md)
 so the brief stays the single source of requirements. It contains exactly:
 
 1. One line on where this task fits in the project.
 2. The brief path, introduced as "read this first — it is your requirements,
    with the exact values to use verbatim."
-3. Interfaces and decisions from earlier tasks that the brief cannot know.
+3. The context file path (`exec-context` output), introduced as "read this
+   second — it carries the seam contracts, the existing surface, the
+   binding constraints, and the rulings that touch this task."
 4. Your resolution of any ambiguity you noticed in the brief.
 5. The report-file path (`reports/<TASK-ID>-report.md`) and the report
    contract.
@@ -359,9 +387,11 @@ report. In real sessions, **every reviewer a worker spawned duplicated the
 task review the controller dispatched anyway — a full extra review seat per
 task.**
 
-**Carry forward parked findings.** If an earlier task parked a finding in
-the area this task touches, put a pointer to that rulings entry in the
-dispatch, so the implementer does not rediscover a decided question.
+**Parked findings are now mechanical.** `exec-context` matches rulings
+whose task ID or named files intersect this task and includes them in the
+context file. Do not hand-transcribe them — if the context file is missing
+a ruling you know about, that is a bug in the match, not a reason to paste
+it manually. Record the miss in the ledger and fix the script.
 
 **Record the agent identity** from the dispatch result into `dispatches.md`
 — fix-loop rounds 1-3 resume that agent.
