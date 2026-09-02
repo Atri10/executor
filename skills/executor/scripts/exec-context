@@ -78,7 +78,7 @@ fi
 # For each Modify path, extract the current symbol skeleton from HEAD so the
 # implementer can start without exploring the whole codebase.
 surface=""
-modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep '^\s*- Modify:' | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^\s*- Modify:' || true; } | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 if [ -n "$modify_paths" ]; then
   surface="## Existing surface of the files you will modify
 
