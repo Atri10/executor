@@ -122,9 +122,12 @@ is written. This is the file that answers "why is it like this" a year
 later.
 
 **`dispatches.md`** — one line per subagent dispatch: task ID, role, model,
-agent identity, start time, outcome. Makes model-selection decisions
-reviewable and lets a resumed controller find a live agent it can resume
-rather than replacing.
+agent identity, start time, outcome, and the **Context** column naming the
+
+brief and context files each agent received. Makes model-selection
+decisions reviewable, lets a resumed controller find a live agent it can
+resume rather than replacing, and answers "bad context or bad model?" with
+one line when a run goes sideways.
 
 **`briefs/`** — extracted task text, the single source of requirements for
 one implementer. Never pasted through the controller's context.

@@ -20,6 +20,7 @@ Subagent (general-purpose):
     | Task | [INIT-NNNN-Pnn-Tnn] — [task name] |
     | Spec | [INIT-NNNN-SPEC-nn] (binding authority) |
     | Brief | [.executor/INIT-NNNN/Pnn/briefs/<TASK-ID>-brief.md] |
+    | Context | [.executor/INIT-NNNN/Pnn/briefs/<TASK-ID>-context.md] |
     | Report | [.executor/INIT-NNNN/Pnn/reports/<TASK-ID>-report.md] |
     | Worktree | [absolute path — work from here] |
 
@@ -37,20 +38,35 @@ Subagent (general-purpose):
 
     Do not go looking for the plan file. The brief is the whole task.
 
+    ## Read Order — follow it exactly
+
+    Read in this order, and only this order:
+
+    1. **The context file first**: [CONTEXT_FILE] — it carries the seam
+       contracts (exact signatures earlier tasks produce), the existing
+       surface of the files you will modify, the binding global
+       constraints, and the rulings that touch this task. It exists so you
+       do not need to explore to start.
+    2. **The brief**: [BRIEF_FILE] — your requirements, verbatim.
+    3. **Only the files the context file names**, if you need to see more
+       than the skeleton shows.
+
+    **Exploring the codebase to discover what the context file should have
+    told you is a defect in the dispatch, not a way to work.** If the
+    context file is missing something you need — a signature, a file, a
+    constraint — report NEEDS_CONTEXT with the exact missing piece, before
+    exploring and before guessing. The controller will fix the dispatch.
+
     ## Context
 
     [One or two lines: where this task fits in the project.]
 
-    [Interfaces and decisions from earlier tasks that the brief cannot know
-    — exact signatures, file locations, naming already established.]
+    [One or two lines: where this task fits in the project.]
 
     [Your resolution of any ambiguity you noticed in the brief, stated as a
-    decision the implementer must follow.]
-
-    [Any parked finding in the area this task touches, with a pointer to the
-    rulings entry, so you do not rediscover a decided question.]
-
-    [Global constraints from the spec that bind this task, verbatim.]
+    decision the implementer must follow. The seam contracts, existing
+    surface, constraints, and parked rulings now come from the context
+    file — do not restate them here.]
 
     ## Before You Begin
 
