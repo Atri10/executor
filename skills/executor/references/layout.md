@@ -106,15 +106,20 @@ readable after that worktree is gone.
 
 ### Why each file exists
 
-**`progress.md`** — the resume scan. One line per task state change, terse
-enough to read in one glance after a context loss. Its first two lines are
-the plan ID and plan file path; a ledger whose identity line names a
-different plan is not yours.
+**`progress.md`** — the resume scan. Its identity block (plan, plan_file,
+spec, started) is followed by a **Task status table** — one row per task,
+state (`pending | dispatched | in-fix | complete | parked`), commits,
+review, notes — and then one line per state change. The resume scan reads
+the table first: a task with no row has never been dispatched. A ledger
+whose identity line names a different plan is not yours.
 
 **`preflight-scan.md`** — the cross-task conflict table produced before Task
-1 dispatches, with a ruling recorded beside every finding. Separated from
-the ledger because it is written once and read whenever a task surprises
-you.
+1 dispatches, with a ruling recorded beside every finding. The seed carries
+a `## Scan` table (Tasks, Shared surface, Produced vs consumed, Finding,
+Severity, Ruling) and a `## Method` block stating what was walked, so the
+scan's scope is visible. A finding with no ruling is unresolved — do not
+dispatch until every finding is ruled. Separated from the ledger because it
+is written once and read whenever a task surprises you.
 
 **`rulings.md`** — append-only, every decision made on the human's behalf,
 with what it costs if wrong. Mirrored into `.local/decisions/` as each one
@@ -123,7 +128,6 @@ later.
 
 **`dispatches.md`** — one line per subagent dispatch: task ID, role, model,
 agent identity, start time, outcome, and the **Context** column naming the
-
 brief and context files each agent received. Makes model-selection
 decisions reviewable, lets a resumed controller find a live agent it can
 resume rather than replacing, and answers "bad context or bad model?" with
@@ -144,6 +148,32 @@ findings by severity, per-finding ADDRESSED / NOT ADDRESSED on re-reviews.
 Persisted because the judgment is the insight; the diff is just evidence.
 A verdict that lives only in a subagent's response text is lost the moment
 the controller summarizes it.
+
+### The placement rule — hard
+
+**Every artifact a run produces lives under `.executor/`.** Briefs, context
+files, reports, diffs, verdicts, ledger, rulings, preflight, dispatches —
+all of it. **Nothing a run produces is ever written under `docs/executor/`**
+except by the phase skills that own thinking documents (charter, research,
+architecture, spec, plan, VRFY strategy).
+
+The two stores are not interchangeable, and the reason is the worktree
+survival contract: `docs/executor/` is tracked and commits on the branch
+that produced it; `.executor/` is untracked and anchored to the main
+repository root so removing a worktree cannot destroy the execution record.
+
+A verdict, report, or evidence block that lands in `docs/executor/` is a
+**contract violation**, not a style choice — it pollutes the tracked
+thinking record with execution noise, and it silently moves the record to a
+place where branch cleanup can lose it. If you catch yourself about to
+write an execution artifact under `docs/executor/`, stop: the correct path
+is under `.executor/`, resolved by the scripts, never hand-built.
+
+**Verification outcomes are the one deliberate exception.** The evidence
+ledger is appended to the initiative's VRFY document in `docs/executor/`
+because it is the *thinking* record of what was proven — the strategy and
+its outcomes belong together for anyone who clones the repo. That exception
+is named here so it is a decision, not a leak.
 
 ## Path resolution
 
