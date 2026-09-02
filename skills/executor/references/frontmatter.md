@@ -133,6 +133,54 @@ execution_mode: subagent           # subagent|inline — set when the human pick
 workspace: .executor/INIT-0004/P01
 ```
 
+## Execution artifacts (the `.executor/` store)
+
+Every file the execution phase generates carries the same identity block as
+a thinking document, so a brief found on disk is traceable without opening
+the plan. These artifacts are **generated** — scripts write them, agents
+append to them; nobody hand-writes frontmatter for one. `exec-brief`,
+`exec-context`, and `exec-workspace` emit this block automatically.
+
+Common shape (all execution artifacts):
+
+```yaml
+---
+kind: brief                        # brief|context|ledger|rulings|preflight|dispatches|report|verdict|evidence
+id: INIT-0004-P01-T03              # the task ID; ledger/rulings/preflight/dispatches use the plan ID instead
+initiative: INIT-0004
+plan: INIT-0004-P01
+plan_file: docs/executor/INIT-0004-<slug>/plans/INIT-0004-P01-<topic>.md
+spec: INIT-0004-SPEC-01            # omitted where meaningless (rulings, dispatches)
+title: Brief for INIT-0004-P01-T03
+status: active
+created_at: <UTC from an executed command>
+updated_at: <UTC from an executed command>
+---
+```
+
+Per-kind fields:
+
+| Kind | Written by | Extra fields | Notes |
+|---|---|---|---|
+| `brief` | `exec-brief` | — | regenerated per dispatch; `updated_at` moves only on regeneration |
+| `context` | `exec-context` | — | same lifecycle as the brief |
+| `ledger` | `exec-workspace` | — | `progress.md`; appended by the controller through the run |
+| `rulings` | `exec-workspace` | — | `rulings.md`; `exec-ruling` appends entries |
+| `preflight` | `exec-workspace` | — | `preflight-scan.md` |
+| `dispatches` | `exec-workspace` | — | `dispatches.md` |
+| `report` | the implementer | `task: INIT-0004-P01-T03`, `rounds: 2` | one file per task, appended per fix round |
+| `verdict` | the reviewer | `task`, `round: INIT-0004-P01-T03-R02`, `spec_verdict: PASS`, `quality: APPROVED` | one file per review round |
+| `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion per round |
+
+`report` and `verdict` files are written by subagents, not scripts — the
+subagent copies the identity block from its brief (or verdict path) and
+fills the fields it owns. `updated_at` is bumped by whoever appends last.
+
+The `status` vocabulary is unchanged: `active` while the run lives. Nothing
+in `.executor/` is ever superseded or deleted — a finished run's artifacts
+keep `status: active` and the run's row in `.executor/INDEX.md` says
+`complete`.
+
 ## Task identity
 
 Tasks are headings inside a plan, not separate files. They are addressed by
