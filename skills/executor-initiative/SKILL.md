@@ -1,6 +1,6 @@
 ---
 name: executor-initiative
-description: Owns the Executor intake phase and the whole initiative lifecycle — deciding whether a request deserves an initiative at all, allocating the INIT-NNNN ID, scaffolding the folder, writing and getting approval for the charter, recording every later phase transition, and maintaining the initiative registry and the initiative's own index. Use when a request arrives and nothing has been allocated yet, when work must attach to an initiative that already exists, when a phase gate passes or a phase is deliberately skipped, or when an initiative becomes complete, superseded, abandoned, or paused.
+description: Use when a request arrives and nothing has been allocated yet, when work should attach to an initiative that already exists, when a phase gate needs to pass or be skipped, or when an initiative becomes complete, superseded, abandoned, or paused.
 ---
 
 # Executor — Initiative Intake and Lifecycle

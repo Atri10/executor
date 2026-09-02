@@ -1,6 +1,6 @@
 ---
 name: executor-planning
-description: Turns an approved Executor spec into one or more plans of ID-bearing, independently testable tasks — file map, exact interface signatures, bite-sized TDD steps with real code, a cross-task dependency map, and an execution-mode gate. Use after a spec passes its phase gate and before any implementation begins, or when an existing plan must be split, extended, or repaired so `executor-execution` can dispatch it.
+description: Use when a spec has passed its phase gate and must become implementable tasks before any code is written, or when an existing plan must be split, extended, or repaired so it can be dispatched.
 ---
 
 # Planning
@@ -385,18 +385,61 @@ def score(cell: CellId, load: int) -> float:
 Run: `pytest tests/cells/test_scoring.py -v`
 Expected: PASS — 2 passed
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Refactor (behavior unchanged, tests stay green)**
 
-```bash
-git add src/cells/scoring.py tests/cells/test_scoring.py
-git commit -m "feat(cells): add placement scoring"
-```
+Check the implementation against the rest of `src/cells/` for duplication
+or naming drift. Extract nothing unless the task needs it — this task's
+implementation is already minimal. Re-run:
+
+Run: `pytest tests/cells/test_scoring.py -v`
+Expected: PASS — 2 passed
+
+- [ ] **Step 6: Commit**
 ````
 
 **Steps are bite-sized — one action, 2-5 minutes each — in TDD rhythm:**
 write the failing test → run it and see it fail → minimal implementation →
-run it and see it pass → commit. Every code step carries a fenced code
-block. Every run step names the exact command and the exact expected output.
+run it and see it pass → refactor → commit. Every code step carries a fenced
+code block. Every run step names the exact command and the exact expected
+output.
+
+**The TDD rhythm is not optional for tasks producing or changing behavior.**
+The TDD Iron Law binds every implementer; the plan is where it becomes
+concrete. A task with genuinely no test cycle (pure configuration, generated
+code) needs its reason stated in the task's Requirements line — an unstated
+exception is a plan defect the reviewer will flag.
+
+**The RED step must name the expected failure.** Write the exact failure
+the test should produce before the implementation exists — `FAIL:
+NameError: name 'score' is not defined` is a correct RED; `FAIL` alone is
+not. The run step then verifies the *observed* failure against it. This is
+what catches fake TDD at the source: an implementer who writes test and
+code together cannot state the expected failure, because they never
+watched it.
+
+**Every task that produces behavior gets a REFACTOR step** between the
+green run and the commit: remove duplication, improve names, re-run the
+tests. Plans that end at green teach implementers that green is the finish
+line — it is not; clean is.
+
+**Test quality is planned, not hoped for.** Tests in the plan follow the
+two-principle doctrine in
+[`../executor/references/test-quality.md`](../executor/references/test-quality.md):
+every test names the break it catches, and every test exercises the real
+thing. Concretely, when writing the test code blocks:
+
+- Derive expected values as **literals or hand-checked fixtures** — never
+  by calling the function under test (a mirror assertion passes no matter
+  what the code does).
+- Assert **behavior, not text**: run the script and check its output, do
+  not grep its source.
+- Keep **your code, not the framework's** under test — the route you
+  register, not that the router dispatches.
+- Mock only the slow or external dependency, **mirror its data structure
+  completely**, and let the mock earn no assertions.
+- Cover the **negative and boundary** paths the requirement names —
+  rejection cases, off-by-one boundaries, error responses — not only the
+  happy path.
 
 **The Interfaces block is how an implementer who sees only their own task
 learns what neighbours expose.** Consumes lists exact signatures of what it
@@ -468,7 +511,17 @@ precede consumers in task order.
 initiative's ID. `id`, `spec`, `interfaces`, the ID in every task heading,
 and every `R`/`C` token resolve inside this initiative.
 
-**7. ID extraction — run it.** The definitive check, using the three-argument
+
+**7. TDD completeness.** Every task that produces or changes behavior has
+the full rhythm: failing test → run with expected failure named → minimal
+implementation → run green → refactor → commit. A task skipping the RED
+run, or stating `FAIL` without the expected failure, is a defect — fix the
+task. Test code blocks pass the two-principle doctrine:
+`../executor/references/test-quality.md` — literals not mirror assertions,
+behavior not text, mocks only the external dependency, negative paths
+covered where the requirement names them.
+
+**8. ID extraction — run it.** The definitive check, using the three-argument
 form, which writes to the path you give and does **not** create the
 execution workspace:
 
@@ -485,7 +538,7 @@ Every task prints its own `INIT-0004-P01-Tnn` and none errors. A task that
 errors cannot be dispatched. A task printing the wrong `Tnn` means the
 heading ordinal and the ID disagree.
 
-**8. Trailing-content check.** The last task's brief ends with the last
+**9. Trailing-content check.** The last task's brief ends with the last
 task's last step. If it contains a plan-level section, move that section
 above the first task heading.
 

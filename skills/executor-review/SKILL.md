@@ -1,6 +1,6 @@
 ---
 name: executor-review
-description: Owns every review event in an Executor initiative — the per-task review after each implementer report, up to five scoped re-reviews inside a task's fix loop, and the final whole-branch review before handoff. Use when a task's implementer has reported, when a fix round needs verifying, or when a plan's tasks are all complete and the branch needs its last gate. Every review event produces a persisted verdict file written by the reviewer subagent itself.
+description: Use when a task's implementer has reported DONE or DONE_WITH_CONCERNS, when a fix round needs verifying, or when every task in a plan is complete and the whole branch needs its final review.
 ---
 
 # Executor Review

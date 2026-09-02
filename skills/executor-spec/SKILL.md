@@ -1,6 +1,6 @@
 ---
 name: executor-spec
-description: Owns the Specification phase of an Executor initiative — turning an approved architecture into a numbered requirements contract (SPEC), a pre-mortem risk register (RISK), and a verification strategy (VRFY) that names concrete evidence per requirement. Use when an initiative's architecture and design gates have passed and the next output is the binding requirements document a plan will argue from, or when an existing spec must be superseded because a plan already depends on it.
+description: Use when architecture and design gates have passed and requirements must be written down before planning, when a spec needs a verification strategy with named evidence, or when an existing spec must be superseded because a plan already depends on it.
 ---
 
 # Specification

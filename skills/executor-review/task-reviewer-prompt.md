@@ -152,6 +152,49 @@ Subagent (general-purpose):
     of broadening your search. The controller resolves those; it holds the
     cross-task context you do not.
 
+    ### TDD evidence check (mechanical — run it on every task)
+
+    The implementer contract requires a watched failing test before any
+    production code. Verify it in the report:
+
+    1. **RED evidence present?** The report must contain the failing
+       output from BEFORE the implementation existed, with the command
+       that produced it, and a statement of why that failure was expected.
+    2. **GREEN evidence present?** The same command, passing, after.
+    3. **RED plausible?** The failure should be "feature missing /
+       behavior wrong", not a typo, import error, or setup problem —
+       those are errors, not a RED.
+
+    **GREEN-only evidence is a spec-compliance finding.** A report with
+    no RED section means the tests may have been written after the code,
+    which means nobody proved the tests can fail — record it as an
+    Important finding: "TDD evidence missing — no failing-test output
+    before implementation."
+
+    **Test-quality grading (Part 2):** when the diff contains tests, grade
+    them against the two principles in the test-quality doctrine
+    (`skill://executor/references/test-quality.md`):
+
+    - Does each test name the break it catches? A test only an intentional
+      design decision can fail is a **change detector** — Important
+      finding ("test asserts a constant/wording; test the behavior that
+      depends on it instead").
+    - Are expectations derived independently — literals or hand-checked
+      fixtures? An expectation computed by the code under test (mirror
+      assertion) always passes and is an Important finding.
+    - Does the mock earn no assertions? Asserting on a mock's existence
+      or calls when the real component's behavior is the point is an
+      Important finding.
+    - Do fixtures mirror the real data structure completely? A partial
+      mock is a silent integration break — Important.
+    - Did the task include a REFACTOR pass — duplication removed, names
+      improved, tests still green? Its absence with visible duplication
+      in the diff is Minor.
+
+    A test that asserts nothing, asserts the wrong thing, or asserts a
+    mock is worse than no test: it is a false sense of coverage that
+    blocks honest testing later.
+
     ## Part 2: Code Quality
 
     **Code quality:** clean separation of concerns? proper error handling?
