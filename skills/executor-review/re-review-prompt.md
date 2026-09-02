@@ -114,6 +114,23 @@ Subagent (general-purpose):
     proves it. A fix that moves the defect, comments it, or guards it in one
     of two call paths is NOT ADDRESSED.
 
+    **Root cause, or it is not addressed.** The fix report must carry a
+    root-cause line per finding — why the code behaved this way, and where
+    the wrong behavior originated. Verdict that line too:
+    - Root cause named and the fix alters that condition → ADDRESSED.
+    - Root cause misidentified (the fix addresses a different cause) →
+      NOT ADDRESSED, even if the reported symptom is gone.
+    - No root-cause line at all → NOT ADDRESSED; the fix is unverifiable.
+
+    **Test-weakening is a NOT ADDRESSED, always.** A fix that changes a
+    test's expectations so the test passes — loosening an assertion,
+    removing a case, widening a boundary, deleting a negative test — is the
+    implementer making the failure disappear instead of fixing the code.
+    Every hunk in the fix diff that touches a test file must be verdict:
+    it either (a) adds/strengthens an assertion consistent with the
+    finding, or (b) is test-weakening. (b) is NOT ADDRESSED and is itself
+    a Critical finding.
+
     ## Tests
 
     The implementer re-ran the tests covering the amended code and appended
@@ -159,6 +176,8 @@ Subagent (general-purpose):
 
     **[PRIOR_ROUND_ID]-I1 — <the prior finding's headline>**
     - **Verdict:** ADDRESSED | NOT ADDRESSED
+    - **Root cause:** named-and-addressed | misidentified | missing
+    - **Test change:** none | strengthened | weakened
     - **Evidence:** `file:line` — what the fix did, or what is still missing
     - **Violates:** `[SPEC_ID]-R07` — carried from the prior finding, when it
       had one
