@@ -72,6 +72,14 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
 [ -f "$dir/preflight-scan.md" ] || cat > "$dir/preflight-scan.md" <<EOF
+---
+kind: preflight
+plan: $plan_id
+plan_file: $plan
+created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+---
+
 # Preflight conflict scan — $plan_id
 
 <!-- One row per task pair sharing a file or interface, one row per task for
@@ -96,6 +104,14 @@ EOF
 EOF
 
 [ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
+---
+kind: dispatches
+plan: $plan_id
+plan_file: $plan
+created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+---
+
 # Dispatch log — $plan_id
 
 <!-- Context: the brief and context file paths each agent received, so
