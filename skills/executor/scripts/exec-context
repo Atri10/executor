@@ -165,12 +165,23 @@ $(printf '%s\n' "$matches" | sed 's/^/    /')
 fi
 
 # --- Assemble --------------------------------------------------------------
+stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
 {
-  echo "<!-- Executor context — generated, do not edit by hand -->"
+  echo "---"
+  echo "kind: context"
+  [ -n "$task_id" ] && echo "id: $task_id"
+  [ -n "$init" ] && echo "initiative: $init"
+  echo "plan: ${plan_id:-(legacy)}"
+  echo "plan_file: $plan"
+  echo "spec: ${spec_id:-(none)}"
+  echo "title: Context for $task_id"
+  echo "status: active"
+  echo "created_at: $stamp"
+  echo "updated_at: $stamp"
+  echo "---"
   echo
-  echo "**Task:** \`$task_id\`  "
-  echo "**Plan:** \`${plan_id:-(legacy)}\` — \`$plan\`  "
-  echo "**Spec:** \`${spec_id:-(none)}\`"
+  echo "<!-- Executor context — generated, do not edit by hand -->"
   echo
   echo "This file carries what the brief cannot: the seam contracts, the"
   echo "existing surface, the binding constraints, and the decided rulings."
