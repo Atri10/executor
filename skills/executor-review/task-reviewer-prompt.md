@@ -241,6 +241,36 @@ Subagent (general-purpose):
     plan-mandated. The plan's authorship does not grade its own work; the
     controller rules on it with the spec as binding authority.
 
+    ### Calibration — worked examples
+
+    Severity is a judgment, and judgments drift. Anchor yours on these:
+
+    | Case | Severity | Why |
+    |---|---|---|
+    | A swallowed error in a retry path (`catch {}` then continue) | **Critical** | The failure is invisible; the system reports success while losing work |
+    | Off-by-one on a spec-named boundary ("rejects at 100") | **Critical** | A boundary the spec names is a data-integrity contract; the off-by-one admits the forbidden value |
+    | A test that asserts a constant's value (`expect(MAX_RETRIES).toBe(5)`) | **Important** | Change detector — fires on redesign, sleeps through the bug the behavior depends on |
+    | A mirror assertion (`expected = f(x); expect(f(x)).toBe(expected)`) | **Important** | Passes no matter what `f` does; it is not a test |
+    | A mock assertion standing in for real behavior | **Important** | The mock earns no assertions; the real component is untested |
+    | Verbatim duplication of a logic block | **Important** | Two copies drift; the second fix never reaches both |
+    | A missing edge case in an otherwise correct implementation | **Minor** | The behavior is right; coverage could be broader |
+    | A naming choice you would have made differently | **Minor** | Style, not correctness |
+    | A declared file the diff never touches | **Important** | The task's own Files: block named it; it is missing work |
+
+    **The asymmetry.** A false PASS ships a production bug that costs a
+    merge, a deployment, and a rollback. A false finding costs one fix
+    round — the loop is built to absorb it, and the breaker exists to
+    adjudicate it. When genuinely in doubt between two severities, take
+    the higher one and say why.
+
+    **Per-finding confidence.** Every finding carries
+    `**Confidence:** high | medium`. High means you can point at the exact
+    line and the exact failure. Medium means you can see the risk but not
+    prove the failure from the diff alone — that finding is real, but its
+    proof belongs in the "Needs runtime verification" section below, which
+    routes it to `executor-verification` rather than pretending the diff
+    settled it.
+
     Acknowledge what was done well before listing issues — accurate praise is
     what makes the rest of the feedback trustworthy.
 
@@ -285,6 +315,8 @@ Subagent (general-purpose):
     - **Where:** `file:line`
     - **Violates:** `[SPEC_ID]-R07` — or `quality` when it traces to no
       numbered requirement
+    - **Confidence:** high | medium — high = provable from the diff;
+      medium = risk visible, proof needs runtime (section 5)
     - **What is wrong:** …
     - **Why it matters:** …
     - **How to fix:** … (omit when obvious)
@@ -307,14 +339,23 @@ Subagent (general-purpose):
     Numbered items: the requirement, why the diff cannot settle it, and what
     the controller should check. "None." if none.
 
-    ## 5. Checks I ran
+    ## 5. Needs runtime verification
+
+    Findings marked **Confidence: medium** land here — risks you can see
+    but cannot prove from the diff. For each: the finding ID, the exact
+    runtime check that would settle it (command or scenario), and what a
+    pass or fail would mean. These are NOT resolved by the fix loop: the
+    controller routes them to `executor-verification`, which owns running
+    evidence. "None." if every finding was high-confidence.
+
+    ## 6. Checks I ran
 
     One line per check outside the diff: the named risk, what you inspected,
     what you found. Also record any focused test you ran and why the code
     raised a doubt no existing run answered. "None — diff was sufficient."
     is a valid entry.
 
-    ## 6. Gate
+    ## 7. Gate
 
     **QUALITY: APPROVED | NEEDS_FIXES**
     **GATE: PASS | FAIL** — PASS requires SPEC PASS, QUALITY APPROVED, and no
@@ -334,6 +375,7 @@ Subagent (general-purpose):
     QUALITY: APPROVED | NEEDS_FIXES
     FINDINGS: critical=<n> important=<n> minor=<n>
     CANNOT_VERIFY: <n>
+    NEEDS_RUNTIME: <n>
     GATE: PASS | FAIL
     ```
 

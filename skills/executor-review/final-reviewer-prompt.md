@@ -41,6 +41,8 @@ Subagent (general-purpose):
     **Commit range:** [MERGE_BASE_SHA]..[HEAD_SHA]
 
     **Plan file (the task list and global constraints):** [PLAN_FILE]
+    **Dependency map (declared seams, from the plan):** [DEPENDENCY_MAP]
+    **Preflight scan (declared conflicts + rulings):** [PREFLIGHT_SCAN]
     **Ledger (task outcomes, rulings, deferrals):** [LEDGER_FILE]
     **Task briefs and implementer reports:** [BRIEFS_DIR], [REPORTS_DIR]
     **Prior verdicts:** [VERDICTS_DIR]
@@ -80,6 +82,16 @@ Subagent (general-purpose):
       rulings, deferred minors, parked findings. The rulings tell you where
       the controller decided something on the human's behalf; those are the
       places most likely to hide a problem.
+    - **[DEPENDENCY_MAP]** — the plan's declared seams: every producer →
+      consumer pair, the shared surface, and what flows across it. This is
+      the authoritative list of seams the branch must satisfy. Walk it in
+      section 3; a declared seam with no evidence in the branch is a Missing
+      finding even if nothing else looks broken.
+    - **[PREFLIGHT_SCAN]** — the conflicts the controller adjudicated before
+      Task 1. Each ruling names a seam that was already known to be
+      dangerous. Verify the ruling actually held in the final code — a
+      preflight ruling that the implementation silently bypassed is exactly
+      the kind of seam a per-task review could not see.
     - **[VERDICTS_DIR]**, **[REPORTS_DIR]**, **[BRIEFS_DIR]** — open a
       specific file only when a concrete question sends you there ("did the
       T04 review see this seam?"). Do not read them all; the branch diff plus
@@ -235,10 +247,19 @@ Subagent (general-purpose):
 
     ## 3. Cross-task seams
 
-    One entry per seam you examined: the two tasks, what one produces against
-    what the other consumes, and what you found. A clean seam gets a line
-    saying so — this section is the evidence that the branch was reviewed as
-    a whole and not as a longer task.
+    **Walk every seam in [DEPENDENCY_MAP], declared or not.** One entry per
+    declared seam: the producer task, the consumer task, the shared surface,
+    what flows across it, and what you found in the branch. A declared seam
+    with no evidence — the producer's signature absent, the consumer calling
+    a different name, the shared file split into two — is a **Missing**
+    finding: it is exactly the failure the dependency map exists to prevent,
+    and no per-task review could see it.
+
+    Then walk every preflight ruling in [PREFLIGHT_SCAN]: the adjudication,
+    and whether the final code honours it.
+
+    A clean seam gets a line saying so — this section is the evidence that
+    the branch was reviewed as a whole and not as a longer task.
 
     ## 4. Findings
 
@@ -323,6 +344,8 @@ Subagent (general-purpose):
 | `[MERGE_BASE_SHA]` | the commit the branch started from (`git merge-base main HEAD`) |
 | `[HEAD_SHA]` | current commit |
 | `[DIFF_FILE]` | `exec-review-package PLAN_FILE final MERGE_BASE HEAD` output path |
+| `[DEPENDENCY_MAP]` | the plan's `## Dependency Map` section, copied verbatim |
+| `[PREFLIGHT_SCAN]` | `<workspace>/preflight-scan.md` — the conflict table and its rulings |
 | `[LEDGER_FILE]` | `<workspace>/progress.md` |
 | `[BRIEFS_DIR]` / `[REPORTS_DIR]` / `[VERDICTS_DIR]` | `<workspace>/briefs/`, `reports/`, `reviews/verdicts/` |
 | `[VERDICT_FILE]` | `<workspace>/reviews/verdicts/<PLAN-ID>-final-verdict.md` |
