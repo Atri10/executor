@@ -30,6 +30,79 @@ becomes the work.
 **The gate:** if you cannot name a deliverable that outlives this session,
 there is no initiative. Answer the question and stop.
 
+## Session Opening Ritual — run before ANY work, every session
+
+Before your first substantive action in any session touching an Executor
+initiative, execute this ritual. It is not optional and it is not skippable
+because you "already know" the state — session memory is not state.
+
+```bash
+git branch --show-current && git rev-parse HEAD && git status --short
+```
+
+Then read, in this order:
+
+1. `docs/executor/INDEX.md` — which initiatives exist, their status and phase.
+2. The active initiative's `INDEX.md` — its phase log: where work actually
+   stopped, and which phases are skipped versus never done.
+3. Any `.executor/INDEX.md` — which plans ran and where their workspaces are.
+
+Only then state, in one line: which initiative you are in, which phase it is
+in, and what the last recorded event was. If you cannot state all three, you
+are not ready to work. **Precedence, absolute:** current repository state
+beats stored records — if the phase log says `planning passed` and there is
+no plan file, the code wins; write a correction, do not proceed on the
+stale record.
+
+## Hard Rules — these bind regardless of which phase skill is loaded
+
+**1. You never write implementation code outside `executor-execution`'s task
+dispatch, and you never write it inline.** In discovery, architecture, spec,
+and planning you write documents — no project scaffolding, no source files,
+no `mkdir` for code, no "quick fix while I'm here". A probe whose output is a
+measurement is evidence; label it throwaway in the document that cites it.
+The only phases that touch production code are `executor-execution` (through
+dispatched implementers) and `executor-verification` (through running checks).
+If you catch yourself opening a source file to edit it in any other phase —
+stop. That is the primary failure mode of weaker models running this system.
+
+**2. A gate means END YOUR TURN.** "Present and stop" means: your message
+ends after presenting the artifact. No follow-up work, no "while you review
+that, I'll…", no next-phase preparation. The next message after a gate
+presentation is the human's answer, not your continued work. Silence is not
+approval — nothing acquires consent by aging.
+
+**3. Never guess when you can read, never read when a script answers.**
+Store paths, IDs, and phases come from the scripts (`exec-initiative`,
+`exec-id`, `exec-workspace`). Hand-built paths and invented IDs are defects
+even when they look right.
+
+**4. One phase at a time, declared.** Every message you send names which
+phase you are working in. If your work has silently drifted into a different
+phase's territory (discovery producing architecture, planning writing
+requirements), stop and either re-route or record the phase transition
+properly.
+
+## Drift Recovery — when you notice you violated a rule
+
+Violations compound: an inline edit becomes an unrecorded decision, becomes
+an unreviewed change, becomes a spec that argues from nothing. The recovery
+procedure is fixed:
+
+1. **Stop the violating action immediately.** Do not finish the edit, the
+   scaffold, or the batch you were mid-way through.
+2. **Assess exposure.** Did the violation produce files, commits, or
+   side effects? List them.
+3. **Repair to the record, not to silence.** Anything created gets either
+   reverted (`git checkout -- <paths>` for uncommitted edits, or explicitly
+   marked throwaway) or properly recorded (a ruling, an ADR, a phase-log
+   note). An unrecorded violation discovered later by a reviewer costs a
+   full round; recorded, it costs one line.
+4. **Re-run the Session Opening Ritual** before continuing — your model of
+   the state was wrong when you drifted; re-ground before acting on it.
+5. **Continue the correct phase.** Do not restart the whole initiative; the
+   record exists precisely so a detour does not become a rewrite.
+
 ## Invocation
 
 The root router is available as the `executor` skill:
@@ -206,6 +279,33 @@ skipping is a stated decision recorded in the charter, not an omission. The
 `skipped_phases` field exists so a reader knows the difference between "we
 considered alternatives and picked one" and "nobody looked."
 
+## The Approval Gate
+
+**Do NOT write code, scaffold a project, or take any implementation action
+until the human has approved the intent for the current phase.**
+
+The artifact scales with the work — a small initiative's architecture
+section is three sentences. The approval never scales. Every phase gate in
+the table above is a real stop.
+
+**A real stop means your turn ends.** The gate presentation is the last
+thing in your message. If you find yourself continuing to work after writing
+"please review" — planning the next phase, pre-reading documents, drafting
+the next artifact — you have not stopped. A gate crossed without approval
+invalidates everything downstream of it: a spec written against unapproved
+architecture gets rewritten, a plan built on an unapproved spec argues from
+nothing.
+
+Executing a plan is different: once the human approves the plan and picks an
+execution mode, `executor-execution` runs to completion without check-ins.
+Approval happens at phase boundaries, not inside them.
+
+**Recovery when a gate was crossed without approval:** name it plainly to
+the human ("I crossed the discovery gate without your pick — here is what I
+did meanwhile, and here is the decision you still own"), and treat nothing
+produced past the gate as approved. Do not quietly pretend the approval
+happened.
+
 ```mermaid
 flowchart TB
     I["Intake, charter"] --> DI["Discovery, research, options"]
@@ -242,19 +342,6 @@ Read the contract references before writing anything into either store:
 - [references/indexes.md](references/indexes.md) — index formats and maintenance
 - [references/safety.md](references/safety.md) — secret hygiene, required because `.executor/` may be committed
 
-## The Approval Gate
-
-**Do NOT write code, scaffold a project, or take any implementation action
-until the human has approved the intent for the current phase.**
-
-The artifact scales with the work — a small initiative's architecture
-section is three sentences. The approval never scales. Every phase gate in
-the table above is a real stop.
-
-Executing a plan is different: once the human approves the plan and picks an
-execution mode, `executor-execution` runs to completion without check-ins.
-Approval happens at phase boundaries, not inside them.
-
 ## Rulings, Not Stalls
 
 Inside a phase, a running Executor does not wait on a human. Ambiguities,
@@ -285,6 +372,44 @@ statement and a safe path instead.
 See [references/safety.md](references/safety.md) for the required scan
 before any handoff, and what to do when a secret has already landed.
 
+## A Session That Follows the Rules — worked example
+
+The right shape of a session, condensed. Every rule above appears here in
+its natural place; if your session does not look like this, find the rule
+you skipped.
+
+```text
+[Session opens on "continue the cells initiative"]
+
+$ git branch --show-current; git rev-parse HEAD; git status --short
+feature/cell-router  a91e502  clean
+
+[Read docs/executor/INDEX.md → INIT-0004, phase: planning]
+[Read INIT-0004/INDEX.md → planning entered, gate not passed,
+ one plan INIT-0004-P01 exists, execution_mode: null]
+
+Me: "INIT-0004 is in planning: plan P01 (7 tasks) is drafted, but you have
+not picked an execution mode. Two options: 1) subagent-driven — a fresh
+implementer per task with independent review per diff; 2) inline — faster,
+no independent review. Which?"
+
+[TURN ENDS. No pre-dispatching, no reading ahead into executor-execution,
+ no work in this message beyond the question.]
+
+Human: "Subagent."
+
+Me: [records execution_mode: subagent, status: active, bumps updated_at]
+$ scripts/exec-initiative phase INIT-0004 planning passed "subagent mode"
+$ scripts/exec-initiative phase INIT-0004 execution entered
+[Routes to executor-execution and follows ITS skill from here.]
+```
+
+Note what did **not** happen: no inline implementation during planning, no
+gate crossed in the same message that presented it, no invented state when
+the indexes disagreed with memory, no phase transition without the script.
+The whole discipline is: ground first, work one phase, end turns at gates,
+record through scripts.
+
 ## Common Rationalizations
 
 | Excuse | Reality |
@@ -296,3 +421,7 @@ before any handoff, and what to do when a secret has already landed.
 | "The ledger has the ruling, that's enough" | The ledger dies with the plan's relevance. Rulings go to `.local/decisions/` the moment they are made. |
 | "No secrets in this one, skipping the scan" | The scan is cheap and the failure is unrecoverable once pushed. Run it. |
 | "Phases are overhead, I'll write the plan directly" | A plan with no spec argues from nothing. If discovery and architecture are genuinely unnecessary, record them as skipped and say why. |
+| "I already read the indexes earlier this session" | Session memory is not state. The ritual runs every session; compaction and interruptions make stale confidence expensive. |
+| "The next step is obvious, I'll start it while they review" | A gate ends your turn. Work produced past an unpassed gate is work the approval cannot cover. |
+| "It's just a small inline edit to unblock the document" | Inline execution in a document phase is the primary drift failure. Record what blocks you instead, or rule on it if a plan is running. |
+| "I drifted, but the work is good, I'll keep it quietly" | An unrecorded violation is a defect discovered by a reviewer later. Run Drift Recovery: stop, assess, repair to the record, re-ground. |

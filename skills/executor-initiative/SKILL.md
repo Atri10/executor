@@ -205,10 +205,13 @@ and therefore already public to anyone with the repo.
 
 ### The intake gate
 
-Present the charter and **stop**. Do not write code, scaffold a project,
-allocate a spec, or start discovery until the human has approved the problem
-statement and the success criteria — those two are what they are actually
-approving; the rest is context.
+Present the charter and **stop — your turn ends with the presentation**. Do
+not write code, scaffold a project, allocate a spec, or start discovery
+until the human has approved the problem statement and the success criteria
+— those two are what they are actually approving; the rest is context.
+Charter approval is the first and most load-bearing gate in the system:
+everything downstream argues from it, so working past it unapproved poisons
+the whole initiative.
 
 Nothing here is a ruling. Rulings are an execution-time mechanism and
 `exec-ruling` requires a plan file, because `rulings.md` is per-plan. A

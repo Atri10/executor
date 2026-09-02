@@ -527,6 +527,13 @@ requirements and two constraints. The approval never scales.
 While waiting, do not fill the interval with probing. The three documents
 are written, scanned, and cross-linked. Stop.
 
+**The gate ends your turn.** The presentation above is the last thing in
+your message — no pre-reading the planning skill, no drafting requirement
+tables "in case they approve", no other work in the same message. A spec
+gate crossed without approval poisons every plan that argues from it, and
+unwinding that costs supersession of the spec and every plan downstream.
+Silence is not approval; wait for the explicit yes.
+
 ## Supersession
 
 **While `status: draft` and no plan exists**, edit in place and bump

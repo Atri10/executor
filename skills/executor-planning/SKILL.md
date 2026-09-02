@@ -550,6 +550,19 @@ git commit -m "docs(INIT-0004): add plan P01 — cell router"
 >
 > **Which approach?**
 
+
+**The gate ends your turn.** The offer above is the last thing in your
+message. Do not begin executing either mode in the same message — the human
+has not picked yet, and `execution_mode` stays `null` until they do.
+
+**If the human picks inline**, note it plainly: inline mode means you
+execute the tasks yourself in this session, still committing per task, still
+following every task step verbatim — but with no independent review and no
+context isolation. Inline execution does **not** relax the plan's task
+boundaries, the TDD rhythm, or the per-task commits; it only removes the
+subagent dispatch. If the plan is long or the tasks are intertwined, say so
+and recommend subagent mode again once — then execute whichever they chose.
+
 **6. Record the choice** in the plan's `execution_mode` (`subagent` or
 `inline`), flip `status` to `active`, bump `updated_at`, and pass the gate:
 
@@ -575,3 +588,5 @@ inside them. That is exactly why every defect above must be caught here.
 | "One giant task is simpler to review" | A reviewer cannot reject half of it, so they approve all of it. |
 | "'Add error handling' is clear enough" | It is the single most rejected step in review. Write the raise and the test. |
 | "I'll fix the type mismatch during execution" | It surfaces as an import error mid-dispatch and costs a full review round. |
+| "I'll start executing while the human reviews the plan" | The gate ends your turn. Work past an unpicked mode is work the approval cannot cover. |
+| "Inline mode means I can skip the brief ceremony" | Inline removes the dispatch, not the task boundaries, the TDD steps, or the per-task commits. |

@@ -36,6 +36,18 @@ branch for implementation, or invoke any implementation skill until the
 human has approved an approach. This applies to EVERY initiative, however
 small. The artifact scales with the task — a tiny initiative's options
 document is three paragraphs. The approval gate never scales.
+
+**This gate ends your turn.** Presenting the options document is the last
+thing in your message. Working past it — drafting architecture, reading
+ahead, preparing anything "for when they pick" — means the pick you record
+never happened.
+
+**Inline execution is forbidden in this phase.** If you catch yourself
+opening a source file to edit it, scaffolding a directory, or writing a
+script "to test the approach" — stop. That is implementation, and it is what
+the gate exists to prevent. Probes that produce measurements are evidence;
+write what you ran and what you observed into the RSCH document, and leave
+the throwaway code out of the tree.
 </HARD-GATE>
 
 ## Procedure

@@ -169,9 +169,10 @@ On approval, flip document `status: draft` → `active` and close the phase:
 scripts/exec-initiative phase INIT-0004 architecture passed "2 ADRs, 1 interface"
 ```
 
-Do not start design or specification before that approval. The gate exists
-because a spec written against unapproved structure has to be rewritten, not
-amended.
+**The gate ends your turn** — item 4 above is the last line of your message.
+Do not start design or specification before that approval, and do not begin
+either in the same message that presents the gate. The gate exists because a
+spec written against unapproved structure has to be rewritten, not amended.
 
 ### 8. Design phase
 
@@ -182,7 +183,8 @@ scripts/exec-id INIT-0004 DSGN        # -> INIT-0004-DSGN-01
 
 One DSGN per component that needs one, following
 [design-template.md](references/design-template.md), including the file
-decomposition. Then gate again and close:
+decomposition. Then present the designs and **end your turn** — same gate
+discipline as architecture. On approval, close:
 
 ```bash
 scripts/exec-initiative phase INIT-0004 design passed "router + admission control"

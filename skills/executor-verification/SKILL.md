@@ -356,6 +356,13 @@ four statuses, each backed by a record**, and the human accepts the
 - Report the shape honestly: `N PROVEN · N FAILED · N NOT-RUN · N UNAVAILABLE`,
   then the named exceptions with their exact conditions.
 
+**The completion gate is a human stop.** Present the outcomes round — the
+summary line, the exceptions, and where the evidence ledger lives — and end
+your turn. The human accepts the `FAILED` / `NOT-RUN` / `UNAVAILABLE` set or
+sends work back; you do not declare the initiative complete on your own
+authority, and you do not start handoff in the same message. An acceptance
+that never happened is the exact fabrication this phase exists to prevent.
+
 Record the phase transition:
 
 ```bash

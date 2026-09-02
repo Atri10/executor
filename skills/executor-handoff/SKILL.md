@@ -249,8 +249,10 @@ Implementation complete. You're on a detached HEAD (externally managed workspace
 Which option?
 ```
 
-Present the menu as written. Do not add a discard option — discarding
-happens only when the human asks for it in so many words (§7). Wait for the
+Present the menu as written, and **end your turn with the menu on screen**.
+Do not add a discard option — discarding happens only when the human asks
+for it in so many words (§7). Do not pre-select an option, do not begin any
+option's work, and do not run Step 8 in the same message. Wait for the
 answer; the integration decision is theirs, and a merge, a push, and a
 publish are three of the four things that stop a running Executor.
 
