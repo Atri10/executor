@@ -1,6 +1,6 @@
 ---
 name: executor-execution
-description: Runs an approved Executor plan to completion by dispatching a fresh implementer subagent per task, packaging a review after each, and driving a capped fix loop — owning the ledger, the preflight conflict scan, model selection, rulings, and the dispatch log. Use when a plan under docs/executor/*/plans/ has passed its planning gate and the human has picked subagent execution mode.
+description: Use when a plan under docs/executor/*/plans/ has passed its planning gate and the human has picked an execution mode, or when resuming a plan run whose ledger shows tasks incomplete or mid-fix-loop.
 ---
 
 # Executor — Execution
@@ -37,11 +37,28 @@ they are the only thing that keeps a renamed plan attached to its artifacts.
 
 ## Setup
 
-**1. Isolated workspace.** Ensure the work happens in an isolated git
-worktree — use the repository's native worktree tooling or verify the
-existing one. **Never start implementation on a main/master branch without
-the human's explicit consent**, because the four stop conditions include side
-effects on shared branches and you would be committing to one every task.
+**1. Isolated workspace — detect before creating.** Run the detection
+sequence before doing anything else:
+
+```bash
+GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
+GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
+BRANCH=$(git branch --show-current)
+# Submodule guard: GIT_DIR != GIT_COMMON is also true inside submodules.
+git rev-parse --show-superproject-working-tree 2>/dev/null
+```
+
+| Result | Meaning | Action |
+|---|---|---|
+| `GIT_DIR != GIT_COMMON`, on a branch, not a submodule | Already in a linked worktree | Verify the branch is **not** main/master, then proceed |
+| `GIT_DIR != GIT_COMMON`, detached HEAD, not a submodule | Externally managed workspace | Report it; branch creation happens at handoff |
+| In a submodule | Normal repo semantics | Treat as a normal checkout below |
+| `GIT_DIR == GIT_COMMON`, branch is not main/master | Normal checkout on a feature branch | Acceptable — proceed, or create a worktree if the host offers one |
+| `GIT_DIR == GIT_COMMON`, branch is main/master | Un-isolated | Create a feature branch or worktree now. **Never start implementation on main/master without the human's explicit consent** — you would be committing to a shared branch every task. |
+
+Creating a worktree: prefer the host's native worktree tooling when it
+exists; fall back to `git worktree add <path> -b <branch>` otherwise. Ask
+for consent if the human has not already declared a worktree preference.
 
 **2. Resolve the execution workspace.**
 
@@ -470,9 +487,24 @@ its own problem — fresh eyes and a capability bump in one move.
 covering the amended code, appends its fix report to the **same** report
 file, and returns the short contract. Name the covering test files in the
 fix message — a one-line fix does not need the whole suite. Before
-re-dispatching the reviewer, confirm the fix report contains the covering
-tests, the command run, and the output; dispatch the re-review only once all
-three are present.
+re-dispatching the reviewer, confirm the fix report contains **four**
+things: the root-cause line for each finding, the covering tests, the
+command run, and the output; dispatch the re-review only once all four are
+present.
+
+**Root cause, or it is not a fix.** Every fix report must answer, per
+finding: *why did the code behave this way, and where does the wrong
+behavior originate?* A change that suppresses the symptom — guards one
+call path, adds a retry, widens a type, catches and continues, special-
+cases the input that tripped it — without altering the condition that
+produced the wrong behavior is **NOT ADDRESSED by definition**. The
+re-reviewer's template already says so; this rule is where it starts.
+
+**A bug-fix round is a TDD round.** If the finding describes a defect,
+the fix report must also carry the reproducing test: written first, watched
+failing (the RED), then passing after the fix (the GREEN). The test is
+what turns this fix into a permanent regression guard; a fix without one
+is an unverified claim about code that already fooled someone once.
 
 **Every round ends with a scoped re-review:**
 
@@ -629,6 +661,9 @@ is the only place a cross-initiative ID may appear.
 | "The plan says to do it, so the finding is invalid" | The spec is the binding authority; the plan is its argument. Rule on the conflict, don't dismiss the finding. |
 | "I'll ask before starting Task 4, just to confirm" | They approved the plan. Continuous execution means the next check-in is the final report. |
 | "The secret is only in a git-ignored diff" | `.executor/` is committable and a secret in a diff is also in git history. Scan, then tell the human. |
+| "The fix works, no need for a reproducing test" | A fix without a watched failing test is an unverified claim about code that already fooled someone once. Bug-fix rounds are TDD rounds. |
+| "The implementer patched the symptom, good enough" | A symptom fix (guard one path, add a retry) is NOT ADDRESSED by definition. The fix report must name the root cause, or the round repeats. |
+| "TDD is the implementer's choice, not the brief's" | The Iron Law binds every task that produces or changes behavior. A report with GREEN-only evidence is a spec-compliance finding the reviewer is required to raise. |
 
 ## Worked Example
 

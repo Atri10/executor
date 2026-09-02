@@ -1,6 +1,6 @@
 ---
 name: executor-handoff
-description: Closes out an initiative — collects every ruling into a report the human actually reads, runs the secret scan gate across both stores, re-verifies tests on the tree about to be integrated, presents the branch-completion menu and executes the human's choice, then updates every index and sets the lifecycle status without deleting anything. Also owns the paused handoff: what gets written so a fresh session resumes an unfinished initiative without re-deriving state. Use when an initiative's verification phase has passed, or when work must stop mid-flight and survive the session.
+description: Use when an initiative's verification gate has passed and the work must integrate or pause, when work must stop mid-flight and survive the session, or when a paused initiative is being resumed by a fresh session.
 ---
 
 # Executor Handoff

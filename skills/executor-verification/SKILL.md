@@ -1,6 +1,6 @@
 ---
 name: executor-verification
-description: Owns the Executor's verification phase — proving an initiative's work actually works before anyone claims it does. Use when execution and review are finished and the initiative is about to be called complete, or when the verification strategy document (VRFY) needs to be walked requirement by requirement and turned into an evidence record with real observed output.
+description: Use when execution and review are finished and completion is about to be claimed, when a verification strategy document exists and its criteria need observed evidence, or when any completion claim needs to be proven with a fresh command.
 ---
 
 # Executor — Verification

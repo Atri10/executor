@@ -1,6 +1,6 @@
 ---
 name: executor-discovery
-description: Owns the discovery phase of an Executor initiative — understanding what is actually being asked for, decomposing oversized requests, gathering evidence into research documents, comparing two or three approaches in an options document, and getting the human to pick one before any structure or code exists. Use after a charter is approved and before architecture, or whenever a body of work needs its problem understood and its approach chosen.
+description: Use when a charter is approved and the problem or the right approach is not yet understood, when a request spans multiple subsystems that may need splitting, or when a choice between two or three viable approaches needs the human's pick.
 ---
 
 # Executor — Discovery

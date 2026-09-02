@@ -62,11 +62,68 @@ Subagent (general-purpose):
     ## Your Job
 
     1. Implement exactly what the brief specifies — nothing more.
-    2. Write tests. If the brief says TDD, follow it (see TDD Evidence).
-    3. Verify the implementation actually works.
-    4. Commit your work.
-    5. Self-review (see below).
-    6. Write the report file, then report back short.
+    2. Follow the TDD Iron Law below for every behavior the task produces
+       or changes (see TDD Evidence).
+    3. Refactor after green — duplication removed, names improved, tests
+       still green.
+    4. Verify the implementation actually works.
+    5. Commit your work.
+    6. Self-review (see below).
+    7. Write the report file, then report back short.
+
+    ## The TDD Iron Law
+
+    ```text
+    NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+    ```
+
+    Write the test. Watch it fail. Write minimal code to pass. This is not
+    a preference and not conditional on what the brief says — every task in
+    this system produces or changes behavior, and behavior gets a watched
+    failing test first. **Violating the letter of this rule is violating
+    the spirit of it.**
+
+    **Write code before the test? Delete it and start over.**
+
+    No exceptions:
+    - Don't keep it as "reference"
+    - Don't "adapt" it while writing the tests
+    - Don't look at it
+    - Delete means delete
+
+    **Verify RED — the failure is the deliverable:**
+    - Run the test. It must FAIL — and fail the EXPECTED way: the feature
+      is missing, not a typo, not an import error, not a setup problem.
+    - **The test passes immediately?** You are testing existing behavior.
+      Rewrite the test so it names the missing behavior.
+    - **The test errors instead of failing?** Fix the error and re-run
+      until it fails correctly. An error is not a RED.
+
+    **Verify GREEN — then refactor:**
+    - Run the test again: passes, all other tests still pass, output
+      pristine (no warnings, no noise).
+    - Only after green: remove duplication, improve names, extract
+      helpers. Keep the tests green. Add no behavior.
+
+    Before writing any test, read the test-quality doctrine:
+    `skill://executor/references/test-quality.md`. It defines the two
+    gates your tests must pass — every test names the break it catches,
+    and every test exercises the real thing.
+
+    ### TDD Rationalizations — and why each one fails
+
+    | Excuse | Reality |
+    |---|---|
+    | "Too simple to test" | Simple code breaks. The test takes 30 seconds. |
+    | "I'll test after" | Tests written after pass immediately — which proves nothing. You never watched it fail, so you never proved it can catch the bug. |
+    | "Tests after achieve the same goals" | Tests-after answer "what does this do?"; tests-first answer "what should this do?" |
+    | "Already manually tested" | Manual testing has no record and no re-run. It is not coverage. |
+    | "Keep it as reference" | You will adapt it. That is testing after. Delete means delete. |
+    | "Just this once" | The exception is the failure mode. Report DONE_WITH_CONCERNS instead of skipping silently. |
+
+    **Exceptions exist only with the human's explicit approval.** If the
+    task genuinely produces no behavior (pure configuration, generated
+    code), say so in your report — never decide silently.
 
     **While you work:** if you hit something unexpected or unclear, ask. It
     is always OK to pause and clarify. Do not guess and do not assume.
@@ -159,8 +216,9 @@ Subagent (general-purpose):
     was requested? Did I follow the codebase's existing patterns?
 
     **Testing** — do the tests verify real behavior rather than mock
-    behavior? Did I follow TDD where required? Is the test output pristine,
-    with no stray warnings or noise?
+    behavior? Did every test watch a failing run before the code existed?
+    Did each fail for the expected reason? Is the test output pristine,
+    with no stray warnings or noise? Did I refactor after green?
 
     Fix what you find now, before reporting. A defect you found and fixed
     costs one turn; the same defect found by the reviewer costs a full round.
@@ -180,7 +238,8 @@ Subagent (general-purpose):
 
     - What you implemented (or attempted, if blocked)
     - What you tested, and the results
-    - **TDD Evidence** (when the brief requires TDD):
+    - **TDD Evidence** (required for every task that produced or changed
+      behavior):
       - RED: the command run, the relevant failing output from before the
         implementation, and why that failure was the expected one
       - GREEN: the command run and the relevant passing output after
@@ -211,16 +270,29 @@ Subagent (general-purpose):
 Rounds 1-3 resume the original agent — send the open findings verbatim plus:
 
 ```text
-Review findings on [TASK_ID] (round [R] of 5). Fix each one, re-run the
-tests covering the amended code ([covering test files]), append a fix report
-to [REPORT_FILE] with the command and its output, and reply with the short
-status contract.
+Review findings on [TASK_ID] (round [R] of 5).
 
-[findings, verbatim from the verdict file]
+    **Before fixing: name the root cause.** For each finding, answer in one
+    line: why does the code behave this way, and where does the wrong
+    behavior originate? A fix that addresses the symptom — guards one call
+    path, adds a retry, widens a type, catches and continues — without
+    changing the condition that produced the wrong behavior is NOT
+    ADDRESSED by definition, and the re-reviewer will say so. Fix at the
+    source.
+
+    **Fixing a bug means TDD:** write the failing test that reproduces the
+    reported defect first, watch it fail, then fix, then watch it pass.
+    The test you add proves the fix and prevents the regression forever.
+    A bug fix with no reproducing test is an unverified claim.
+
+    Fix each finding, re-run the tests covering the amended code
+    ([covering test files]), append a fix report to [REPORT_FILE] with:
+    the root-cause line for each finding, what you changed, the covering
+    test files, the exact command, and its output. Then reply with the
+    short status contract.
+
+    [findings, verbatim from the verdict file]
 ```
-
-Rounds 4-5 dispatch a **fresh** implementer one tier up, carrying the
-identity header, the brief path, the report path, the open findings, and:
 
 ```text
 A prior implementer attempted this task [N] times; you own it now. Read the

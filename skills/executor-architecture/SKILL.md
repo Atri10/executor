@@ -1,6 +1,6 @@
 ---
 name: executor-architecture
-description: Owns the Executor's architecture and design phases. Produces the system structure document (ARCH), decision records (ADR) with mandatory falsifiers and a stated reversibility, interface contracts (IFCE) exact enough that independent implementers cannot build mismatched halves of one seam, and component designs (DSGN) including file decomposition. Use after an approach has been chosen and before a spec is written; also use when superseding a decision, filling an interface gap that blocked a task, or declaring that an initiative needs no ADRs or designs.
+description: Use when an approach has been chosen and structure must be decided before a spec exists, when superseding a decision, when a task is blocked on a missing interface, or when declaring that an initiative needs no ADRs or designs.
 ---
 
 # Architecture & Design

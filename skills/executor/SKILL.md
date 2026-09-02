@@ -1,6 +1,6 @@
 ---
 name: executor
-description: Router and contract for The Executor — an initiative-scoped system for taking a major idea from intake through architecture, spec, plan, execution, and review, with a strict per-initiative ID namespace, separated thinking and execution stores, and evidence-backed completion. Use when starting any substantial body of work, or when routing between executor-* sub-skills.
+description: Use when a request arrives and it is unclear whether it needs an initiative, when starting or resuming any Executor initiative, or when deciding which executor phase skill applies next.
 ---
 
 # The Executor
