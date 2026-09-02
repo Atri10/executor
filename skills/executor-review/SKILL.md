@@ -124,6 +124,14 @@ exec-review-package PLAN_FILE 3 "$BASE" "$(git rev-parse HEAD)" 01
   commit, and the review then passes code nobody read.
 - **Never dispatch a task reviewer without a diff file.** A reviewer told to
   "run git diff" re-derives the range, gets it wrong, and burns turns.
+- **Non-code tasks still get a verdict file.** A task that produces no diff
+  (docs, config, scaffolding, a migration note) is reviewed against its
+  **report and brief** instead: the reviewer verdicts whether the deliverable
+  exists, matches the brief, and is complete. The verdict file is mandatory
+  for every task, code or not — a report without a verdict is an unjudged
+  claim, and the ledger cannot mark the task complete without one. Use
+  `exec-review-package` with the same BASE and HEAD; the package will be
+  small or empty, and the reviewer judges the report against the brief.
 - The diff never enters the controller's context. The script prints a path;
   the path is what you pass on. Reading the diff yourself defeats the whole
   arrangement — your context is for coordination.

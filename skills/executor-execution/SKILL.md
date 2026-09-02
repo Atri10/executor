@@ -361,7 +361,7 @@ Implementers report one of four statuses.
 
 | Status | Handling |
 |---|---|
-| **DONE** | Generate the review package and dispatch the task reviewer. |
+| **DONE** | Generate the review package and dispatch the task reviewer. The task is not complete until the verdict file exists in `reviews/verdicts/` — a report without a verdict is an unjudged claim. |
 | **DONE_WITH_CONCERNS** | Read the concerns before proceeding. Correctness or scope concerns get addressed before review. Observations ("this file is getting large") get noted in the ledger and review proceeds. |
 | **NEEDS_CONTEXT** | Supply the missing information and re-dispatch. |
 | **BLOCKED** | Assess the blocker: (1) context problem → more context, same model; (2) needs more reasoning → more capable model; (3) task too large → break it into pieces; (4) the plan itself is wrong → rule on the correction with `exec-ruling` and re-dispatch carrying the ruling. |
@@ -524,9 +524,9 @@ INIT-0004-P01-T03: complete (commits a1b2c3d..b7c8d9e, review clean)
 INIT-0004-P01-T05: complete (commits b7c8d9e..e1f2a3b, 2 parked)
 ```
 
-Update the run's `Tasks` cell in `.executor/INDEX.md` (`3/7`), mark the todo
-complete, and move on in the same message — bookkeeping batched into one
-turn keeps the loop cheap.
+Update the run's row with `exec-run "$PLAN" task` (it counts the ledger's
+`complete` lines — `3/7`), mark the todo complete, and move on in the same
+message — bookkeeping batched into one turn keeps the loop cheap.
 
 **Never move to the next task while the review has open Critical/Important
 issues that are neither fixed nor parked-with-ruling at the cap.**
@@ -566,8 +566,27 @@ findings surface to the human when `executor-handoff` presents the options.
 
 ## Finish
 
-**1. Mark the run complete.** Edit this run's row in `.executor/INDEX.md`:
-`Status: complete`, `Tasks: 7/7`, `Finished: <today>`.
+**1. Mark the run complete — with the script, not by hand.** The registry is
+a contract, and a hand-edited row can lie about the ledger:
+
+```bash
+../executor/scripts/exec-run "$PLAN" complete
+# counts complete lines in progress.md, sets Status: complete,
+# Tasks: N/N, Finished: today
+```
+
+Then verify the row agrees with the ledger:
+
+```bash
+../executor/scripts/exec-run "$PLAN" check
+# exit 0 = consistent; exit 1 = drift, fix before proceeding
+```
+
+Every task completion updates the count the same way —
+`exec-run "$PLAN" task` after each ledger `complete` line — so the registry
+never silently lags the ledger. A resumed controller reads the registry
+first; a row that says `running` when every task is complete is how work
+gets re-dispatched.
 
 **2. Scan for secrets before anything leaves the worktree:**
 

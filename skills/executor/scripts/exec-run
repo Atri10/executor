@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Own the run's lifecycle transitions in .executor/INDEX.md. The registry is
+# a contract, not a scratch note: a row whose status lies about the ledger
+# is how a resumed controller re-dispatches completed work.
+#
+# Usage:
+#   exec-run PLAN_FILE start            # Status: running, Tasks: 0/N
+#   exec-run PLAN_FILE task N           # Tasks: N/M (counts complete lines)
+#   exec-run PLAN_FILE complete         # Status: complete, Finished: today
+#   exec-run PLAN_FILE check            # verify row matches ledger; exit 1 on drift
+#   exec-run PLAN_FILE pause|blocked    # partial-handoff states
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -ge 2 ] && [ $# -le 3 ] || exec_die "usage: exec-run PLAN_FILE start|task|complete|check|pause|blocked [N]"
+
+plan=$1
+action=$2
+n=${3:-}
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+plan_id=$(exec_frontmatter "$plan" id)
+[ -n "$plan_id" ] || exec_die "no id: in plan frontmatter — cannot track a run without an ID"
+dir=$(exec_workspace_dir "$plan")
+store=$(exec_run_store)
+reg="$store/INDEX.md"
+[ -f "$reg" ] || exec_die "no run registry at $reg — run exec-workspace first"
+
+total=$(grep -c '^### Task ' "$plan" 2>/dev/null || echo 0)
+
+# Count complete lines in the ledger: '^<TASK_ID>: complete'
+done_count=$(grep -cE "^${plan_id}-T[0-9]{2}: complete" "$dir/progress.md" 2>/dev/null || echo 0)
+
+update_row() {
+  # $1 = new Status cell, $2 = Tasks cell, $3 = Finished cell (or keep)
+  local status=$1 tasks=$2 finished=$3
+  awk -v id="$plan_id" -v status="$status" -v tasks="$tasks" -v finished="$finished" '
+    BEGIN { FS = OFS = "|" }
+    $0 ~ "^\\| " id " \\|" {
+      $4 = " " status " "
+      if (tasks != "") $5 = " " tasks " "
+      if (finished != "") $7 = " " finished " "
+      print; next
+    }
+    { print }
+  ' "$reg" > "$reg.tmp" && mv "$reg.tmp" "$reg"
+}
+
+case "$action" in
+  start)
+    update_row "running" "0/$total" ""
+    echo "$plan_id: running (0/$total)"
+    ;;
+  task)
+    update_row "running" "$done_count/$total" ""
+    echo "$plan_id: running ($done_count/$total)"
+    ;;
+  complete)
+    update_row "complete" "$done_count/$total" "$(date -u +%Y-%m-%d)"
+    echo "$plan_id: complete ($done_count/$total)"
+    ;;
+  pause)
+    update_row "paused" "" ""
+    echo "$plan_id: paused"
+    ;;
+  blocked)
+    update_row "blocked" "" ""
+    echo "$plan_id: blocked"
+    ;;
+  check)
+    row_status=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$4); print $4 }' "$reg")
+    row_tasks=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$5); print $5 }' "$reg")
+    drift=0
+    if [ "$row_status" = "complete" ] && [ "$done_count" -lt "$total" ]; then
+      echo "DRIFT: row says complete but ledger shows $done_count/$total complete" >&2
+      drift=1
+    fi
+    if [ "$row_status" = "running" ] && [ "$done_count" -ge "$total" ] && [ "$total" -gt 0 ]; then
+      echo "DRIFT: row says running but all $total tasks are complete — run exec-run PLAN complete" >&2
+      drift=1
+    fi
+    if [ "$drift" -eq 0 ]; then
+      echo "$plan_id: row consistent ($row_status, $row_tasks)"
+    fi
+    exit "$drift"
+    ;;
+  *)
+    exec_die "unknown action: $action"
+    ;;
+esac

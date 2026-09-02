@@ -28,9 +28,19 @@ if [ ! -f "$dir/progress.md" ]; then
 plan: $plan_id
 plan_file: $plan
 spec: $spec_id
+started: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 <!-- One line per state change. A ledger whose plan: line names a different
      plan is not yours — leave it and start your own. -->
+
+## Task status
+
+| Task | State | Commits | Review | Notes |
+|---|---|---|---|---|
+
+<!-- State: pending | dispatched | in-fix | complete | parked.
+     One row per task, filled as it moves. The resume scan reads this table
+     first: a task with no row has never been dispatched. -->
 EOF
 fi
 
@@ -45,17 +55,34 @@ EOF
 # Preflight conflict scan — $plan_id
 
 <!-- One row per task pair sharing a file or interface, one row per task for
-     self-consistency, and a ruling beside every finding. -->
+     self-consistency, and a ruling beside every finding. Written before
+     Task 1 dispatches; read whenever a task surprises you. -->
 
-| Tasks | Shared surface | Produced vs consumed | Finding | Ruling |
-|---|---|---|---|---|
+## Scan
+
+| Tasks | Shared surface | Produced vs consumed | Finding | Severity | Ruling |
+|---|---|---|---|---|---|
+
+<!-- Severity: conflict | self-inconsistent | clean. Every pair sharing a
+     file or symbol gets a row; every task gets a self-check row. A finding
+     with no ruling is unresolved — do not dispatch until every finding is
+     ruled. -->
+
+## Method
+
+<!-- What was checked: the dependency map rows, the file map, the interface
+     signatures, the test expectations. State the inputs you walked so a
+     reader can see the scan's scope. -->
 EOF
 
 [ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
 # Dispatch log — $plan_id
 
-| Task | Role | Model | Agent | Started | Outcome |
-|---|---|---|---|---|---|
+| Task | Role | Model | Agent | Started | Outcome | Context |
+|---|---|---|---|---|---|---|
+
+<!-- Context: the brief and context file paths each agent received, so
+     'bad context or bad model?' has a one-line answer. -->
 EOF
 
 # Run registry row, created on first resolution of this plan.
