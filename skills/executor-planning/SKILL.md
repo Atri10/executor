@@ -542,6 +542,12 @@ heading ordinal and the ID disagree.
 task's last step. If it contains a plan-level section, move that section
 above the first task heading.
 
+**10. Mechanical lint.** Run `scripts/exec-plan-lint PLAN_FILE` before the
+gate; exit 0 or fix. It catches what reading re-derives every time: literal
+store paths written into tasks (artifact locations are resolved by
+`exec-workspace`/`exec-evidence`, never named in a plan — issue #7's
+failure), task headings missing their ID tokens, and missing frontmatter.
+
 ## Rulings Do Not Apply Here
 
 A **ruling** is an execution-time concept: the controller decides something

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Plan-branch lifecycle: fork from the initiative branch, merge back.
+#
+# Branch model (issue #6): every plan executes on its own branch, forked
+# from the initiative branch. Task commits land there with detailed
+# messages; the plan branch merges back to the initiative branch only
+# after its final review verdict exists and passes the exec-run audit.
+# Initiative completion is the human's decision (executor-handoff).
+#
+# Usage:
+#   exec-branch PLAN_FILE start       fork plan/INIT-NNNN-Pnn from the
+#                                     initiative branch (or its recorded
+#                                     base), switch to it; prints name
+#   exec-branch PLAN_FILE status      print current branch + expectations
+#   exec-branch PLAN_FILE merge       merge plan branch into the initiative
+#                                     branch (--no-ff); refuses unless the
+#                                     exec-run audit passes (final verdict
+#                                     exists, every completed task judged)
+#   exec-branch PLAN_FILE abandon     delete the plan branch (unmerged work
+#                                     is the human's call; refuses if the
+#                                     branch has commits not on the base
+#                                     unless --force-ish -f is passed)
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -ge 2 ] || exec_die "usage: exec-branch PLAN_FILE start|status|merge|abandon [-f]"
+plan=$1
+action=$2
+flag=${3:-}
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+plan_id=$(exec_frontmatter "$plan" id)
+[ -n "$plan_id" ] || exec_die "no id: in plan frontmatter — branch tracking needs an ID"
+init=$(exec_initiative_of "$plan_id") || exec_die "cannot derive initiative from $plan_id"
+
+plan_branch="plan/$plan_id"
+init_branch="initiative/$init"
+
+current=$(git branch --show-current)
+
+case "$action" in
+  start)
+    # The initiative branch must exist first: exec-initiative branch INIT-NNNN.
+    if ! git show-ref --verify --quiet "refs/heads/$init_branch"; then
+      exec_die "no initiative branch $init_branch — run: exec-initiative branch $init"
+    fi
+    if git show-ref --verify --quiet "refs/heads/$plan_branch"; then
+      # Idempotent resume: same plan, same branch.
+      git checkout "$plan_branch" >/dev/null
+      echo "$plan_branch"
+      exit 0
+    fi
+    git checkout -b "$plan_branch" "$init_branch" >/dev/null
+    echo "$plan_branch"
+    ;;
+  status)
+    echo "current branch: ${current:-(detached HEAD)}"
+    echo "plan branch:     $plan_branch"
+    echo "initiative:      $init_branch"
+    if [ "$current" = "$plan_branch" ]; then
+      echo "state:           on the plan branch"
+    elif git show-ref --verify --quiet "refs/heads/$plan_branch"; then
+      echo "state:           plan branch exists, you are NOT on it"
+    else
+      echo "state:           plan branch not created yet"
+    fi
+    ;;
+  merge)
+    [ "$current" = "$plan_branch" ] || exec_die "you are on '$current', not '$plan_branch' — the audit runs against the plan branch's workspace"
+    # Gate: the plan's run must pass the full audit — registry consistent,
+    # a verdict for every completed task, and the final verdict present.
+    # This is the merge gate; review-before-merge is the whole point of the
+    # branch model.
+    "$0" "$plan" audit >/dev/null 2>&1 || {
+      exec_die "merge refused: exec-run audit fails (missing verdict or final review). Run: exec-run PLAN check"
+    }
+    git checkout "$init_branch" >/dev/null
+    if git merge --no-ff --no-edit "$plan_branch" >/dev/null 2>&1; then
+      echo "merged $plan_branch -> $init_branch (no-ff, history preserved)"
+      git branch -d "$plan_branch" >/dev/null
+    else
+      # Conflict: back out the checkout, report. Resolution is a human decision.
+      git merge --abort 2>/dev/null || true
+      git checkout "$plan_branch" >/dev/null
+      exec_die "merge conflict — resolve on the plan branch first (merge $init_branch into $plan_branch, fix, then retry)"
+    fi
+    ;;
+  audit)
+    # Thin wrapper so `merge` and humans invoke the same gate.
+    ws=$(exec_workspace_dir "$plan")
+    reg="$(exec_run_store)/INDEX.md"
+    [ -f "$reg" ] || exec_die "no run registry — run exec-workspace first"
+    done_count=$(grep -cE "^${plan_id}-T[0-9]{2}: complete" "$ws/progress.md" 2>/dev/null || true)
+    done_count=${done_count:-0}
+    [ "$done_count" -gt 0 ] || exec_die "no completed tasks in the ledger — nothing to merge"
+    missing=0
+    while IFS= read -r task_id; do
+      [ -n "$task_id" ] || continue
+      ls "$ws/reviews/verdicts/${task_id}-R"*-verdict.md >/dev/null 2>&1 || {
+        echo "AUDIT: $task_id complete but unjudged (no verdict file)" >&2
+        missing=$((missing + 1))
+      }
+    done < <(grep -E "^${plan_id}-T[0-9]{2}: complete" "$ws/progress.md" | sed -E "s/^(${plan_id}-T[0-9]{2}):.*/\1/" | sort -u)
+    [ "$missing" -eq 0 ] || exec_die "$missing completed task(s) without a verdict file"
+    [ -f "$ws/reviews/verdicts/${plan_id}-final-verdict.md" ] \
+      || exec_die "no final verdict ($ws/reviews/verdicts/${plan_id}-final-verdict.md) — whole-branch review has not run"
+    echo "$plan_id: audit passed"
+    ;;
+  abandon)
+    git show-ref --verify --quiet "refs/heads/$plan_branch" || exec_die "no plan branch to abandon: $plan_branch"
+    if [ "$flag" != "-f" ]; then
+      # Refuse when the branch carries commits not on the initiative branch.
+      if [ -n "$(git log --oneline "$init_branch".."$plan_branch" 2>/dev/null)" ]; then
+        exec_die "$plan_branch has commits not on $init_branch — pass -f to delete them deliberately"
+      fi
+    fi
+    [ "$current" = "$plan_branch" ] && git checkout "$init_branch" >/dev/null
+    git branch ${flag:+-D} -d "$plan_branch" >/dev/null 2>&1 || git branch -D "$plan_branch" >/dev/null
+    echo "abandoned $plan_branch"
+    ;;
+  *)
+    exec_die "unknown action: $action (want start|status|merge|audit|abandon)"
+    ;;
+esac

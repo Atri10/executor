@@ -60,6 +60,29 @@ Creating a worktree: prefer the host's native worktree tooling when it
 exists; fall back to `git worktree add <path> -b <branch>` otherwise. Ask
 for consent if the human has not already declared a worktree preference.
 
+**Branch model.** One initiative branch, one branch per plan, forked from
+it:
+
+```bash
+../executor/scripts/exec-initiative branch INIT-0004     # initiative/INIT-0004
+../executor/scripts/exec-branch "$PLAN" start            # plan/INIT-0004-P01
+```
+
+- The initiative branch forks from wherever the human currently is when the
+  initiative starts; the fork point is recorded in the initiative's
+  `INDEX.md`, so a resumed controller finds it after compaction.
+- Task commits land on `plan/INIT-0004-P01` with detailed messages — the
+  plan branch is the reviewable unit.
+- The plan branch merges back to the initiative branch **only** after its
+  final review verdict exists (`exec-branch "$PLAN" merge` refuses
+  otherwise). The final review is the merge gate, not the implementer's
+  DONE.
+- Initiative completion — merging the initiative branch onward, pushing,
+  opening a PR — is the human's decision at `executor-handoff`, never the
+  controller's.
+- `exec-branch "$PLAN" status` prints where you are and what is expected;
+  after compaction, run it before dispatching anything.
+
 **2. Resolve the execution workspace.**
 
 ```bash
@@ -599,7 +622,14 @@ issues that are neither fixed nor parked-with-ruling at the cap.**
 
 ## Final Review
 
-After the last task:
+After the last task — and always the **last** review of the branch. It is
+the regression gate: if the final task (including an evidence-capture
+task) went through a fix round, the final review runs at the post-fix
+HEAD, never the pre-fix one. Sequence: the last task's review `R<nn>`
+closes its findings → any fix lands → the final review packages
+`merge-base..HEAD` and sees everything. A final review that predates a
+landed fix is stale — re-package and re-dispatch once; there is no second
+fix wave after it.
 
 ```bash
 ../executor/scripts/exec-review-package "$PLAN" final "$(git merge-base main HEAD)" HEAD
@@ -641,12 +671,20 @@ a contract, and a hand-edited row can lie about the ledger:
 # Tasks: N/N, Finished: today
 ```
 
-Then verify the row agrees with the ledger:
+Then verify the row agrees with the ledger AND the review record:
 
 ```bash
 ../executor/scripts/exec-run "$PLAN" check
 # exit 0 = consistent; exit 1 = drift, fix before proceeding
 ```
+
+`check` audits three things: registry-vs-ledger drift, a verdict file for
+every completed task, and the plan's final verdict. A task the ledger
+marks complete with no verdict in `reviews/verdicts/` is an unjudged claim —
+including the last task. Nothing about being the final evidence-capture
+task excuses it from review; its reviewer judges the evidence files against
+the brief. The audit makes a skipped review a detected failure, not a
+human observation.
 
 Every task completion updates the count the same way —
 `exec-run "$PLAN" task` after each ledger `complete` line — so the registry
