@@ -78,6 +78,10 @@ case "$action" in
     row_status=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$4); print $4 }' "$reg")
     row_tasks=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$5); print $5 }' "$reg")
     drift=0
+    if [ -z "$row_status" ]; then
+      echo "DRIFT: no registry row for $plan_id — run exec-workspace (or re-run exec-run PLAN start) to recreate it" >&2
+      exit 1
+    fi
     if [ "$row_status" = "complete" ] && [ "$done_count" -lt "$total" ]; then
       echo "DRIFT: row says complete but ledger shows $done_count/$total complete" >&2
       drift=1
