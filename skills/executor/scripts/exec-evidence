@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Write one criterion's observed output as an evidence file in the run's
-# verification store, and stamp state.txt once per round.
+# Write one criterion's observed output as an evidence file in the
+# initiative's TRACKED verification store, and stamp state.txt once per
+# plan directory.
 #
 # The VRFY outcomes ledger keeps the verdict; this keeps the full raw
 # output, in a deterministic location a reader can reach from the ledger's
-# Evidence column without hunting.
+# Evidence column without hunting. Evidence is thinking-grade proof and is
+# tracked: it commits on the branch that produced it and survives worktree
+# teardown (it lives under docs/executor/, anchored to the working tree —
+# never under the untracked .executor/ store).
 #
 # Usage: exec-evidence PLAN_FILE ROUND CRITERION METHOD [FILE...]
 #   ROUND     = outcomes round number (01, 02, ...)
@@ -12,7 +16,8 @@
 #   METHOD    = unit|integration|smoke|manual|static
 #   Each FILE's content is appended in order; with no FILE, stdin is read.
 #   Output format: <VRFY-id>-V<nn>-<method>.txt under
-#   .executor/<INIT>/<Pnn>/verification/evidence/round-<ROUND>/
+#   docs/executor/<INIT-NNNN-<slug>>/verification/evidence/<plan-seg>/
+#   (plan-seg = P01, P02, ...) plus a state.txt stamped once per directory.
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
@@ -28,7 +33,7 @@ shift 4
 
 plan_id=$(exec_frontmatter "$plan" id)
 [ -n "$plan_id" ] || exec_die "no id: in plan frontmatter — evidence needs a plan ID"
-exec_initiative_of "$plan_id" >/dev/null || exec_die "cannot derive initiative from $plan_id"
+init_id=$(exec_initiative_of "$plan_id") || exec_die "cannot derive initiative from $plan_id"
 exec_plan_segment_of "$plan_id" >/dev/null || exec_die "cannot derive plan segment from $plan_id"
 
 # Round must be a plain integer (01, 02, ...).
@@ -36,8 +41,16 @@ case "$round" in
   ''|*[!0-9]*) exec_die "round must be numeric (like '01'), got: $round" ;;
 esac
 
-vrfy_id=$(exec_frontmatter "$plan" spec)
-[ -n "$vrfy_id" ] || vrfy_id="$plan_id"
+# The VRFY document id: the plan's spec's `verification:` field, resolved
+# through the SPEC document. Falls back to the spec id when the SPEC is
+# not resolvable (pre-linkage stores).
+spec_id=$(exec_frontmatter "$plan" spec)
+vrfy_id=""
+if [ -n "$spec_id" ]; then
+  spec_file=$(find "$(exec_initiative_dir "$init_id")" -maxdepth 3 -type f -name "${spec_id}-*.md" -print -quit 2>/dev/null || true)
+  [ -n "$spec_file" ] && vrfy_id=$(exec_frontmatter "$spec_file" verification)
+fi
+[ -n "$vrfy_id" ] || vrfy_id="$spec_id"
 # Normalize the criterion to a V<nn> file segment: "#3" -> V03, "V03" -> V03.
 num=${criterion#\#}
 num=${num#V}
@@ -50,13 +63,14 @@ case "$criterion" in
   *) exec_die "criterion must look like '#3' or 'V03', got: $criterion" ;;
 esac
 
-dir=$(exec_workspace_dir "$plan")
-edir="$dir/verification/evidence/round-$(printf '%02d' "$((10#$round))")"
+idir=$(exec_initiative_dir "$init_id")
+[ -n "$idir" ] || exec_die "cannot resolve initiative dir for $plan_id — is the initiative registered in docs/executor/INDEX.md?"
+edir="$idir/verification/evidence/$(exec_plan_segment_of "$plan_id")"
 mkdir -p "$edir"
 
-# state.txt: the state under test, written once per round, never overwritten
-# by a later criterion in the same round (append-only would duplicate; first
-# writer wins and the round is one state).
+# state.txt: the state under test, stamped once per plan directory, never
+# overwritten by a later criterion (first writer wins; the plan directory
+# is one state — the VRFY outcomes table names the round it cites).
 state="$edir/state.txt"
 if [ ! -f "$state" ]; then
   {

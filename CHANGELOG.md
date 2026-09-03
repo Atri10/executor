@@ -7,6 +7,32 @@ not use versioned releases yet — entries are dated, and users track `main`.
 ## [Unreleased]
 
 ### Added
+- 2026-09-03 — **Evidence lives in the tracked store:** `exec-evidence`
+  now writes per-criterion evidence files to the initiative's
+  `docs/executor/<init>/verification/evidence/PNN/` (one directory per
+  plan, capital `P` plan segment, flat file names, `state.txt` stamped
+  once per plan directory) instead of the untracked
+  `.executor/…/round-NN/` location. The VRFY id is resolved through the
+  SPEC's `verification:` field. Evidence is proof, and proof commits on
+  the branch that produced it. `references/layout.md` and
+  `executor-verification` document the new location as the contract.
+- 2026-09-03 — **Thinking-store integrity gate:** new `exec-store-check`
+  lints the tracked store — registry ↔ folders ↔ Documents table ↔
+  frontmatter statuses ↔ spec/plan/VRFY cross-links ↔ evidence citations
+  ↔ phase-log chronology. Catching the drift class found in the first
+  live stores (unregistered documents, status contradictions, broken
+  links, "To be filled" outcomes) by script instead of by human
+  observation. `executor-handoff` Step 0 requires exit 0.
+- 2026-09-03 — **Plan lint hardening:** `exec-plan-lint` additionally
+  rejects missing/empty `interfaces:` and `execution_mode:` (the P02/P03
+  live failure), `execution_mode` values outside `subagent|inline`,
+  `tasks:` counts that disagree with the task headings, and plan
+  `status:` outside `draft|active`. The frontmatter `workspace:` field
+  is contract-required and no longer trips the literal-path check.
+- 2026-09-03 — **Ledger table audit:** `exec-run check` now fails when a
+  task complete in `## State changes` has no row in the Task status
+  table — the prose-only ledger that made the resume scan blind (P04/P05
+  live failure).
 
 - 2026-09-03 — **Branch model (issue #6):** one branch per initiative
   (`initiative/INIT-NNNN`, forked from the human's current branch, fork

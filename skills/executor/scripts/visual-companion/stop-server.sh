@@ -109,10 +109,23 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE" "$SERVER_ID_FILE" "${STATE_DIR}/server.log"
   mark_stopped "stop-server.sh"
 
-  # Only delete ephemeral /tmp directories
-  if [[ "$SESSION_DIR" == /tmp/* ]]; then
-    rm -rf "$SESSION_DIR"
-  fi
+  # Only delete ephemeral /tmp session directories, and only when the path
+  # is exactly /tmp/<one-or-more-segments> with no traversal, anchored to
+  # an absolute /tmp location. A relative or hostile $SESSION_DIR is left
+  # alone and reported — rm -rf never runs on an unvalidated path.
+  case "$SESSION_DIR" in
+    /tmp/*)
+      case "$SESSION_DIR" in
+        */..*|*../*|*/.) rm -f "$SESSION_DIR" 2>/dev/null || true ;;
+        *) rm -rf "$SESSION_DIR" ;;
+      esac
+      ;;
+    "")
+      : ;;
+    *)
+      printf '{"warning": "session dir not under /tmp, not removed: %s"}\n' "$SESSION_DIR" >&2
+      ;;
+  esac
 
   echo '{"status": "stopped"}'
 else
