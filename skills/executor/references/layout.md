@@ -91,13 +91,19 @@ readable after that worktree is gone.
     │   ├── reports/
     │   │   ├── INIT-0004-P01-T01-report.md
     │   │   └── INIT-0004-P01-T03-report.md
-    │   └── reviews/
-    │       ├── diffs/
-    │       │   ├── INIT-0004-P01-T03-R01-a1b2c3d..d4e5f6a.diff
-    │       │   ├── INIT-0004-P01-T03-R02-d4e5f6a..b7c8d9e.diff
-    │       │   └── INIT-0004-P01-final-229e5e7..a91e502.diff
-    │       └── verdicts/
-    │           ├── INIT-0004-P01-T03-R01-verdict.md
+    │   ├── reviews/
+    │   │   ├── diffs/
+    │   │   │   ├── INIT-0004-P01-T03-R01-a1b2c3d..d4e5f6a.diff
+    │   │   │   ├── INIT-0004-P01-T03-R02-d4e5f6a..b7c8d9e.diff
+    │   │   │   └── INIT-0004-P01-final-229e5e7..a91e502.diff
+    │   │   └── verdicts/
+    │   │       ├── INIT-0004-P01-T03-R01-verdict.md
+    │   │       └── INIT-0004-P01-T03-R02-verdict.md
+    │   └── verification/
+    │       └── evidence/
+    │           └── round-01/
+    │               ├── state.txt
+    │               └── INIT-0004-VRFY-01-V01-unit.txt
     │           ├── INIT-0004-P01-T03-R02-verdict.md
     │           └── INIT-0004-P01-final-verdict.md
     └── P02/
@@ -106,12 +112,15 @@ readable after that worktree is gone.
 
 ### Why each file exists
 
-**`progress.md`** — the resume scan. Its identity block (plan, plan_file,
-spec, started) is followed by a **Task status table** — one row per task,
-state (`pending | dispatched | in-fix | complete | parked`), commits,
-review, notes — and then one line per state change. The resume scan reads
-the table first: a task with no row has never been dispatched. A ledger
-whose identity line names a different plan is not yours.
+**`progress.md`** — the resume scan. It opens with YAML frontmatter
+(`kind: ledger`, plan, plan_file, spec, created_at, updated_at), followed
+by a **Task status table** — one row per task, state
+(`pending | dispatched | in-fix | complete | parked`), commits, review,
+notes — and a `## State changes` section holding one line per state change.
+The resume scan reads the table first: a task with no row has never been
+dispatched. A ledger whose `plan:` line names a different plan is not
+yours. State-change lines append under `## State changes`, never between
+table rows.
 
 **`preflight-scan.md`** — the cross-task conflict table produced before Task
 1 dispatches, with a ruling recorded beside every finding. The seed carries
@@ -142,6 +151,14 @@ each fix round, so the file is the task's complete implementation history.
 **`reviews/diffs/`** — the code artifact a reviewer reads. Named per review
 round and commit range so a re-review never overwrites the diff its
 predecessor saw.
+
+**`verification/evidence/round-NN/`** — raw observed output backing each
+outcomes round in the VRFY document. Written by `exec-evidence`:
+`state.txt` records the branch, commit, and tree dirtiness of the state
+under test; one `INIT-NNNN-VRFY-nn-V<nn>-<method>.txt` file per criterion
+holds the command and its observed output. The VRFY outcomes table cites
+these files instead of pasting the output a second time — the tracked
+ledger keeps the verdict, the untracked store keeps the full record.
 
 **`reviews/verdicts/`** — the reviewer's written judgment: spec verdict,
 findings by severity, per-finding ADDRESSED / NOT ADDRESSED on re-reviews.
@@ -185,12 +202,32 @@ Never hand-build a path. Use the scripts:
 | Next free ID of a type | `scripts/exec-id INIT-0004 ADR` |
 | Plan's execution workspace | `scripts/exec-workspace PLAN_FILE` |
 | Task brief file | `scripts/exec-brief PLAN_FILE N` |
+| Task context file | `scripts/exec-context PLAN_FILE N` |
+| Run lifecycle in the registry | `scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
+| Evidence file for a criterion | `scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin) |
 | Review diff for a task or the branch | `scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `scripts/exec-scan-secrets [PATH]` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is
 pre-Executor: the workspace falls back to the file's basename.
+
+## Markdown rendering rules
+
+Every seeded and generated markdown file must render correctly in any
+common renderer. Three rules keep that true:
+
+1. **HTML comments never sit between a table's header and its rows, or
+   between two rows.** A comment after the separator row splits the table
+   in most renderers once rows are appended. Comments go above the table
+   they describe; appended rows go below the last row.
+2. **Appends never land inside a table.** Log-style lines (ledger state
+   changes, dispatch entries) append either as table rows directly under
+   the last row, or as list lines in their own section — never after a
+   trailing comment or a blank section end.
+3. **Generated files open with YAML frontmatter** (see the frontmatter
+   contract's execution-artifact section), so an agent reading one file
+   cold can identify it without opening anything else.
 
 ## What is never deleted
 

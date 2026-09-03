@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Write one criterion's observed output as an evidence file in the run's
+# verification store, and stamp state.txt once per round.
+#
+# The VRFY outcomes ledger keeps the verdict; this keeps the full raw
+# output, in a deterministic location a reader can reach from the ledger's
+# Evidence column without hunting.
+#
+# Usage: exec-evidence PLAN_FILE ROUND CRITERION METHOD [FILE...]
+#   ROUND     = outcomes round number (01, 02, ...)
+#   CRITERION = criterion reference as written in the VRFY doc ("#3" or "V03")
+#   METHOD    = unit|integration|smoke|manual|static
+#   Each FILE's content is appended in order; with no FILE, stdin is read.
+#   Output format: <VRFY-id>-V<nn>-<method>.txt under
+#   .executor/<INIT>/<Pnn>/verification/evidence/round-<ROUND>/
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -ge 4 ] || exec_die "usage: exec-evidence PLAN_FILE ROUND CRITERION METHOD [FILE...]"
+
+plan=$1
+round=$2
+criterion=$3
+method=$4
+shift 4
+
+[ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+plan_id=$(exec_frontmatter "$plan" id)
+[ -n "$plan_id" ] || exec_die "no id: in plan frontmatter — evidence needs a plan ID"
+init=$(exec_initiative_of "$plan_id") || exec_die "cannot derive initiative from $plan_id"
+seg=$(exec_plan_segment_of "$plan_id") || exec_die "cannot derive plan segment from $plan_id"
+
+# Round must be a plain integer (01, 02, ...).
+case "$round" in
+  ''|*[!0-9]*) exec_die "round must be numeric (like '01'), got: $round" ;;
+esac
+
+vrfy_id=$(exec_frontmatter "$plan" spec)
+[ -n "$vrfy_id" ] || vrfy_id="$plan_id"
+# Normalize the criterion to a V<nn> file segment: "#3" -> V03, "V03" -> V03.
+num=${criterion#\#}
+num=${num#V}
+case "$num" in
+  ''|*[!0-9]*) exec_die "criterion must be numeric (like '#3' or 'V03'), got: $criterion" ;;
+esac
+case "$criterion" in
+  \#*) vseg="V$(printf '%02d' "$((10#$num))")" ;;
+  V[0-9]*) vseg="$criterion" ;;
+  *) exec_die "criterion must look like '#3' or 'V03', got: $criterion" ;;
+esac
+
+dir=$(exec_workspace_dir "$plan")
+edir="$dir/verification/evidence/round-$(printf '%02d' "$((10#$round))")"
+mkdir -p "$edir"
+
+# state.txt: the state under test, written once per round, never overwritten
+# by a later criterion in the same round (append-only would duplicate; first
+# writer wins and the round is one state).
+state="$edir/state.txt"
+if [ ! -f "$state" ]; then
+  {
+    echo "branch: $(git -C "$(exec_root)" branch --show-current 2>/dev/null || echo unknown)"
+    echo "commit: $(git -C "$(exec_root)" rev-parse HEAD 2>/dev/null || echo unknown)"
+    echo "recorded_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "dirty: $(git -C "$(exec_root)" status --porcelain 2>/dev/null | wc -l | tr -d ' ') changed paths"
+  } > "$state"
+fi
+
+out="$edir/${vrfy_id}-${vseg}-${method}.txt"
+{
+  echo "criterion: $vrfy_id $vseg"
+  echo "method: $method"
+  echo "round: $(printf '%02d' "$((10#$round))")"
+  echo "recorded_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "---"
+  if [ $# -gt 0 ]; then
+    for f in "$@"; do
+      [ -f "$f" ] || exec_die "no such evidence file: $f"
+      cat "$f"
+    done
+  else
+    cat
+  fi
+} > "$out"
+
+echo "$out"

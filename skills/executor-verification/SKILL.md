@@ -231,9 +231,9 @@ real. A `PROVEN` row with no recorded output is an assertion, not a record; a
 
 | Criterion | Evidence | Status | Command | State |
 |---|---|---|---|---|
-| INIT-0004-VRFY-01 #1 | unit | PROVEN | `bun test test/placement.test.ts` | a91e502 |
-| INIT-0004-VRFY-01 #2 | integration | FAILED | `bun test test/router.int.ts` | a91e502 |
-| INIT-0004-VRFY-01 #3 | smoke | PROVEN | `bun run start` + POST `/place` | a91e502 |
+| INIT-0004-VRFY-01 #1 | unit — `evidence/round-01/...V01-unit.txt` | PROVEN | `bun test test/placement.test.ts` | a91e502 |
+| INIT-0004-VRFY-01 #2 | integration — `evidence/round-01/...V02-integration.txt` | FAILED | `bun test test/router.int.ts` | a91e502 |
+| INIT-0004-VRFY-01 #3 | smoke — `evidence/round-01/...V03-smoke.txt` | PROVEN | `bun run start` + POST `/place` | a91e502 |
 | INIT-0004-VRFY-01 #4 | manual | NOT-RUN | — | — |
 
 <!-- rows #5–#12 omitted in this example -->
@@ -285,7 +285,26 @@ Evidence belongs to a commit, not to a session.
 - A new round never edits an old one. `round 02` records what changed and why
   it was re-run.
 
-### Redaction
+### Evidence files
+
+Every command whose output backs a criterion also writes its full output to
+the execution store, via `exec-evidence`:
+
+```bash
+exec-evidence "$PLAN" 01 "#3" unit <<'EOF'
+bun test test/placement.test.ts
+9 pass, 0 fail, 0 skip  (exit 0)
+EOF
+```
+
+This writes `.executor/INIT-0004/P01/verification/evidence/round-01/state.txt`
+(the commit, branch, and dirtiness recorded once per round) and
+`.../round-01/INIT-0004-VRFY-01-V03-unit.txt` (the command and its observed
+output). The outcomes table's **Evidence** column then names the file
+(`evidence/round-01/...V03-unit.txt`), so a reader can go from verdict →
+table → raw output without trusting anyone's summary.
+
+## Redaction
 
 Observed output is pasted into a tracked document. Command output can contain
 tokens, `Authorization:` headers, credentialed URLs, or `.env` echoes. Trim to

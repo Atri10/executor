@@ -157,6 +157,23 @@ Subagent (general-purpose):
     Write [VERDICT_FILE] with exactly these sections, in this order.
 
     ```markdown
+    ---
+    kind: verdict
+    id: [ROUND_ID]
+    initiative: [INITIATIVE_ID]
+    plan: [PLAN_ID]
+    plan_file: [PLAN_FILE]
+    task: [TASK_ID]
+    round: [ROUND_ID]
+    spec: [SPEC_ID]
+    title: Verdict for [ROUND_ID]
+    status: active
+    created_at: <UTC from an executed command>
+    updated_at: <same>
+    spec_verdict: null             # not applicable on re-reviews
+    quality: APPROVED | NEEDS_FIXES  # filled at the gate
+    ---
+
     <!-- Executor verdict — written by the reviewer subagent -->
 
     **Round:** `[ROUND_ID]`  (scoped re-review of `[PRIOR_ROUND_ID]`)

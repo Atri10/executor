@@ -250,7 +250,27 @@ Subagent (general-purpose):
 
     ## Report Format
 
-    Write your **full** report to [REPORT_FILE]:
+    Write your **full** report to [REPORT_FILE]. It opens with this
+    frontmatter block, filled from your identity table:
+
+    ```markdown
+    ---
+    kind: report
+    id: [TASK_ID]
+    initiative: [INIT-NNNN]
+    plan: [INIT-NNNN-Pnn]
+    plan_file: [plan file path]
+    task: [TASK_ID]
+    rounds: 1
+    title: Report for [TASK_ID]
+    status: active
+    created_at: <UTC from an executed command>
+    updated_at: <same>
+    ---
+    ```
+
+    Bump `updated_at` (and increment `rounds`) every time you append a fix
+    report. Then:
 
     - What you implemented (or attempted, if blocked)
     - What you tested, and the results

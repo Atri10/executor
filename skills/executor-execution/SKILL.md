@@ -87,10 +87,14 @@ map.
 `progress.md` opens with its identity:
 
 ```text
-# Executor ledger
+---
+kind: ledger
 plan: INIT-0004-P01
 plan_file: docs/executor/INIT-0004-cloud-tenant-cells/plans/INIT-0004-P01-cell-router.md
 spec: INIT-0004-SPEC-01
+created_at: 2026-09-01T09:00:00Z
+updated_at: 2026-09-01T09:00:00Z
+---
 ```
 
 - A `plan:` line naming a different plan is not yours — leave it, resolve
