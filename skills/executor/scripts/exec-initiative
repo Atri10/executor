@@ -76,7 +76,8 @@ ensure_registry() {
 # `mkdir` of a fixed lock path is the mutex; `new` is rare enough that
 # serialising it costs nothing.
 registry_lock() {
-  local store=$1 lock="$store/.registry.lock" waited=0
+  local store=$1
+  local lock="$store/.registry.lock" waited=0
   mkdir -p "$store"
   while ! mkdir "$lock" 2>/dev/null; do
     waited=$((waited + 1))
@@ -277,7 +278,7 @@ cmd_status() {
 cmd_branch() {
   local id=${1:-} base=${2:-}
   [ -n "$id" ] || usage
-  local dir idx branch current
+  local dir idx branch
   dir=$(exec_initiative_dir "$id")
   idx="$dir/INDEX.md"
   [ -f "$idx" ] || exec_die "no INDEX.md in $dir"
