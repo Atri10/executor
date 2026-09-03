@@ -71,6 +71,34 @@ POSIX-ish bash with no dependencies beyond `git` and `find`.
 - **Security-sensitive disclosure** — do not open a public issue. See
   [SECURITY.md](SECURITY.md).
 
+## CI
+
+Every PR runs five checks; all must pass before merge:
+
+| Check | What it enforces |
+|---|---|
+| **ShellCheck** (`--severity=warning`) | Every `exec-*` script parses and is warning-clean — these run inside users' agents with git and filesystem access |
+| **Prompt-injection lint** | Skill markdown is *executed as instruction by agents*; the linter blocks override directives, concealment, exfiltration endpoints, fetch-and-execute, and credential literals |
+| **Skill validation** | Frontmatter present, `name`/`description` set, description carries a "Use when" trigger, fences balanced, no duplicate skill names |
+| **Secret scan** | The Executor's own `exec-scan-secrets` over the repo, plus gitleaks over full history |
+| **Script smoke** | Usage paths work; the plan-lint and run-audit gates actually fire on known violations |
+
+Run all of them locally before pushing:
+
+```bash
+shellcheck --severity=warning skills/executor/scripts/exec-* skills/executor/scripts/_exec-lib.sh
+python3 scripts/lint-prompt-injection.py skills/
+bash scripts/validate-skills.sh skills
+bash skills/executor/scripts/exec-scan-secrets .
+```
+
+The injection linter is heuristic and errs toward false positives — a
+flagged line is a human-review prompt in the PR diff, not an accusation.
+If your skill legitimately discusses these patterns (as this project's
+anti-drift tables do), add the surrounding forbidding context the linter
+recognizes, or tighten the pattern in `scripts/lint-prompt-injection.py`
+in the same PR.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the
