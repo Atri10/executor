@@ -181,6 +181,11 @@ in `.executor/` is ever superseded or deleted — a finished run's artifacts
 keep `status: active` and the run's row in `.executor/INDEX.md` says
 `complete`.
 
+Branch provenance is not frontmatter but follows the same never-invent
+rule: `exec-initiative branch` writes the initiative's `**Branch:**` line
+(branch name, base branch, fork-point short SHA) to the initiative's
+`INDEX.md` at fork time — never afterwards from memory.
+
 ## Task identity
 
 Tasks are headings inside a plan, not separate files. They are addressed by

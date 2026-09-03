@@ -6,6 +6,13 @@
 #   exec-initiative resolve INIT-0004                print its folder path
 #   exec-initiative phase INIT-0004 <phase> entered|passed|skipped [note]
 #   exec-initiative status INIT-0004 <status>        active|complete|superseded|abandoned|paused
+#   exec-initiative branch INIT-0004 [BASE]          resolve-or-create the
+#                                                    initiative branch
+#                                                    (initiative/INIT-0004),
+#                                                    forked from BASE
+#                                                    (default: current
+#                                                    HEAD); prints the
+#                                                    branch name
 #   exec-initiative list                             print the registry
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
@@ -259,6 +266,39 @@ cmd_status() {
   echo "$id: $status"
 }
 
+# Initiative branch: initiative/INIT-NNNN. One branch per initiative, forked
+# from wherever the human currently is when the initiative starts (their
+# call — recorded here so a resumed controller finds it). Plan branches fork
+# from this one (exec-branch), so every plan builds on merged, reviewed work.
+#
+# Resolve-or-create is idempotent: calling it twice never errors and never
+# forks twice. The recorded base branch is written to the initiative INDEX
+# so handoff knows where to merge back without asking twice.
+cmd_branch() {
+  local id=${1:-} base=${2:-}
+  [ -n "$id" ] || usage
+  local dir idx branch current
+  dir=$(exec_initiative_dir "$id")
+  idx="$dir/INDEX.md"
+  [ -f "$idx" ] || exec_die "no INDEX.md in $dir"
+
+  branch="initiative/$id"
+
+  # Idempotent create: fork from BASE only if the branch does not exist.
+  if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+    base=${base:-$(git branch --show-current)}
+    [ -n "$base" ] || exec_die "detached HEAD and no BASE given — name the branch to fork from"
+    git rev-parse --verify --quiet "refs/heads/$base" >/dev/null       || exec_die "base branch not found: $base"
+    git branch "$branch" "$base"
+    # Record provenance: fork point and base, in the initiative index.
+    printf '\n**Branch:** `%s` (forked from `%s` at %s)\n' \
+      "$branch" "$base" "$(git rev-parse --short "$base")" >> "$idx"
+    echo "$branch"
+  else
+    echo "$branch"
+  fi
+}
+
 cmd_list() {
   local reg
   reg="$(exec_docs_store)/INDEX.md"
@@ -271,6 +311,7 @@ case "${1:-}" in
   resolve)  shift; cmd_resolve "$@" ;;
   phase)    shift; cmd_phase "$@" ;;
   status)   shift; cmd_status "$@" ;;
+  branch)   shift; cmd_branch "$@" ;;
   list)     shift; cmd_list "$@" ;;
   *)        usage ;;
 esac

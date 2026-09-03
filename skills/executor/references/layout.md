@@ -204,6 +204,8 @@ Never hand-build a path. Use the scripts:
 | Task brief file | `scripts/exec-brief PLAN_FILE N` |
 | Task context file | `scripts/exec-context PLAN_FILE N` |
 | Run lifecycle in the registry | `scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
+| Plan gate lint | `scripts/exec-plan-lint PLAN_FILE` |
+| Plan-branch lifecycle | `scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
 | Evidence file for a criterion | `scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin) |
 | Review diff for a task or the branch | `scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `scripts/exec-scan-secrets [PATH]` |
@@ -228,6 +230,32 @@ common renderer. Three rules keep that true:
 3. **Generated files open with YAML frontmatter** (see the frontmatter
    contract's execution-artifact section), so an agent reading one file
    cold can identify it without opening anything else.
+
+## Branch model
+
+One branch per initiative, one branch per plan, merged on reviewed gates.
+`git branch --list` is the registry; the fork points are recorded in the
+initiative's `INDEX.md`.
+
+```mermaid
+flowchart LR
+    BASE["base branch<br/>(where the human is)"] --> INIT["initiative/INIT-0004"]
+    INIT --> P1["plan/INIT-0004-P01"]
+    INIT --> P2["plan/INIT-0004-P02"]
+    P1 --> INIT
+    P2 --> INIT
+```
+
+| Script | Branch | Gate |
+|---|---|---|
+| `exec-initiative branch INIT-0004 [BASE]` | `initiative/INIT-0004`, forked from BASE (default: current HEAD); fork point recorded in `INDEX.md` | none — creating it is cheap and reversible |
+| `exec-branch PLAN start` | `plan/INIT-0004-P01`, forked from the initiative branch | initiative branch must exist |
+| `exec-branch PLAN merge` | plan branch → initiative branch, `--no-ff` (per-task commits preserved) | full audit: registry consistent, a verdict per completed task, final verdict present |
+| `exec-branch PLAN abandon` | delete the plan branch | refuses when the branch carries unmerged commits unless `-f` |
+
+Plan branches never fork from `main` and never merge to `main` — the
+initiative branch is the only integration line, and merging it onward is
+the human's decision at handoff.
 
 ## What is never deleted
 

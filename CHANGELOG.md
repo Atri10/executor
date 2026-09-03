@@ -8,6 +8,35 @@ not use versioned releases yet — entries are dated, and users track `main`.
 
 ### Added
 
+- 2026-09-03 — **Branch model (issue #6):** one branch per initiative
+  (`initiative/INIT-NNNN`, forked from the human's current branch, fork
+  point recorded in the initiative INDEX) and one branch per plan
+  (`plan/INIT-NNNN-Pnn`, forked from the initiative branch). New
+  `exec-branch` script owns the plan-branch lifecycle — `start`, `status`,
+  `merge` (`--no-ff`, gated on the review audit), `audit`, `abandon`
+  (refuses unmerged work without `-f`). `exec-initiative` gains the
+  `branch` subcommand. `executor-execution` Step 1 and `executor-handoff`
+  Steps 5–6 document the flow; merging the initiative branch onward stays
+  the human's decision.
+- 2026-09-03 — **Plan lint (issue #7):** new `exec-plan-lint` rejects plans
+  that write literal `docs/executor/` or `.executor/` paths into tasks
+  (artifact locations are resolved by scripts), task headings without ID
+  tokens, and missing frontmatter. Required by the planning gate
+  (validation checklist item 10).
+
+### Fixed
+
+- 2026-09-03 — **Verdict audit (issue #5):** `exec-run check` now fails
+  when a ledger-complete task has no verdict file in `reviews/verdicts/`
+  and when a completed run lacks its final verdict — a skipped review,
+  including the last task's, is a detected exit-1 failure instead of a
+  human observation. `executor-execution` documents the final review as
+  the regression gate (always last, always at the post-fix HEAD).
+- 2026-09-03 — Task and final reviewer prompts gain a mechanical artifact
+  placement check: run artifacts under `docs/executor/` (outside the
+  VRFY-outcomes exception) or hand-built `.executor/` paths are Important
+  findings citing the placement contract.
+
 - 2026-09-02 — `exec-evidence` script: writes one criterion's raw observed
   output to `.executor/<INIT>/<Pnn>/verification/evidence/round-NN/` with a
   per-round `state.txt` (branch, commit, dirtiness). The VRFY outcomes
