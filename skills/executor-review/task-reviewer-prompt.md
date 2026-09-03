@@ -210,6 +210,13 @@ Subagent (general-purpose):
     large, or significantly grow existing ones? (Do not flag pre-existing file
     sizes — judge what this change contributed.)
 
+    **Artifact placement (mechanical):** does the diff create or write files
+    under `docs/executor/` (other than appending an Outcomes round to the
+    VRFY document — the one named exception) or hand-build `.executor/`
+    paths? Execution artifacts live only under `.executor/`, resolved by the
+    scripts. A diff that writes run artifacts into the tracked store is an
+    **Important** finding citing the placement contract.
+
     ## Secrets
 
     If the diff contains credential-shaped content — API keys, tokens, private
