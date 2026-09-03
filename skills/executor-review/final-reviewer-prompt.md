@@ -21,6 +21,7 @@ and parked finding for merge.
 ```
 Subagent (general-purpose):
   description: "Final whole-branch review [PLAN_ID]"
+  agent_identity: "[REVIEW-<plan segment>-final — e.g. REVIEW-P01-final. Must match the dispatches.md Agent cell.]"
   model: [MODEL — REQUIRED: the most capable available model, per
          executor-execution Model Selection. An omitted model inherits the
          session's, which may be neither the most capable nor intended.]

@@ -18,6 +18,7 @@ its verdict to a file, and returns a six-line status.
 ```
 Subagent (general-purpose):
   description: "Review [TASK_ID] round [ROUND]"
+  agent_identity: "[REVIEW-<plan segment>-<task number padded>-R<round> — e.g. REVIEW-P01-T03-R01. Must match the dispatches.md Agent cell.]"
   model: [MODEL — REQUIRED: per executor-execution Model Selection, scaled to
          diff risk. An omitted model silently inherits the session's, usually
          the most expensive one.]

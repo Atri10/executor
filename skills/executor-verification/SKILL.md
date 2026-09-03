@@ -306,6 +306,11 @@ The outcomes table's **Evidence** column then names the file
 (`evidence/P01/...V03-unit.txt`), so a reader can go from verdict →
 table → raw output without trusting anyone's summary.
 
+When the evidence run is a subagent dispatch rather than a command you run
+yourself, its agent identity follows the layout.md grammar: `VERIFY-P01-V03`
+(one per criterion; a re-run of the same criterion appends the round, e.g.
+`VERIFY-P01-V03-R02`). Log it in `dispatches.md` like any other dispatch.
+
 ## Redaction
 
 Observed output is pasted into a tracked document. Command output can contain
