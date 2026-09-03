@@ -34,6 +34,17 @@ not use versioned releases yet — entries are dated, and users track `main`.
   table — the prose-only ledger that made the resume scan blind (P04/P05
   live failure).
 
+- 2026-09-03 — **Agent identity grammar:** every subagent dispatch now
+  carries a conventional, role-and-position identity — implementers
+  `IMPL-P01-T03`, task reviewers `REVIEW-P01-T03-R01`, the final
+  whole-branch reviewer `REVIEW-P01-final`, evidence runners
+  `VERIFY-P01-V01` (round-suffixed on re-runs). A resumed agent keeps its
+  identity; fresh rounds 4-5 implementers take `-R4`/`-R5`. Defined in
+  `references/layout.md`, wired into the implementer and reviewer prompt
+  templates, the `exec-workspace` dispatches seed, and `executor-execution`'s
+  identity-recording step. `exec-run check` reports non-conforming Agent
+  cells as a NOTE (legacy stores are provenance, not failures).
+
 - 2026-09-03 — **Branch model (issue #6):** one branch per initiative
   (`initiative/INIT-NNNN`, forked from the human's current branch, fork
   point recorded in the initiative INDEX) and one branch per plan

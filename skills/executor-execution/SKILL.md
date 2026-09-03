@@ -271,9 +271,9 @@ live agent:
 ```markdown
 | Task | Role | Model | Agent | Started | Outcome | Context |
 |---|---|---|---|---|---|---|
-| INIT-0004-P01-T03 | implementer | cheap | impl-t03-a | 2026-09-01T14:20Z | DONE | briefs/T03-brief.md + briefs/T03-context.md |
-| INIT-0004-P01-T03 | reviewer R01 | standard | rev-t03-r1 | 2026-09-01T14:41Z | 2 findings | reviews/diffs/T03-R01-*.diff |
-| INIT-0004-P01-T03 | implementer fix R01 | cheap (resumed impl-t03-a) | impl-t03-a | 2026-09-01T14:52Z | DONE | verdict T03-R01 + report |
+| INIT-0004-P01-T03 | implementer | cheap | IMPL-P01-T03 | 2026-09-01T14:20Z | DONE | briefs/T03-brief.md + briefs/T03-context.md |
+| INIT-0004-P01-T03 | reviewer R01 | standard | REVIEW-P01-T03-R01 | 2026-09-01T14:41Z | 2 findings | reviews/diffs/T03-R01-*.diff |
+| INIT-0004-P01-T03 | implementer fix R01 | cheap (resumed) | IMPL-P01-T03 | 2026-09-01T14:52Z | DONE | verdict T03-R01 + report |
 ```
 
 Three uses, all load-bearing: model-selection decisions become reviewable
@@ -420,10 +420,15 @@ context file. Do not hand-transcribe them — if the context file is missing
 a ruling you know about, that is a bug in the match, not a reason to paste
 it manually. Record the miss in the ledger and fix the script.
 
-**Record the agent identity** from the dispatch result into `dispatches.md`
-— fix-loop rounds 1-3 resume that agent.
+**Assign the agent identity before dispatch, per the grammar in
+[references/layout.md](../executor/references/layout.md)**: implementers
+are `IMPL-P01-T03`, task reviewers `REVIEW-P01-T03-R<round>`, the final
+whole-branch reviewer `REVIEW-P01-final`. Record it in `dispatches.md`
+from the dispatch result — fix-loop rounds 1-3 resume that identity. A
+fresh implementer at rounds 4-5 takes `IMPL-P01-T03-R4` (or `-R5`) so the
+log distinguishes the two instances.
 
-**Ledger:** `INIT-0004-P01-T03: dispatched (model cheap, agent impl-t03-a, base a1b2c3d)`
+**Ledger:** `INIT-0004-P01-T03: dispatched (model cheap, agent IMPL-P01-T03, base a1b2c3d)`
 
 If the implementer asks questions — before starting or mid-task — answer
 clearly and completely, provide the context it needs, and do not rush it
