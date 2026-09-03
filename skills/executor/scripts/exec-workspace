@@ -117,6 +117,10 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 <!-- Context: the brief and context file paths each agent received, so
      'bad context or bad model?' has a one-line answer. Rows append BELOW
      the header, never above it. -->
+<!-- Agent identities follow the grammar <ROLE>-<Pnn>-<Tnn>[-R<nn>]:
+     IMPL for implementers, REVIEW for reviewers (round-suffixed,
+     REVIEW-P01-final for the whole-branch review), VERIFY for evidence
+     runs. A resumed agent keeps its identity. See references/layout.md. -->
 
 | Task | Role | Model | Agent | Started | Outcome | Context |
 |---|---|---|---|---|---|---|

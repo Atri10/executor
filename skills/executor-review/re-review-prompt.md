@@ -22,6 +22,7 @@ that the fix itself broke nothing.
 ```
 Subagent (general-purpose):
   description: "Re-review [TASK_ID] round [ROUND]"
+  agent_identity: "[REVIEW-<plan segment>-<task number padded>-R<round> — same round as the verdict under re-review. Must match the dispatches.md Agent cell.]"
   model: [MODEL — REQUIRED: per executor-execution Model Selection. Scoped
          re-reviews of small fix diffs take a cheap-to-mid tier. An omitted
          model silently inherits the session's, usually the most expensive.]

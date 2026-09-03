@@ -127,6 +127,20 @@ case "$action" in
       drift=1
     fi
 
+    # Agent identity grammar: the Agent column follows
+    # <ROLE>-<Pnn>-<Tnn>[-R<nn>] (IMPL/REVIEW/VERIFY; REVIEW-P01-final for
+    # the whole-branch review). A non-conforming cell is a NOTE, not drift:
+    # legacy stores predate the grammar, and the identity is provenance,
+    # not a gate. It names the log rows a reader should re-spell on touch.
+    if [ -f "$dir/dispatches.md" ]; then
+      bad_agents=$(grep -E '^\| ' "$dir/dispatches.md" 2>/dev/null | grep -vE '^\| *Task *\|' | awk -F'|' '$2 !~ /Initiative/ {gsub(/ /,"",$5); if ($5 != "" && $5 !~ /^(IMPL|REVIEW|VERIFY)-[A-Za-z0-9-]+(-final)?(-R[0-9]{2})?$/) print $5}' | sort -u | head -5)
+      if [ -n "$bad_agents" ]; then
+        while IFS= read -r bad; do
+          [ -n "$bad" ] && echo "NOTE: Agent cell '$bad' in dispatches.md does not follow the <ROLE>-<Pnn>-<Tnn>[-R<nn>] grammar (see references/layout.md) — re-spell on next touch" >&2
+        done <<< "$bad_agents"
+      fi
+    fi
+
     # Final verdict: a completed plan needs the whole-branch final verdict
     # too. The plan is not review-complete without it.
     if [ "$row_status" = "complete" ] && [ "$done_count" -ge "$total" ] && [ "$total" -gt 0 ]; then

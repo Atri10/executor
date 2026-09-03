@@ -134,6 +134,23 @@ decisions reviewable, lets a resumed controller find a live agent it can
 resume rather than replacing, and answers "bad context or bad model?" with
 one line when a run goes sideways.
 
+**Agent identities are conventional.** The `Agent` column carries a
+role-and-position name — never a generated handle:
+
+| Dispatch | Agent identity |
+|---|---|
+| implementer, first round | `IMPL-P01-T03` |
+| implementer, resumed for a fix round | `IMPL-P01-T03` (resumed — one identity per agent instance) |
+| task reviewer, round 1 | `REVIEW-P01-T03-R01` |
+| task reviewer, round 2 | `REVIEW-P01-T03-R02` |
+| final whole-branch reviewer | `REVIEW-P01-final` |
+| verification evidence runner | `VERIFY-P01-V01`; re-run of a criterion appends the round: `VERIFY-P01-V01-R02` |
+
+The grammar: `<ROLE>-<plan segment>-<task>[<-Rnn>]`. Roles are `IMPL`,
+`REVIEW`, `VERIFY`. A resumed agent keeps its identity; a fresh dispatch
+for a new round takes that round's suffix. An `Agent` cell that drifts
+from this grammar is a defect the run check reports.
+
 **`briefs/`** — extracted task text, the single source of requirements for
 one implementer. Never pasted through the controller's context.
 
