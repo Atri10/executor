@@ -78,7 +78,7 @@ fi
 # For each Modify path, extract the current symbol skeleton from HEAD so the
 # implementer can start without exploring the whole codebase.
 surface=""
-modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep '^\s*- Modify:' | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^\s*- Modify:' || true; } | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 if [ -n "$modify_paths" ]; then
   surface="## Existing surface of the files you will modify
 
@@ -165,12 +165,23 @@ $(printf '%s\n' "$matches" | sed 's/^/    /')
 fi
 
 # --- Assemble --------------------------------------------------------------
+stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
 {
-  echo "<!-- Executor context — generated, do not edit by hand -->"
+  echo "---"
+  echo "kind: context"
+  [ -n "$task_id" ] && echo "id: $task_id"
+  [ -n "$init" ] && echo "initiative: $init"
+  echo "plan: ${plan_id:-(legacy)}"
+  echo "plan_file: $plan"
+  echo "spec: ${spec_id:-(none)}"
+  echo "title: Context for $task_id"
+  echo "status: active"
+  echo "created_at: $stamp"
+  echo "updated_at: $stamp"
+  echo "---"
   echo
-  echo "**Task:** \`$task_id\`  "
-  echo "**Plan:** \`${plan_id:-(legacy)}\` — \`$plan\`  "
-  echo "**Spec:** \`${spec_id:-(none)}\`"
+  echo "<!-- Executor context — generated, do not edit by hand -->"
   echo
   echo "This file carries what the brief cannot: the seam contracts, the"
   echo "existing surface, the binding constraints, and the decided rulings."
