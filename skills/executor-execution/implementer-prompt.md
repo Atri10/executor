@@ -7,6 +7,7 @@ session history to infer it from.
 ```text
 Subagent (general-purpose):
   description: "Implement [TASK_ID]: [task name]"
+  agent_identity: "[IMPL-<plan segment>-<task number padded> — e.g. IMPL-P01-T03. Must match the dispatches.md Agent cell.]"
   model: [MODEL — REQUIRED. Choose per executor-execution SKILL.md Model
          Selection. An omitted model silently inherits the controller's
          session model, usually the most expensive one available.]
