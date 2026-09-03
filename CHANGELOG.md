@@ -1,10 +1,19 @@
 # Changelog
 
 All notable changes to The Executor are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project does
-not use versioned releases yet — entries are dated, and users track `main`.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
+project is tagged; between releases, entries are dated and `main` moves.
 
-## [Unreleased]
+## [0.1.0] — 2026-09-03
+
+**The genesis release.** The Executor takes a major idea from intake through
+architecture, spec, plan, execution, review, and verification — with a
+strict per-initiative ID namespace ("nothing floats"), separated thinking
+and execution stores, and a script-enforced contract at every state
+transition: plans lint before they dispatch, reviews gate merges, verdict
+audits catch unjudged work, and the stores themselves check their own
+integrity. Ten skills, fourteen `exec-*` scripts, one CI pipeline of five
+gates.
 
 ### Added
 - 2026-09-03 — **Evidence lives in the tracked store:** `exec-evidence`
@@ -74,12 +83,9 @@ not use versioned releases yet — entries are dated, and users track `main`.
   VRFY-outcomes exception) or hand-built `.executor/` paths are Important
   findings citing the placement contract.
 
-- 2026-09-02 — `exec-evidence` script: writes one criterion's raw observed
-  output to `.executor/<INIT>/<Pnn>/verification/evidence/round-NN/` with a
-  per-round `state.txt` (branch, commit, dirtiness). The VRFY outcomes
-  table's Evidence column now names these files.
-
-### Fixed
+- 2026-09-02 — `exec-evidence` script introduced (per-round `state.txt`,
+  VRFY outcomes table citing files). Superseded 2026-09-03 by the tracked
+  evidence location above.
 
 - 2026-09-02 — **Issue #1:** workspace seed comments (progress, preflight,
   dispatches) moved above their tables; comments placed after a table
