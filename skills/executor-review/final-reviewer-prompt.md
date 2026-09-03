@@ -163,6 +163,12 @@ Subagent (general-purpose):
     **Commit hygiene:** does the commit list read as the work that was done —
     no stray artifacts, generated files, or unrelated changes swept in?
 
+    **Artifact placement (mechanical):** does the branch create files under
+    `docs/executor/` other than the VRFY document's Outcomes rounds (the one
+    named exception), or hand-build `.executor/` paths? Run artifacts belong
+    only under `.executor/`, resolved by scripts. A violation is an
+    **Important** finding citing the placement contract.
+
     ## Secrets
 
     If the branch diff contains credential-shaped content — API keys, tokens,

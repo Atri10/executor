@@ -213,9 +213,12 @@ cannot destroy it**. Nothing needs relocating before cleanup.
 
 ## Step 5 — Determine base branch
 
-The base branch is whatever this work forked from — usually named in the
-charter, the plan, the conversation, or the branch's upstream. If it is not
-already known, ask:
+For an Executor initiative this is already recorded: the initiative's
+`INDEX.md` carries a `**Branch:**` line naming the branch and its fork
+point (written by `exec-initiative branch`). Read it; the base branch is
+the one named there. For non-Executor work the base is whatever this work
+forked from — usually named in the charter, the plan, the conversation, or
+the branch's upstream. If it is not already known, ask:
 
 ```
 This branch split from <your best guess> — is that correct?
@@ -237,6 +240,21 @@ Implementation complete. What would you like to do?
 
 Which option?
 ```
+
+**Executor initiative completion.** Plan branches have already merged into
+the initiative branch (each merge was gated on that plan's final review
+verdict — `exec-branch merge` refuses without it). This menu is for the
+initiative branch itself: merging it onward is the human's explicit
+decision, taken here, with the verification outcomes in front of them.
+
+Before presenting the menu, run the audit one last time:
+
+```bash
+../executor/scripts/exec-run "$PLAN" check
+```
+
+Exit 0 for every plan in the initiative — any drift or missing verdict is
+fixed before the human is asked to merge.
 
 **Detached HEAD — exactly these 2:**
 
