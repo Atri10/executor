@@ -28,11 +28,45 @@ plan=$1
 violations=0
 fail() { echo "VIOLATION: $*" >&2; violations=$((violations + 1)); }
 
-# --- 3. Frontmatter ---------------------------------------------------------
+# --- Frontmatter ------------------------------------------------------------
 plan_id=$(exec_frontmatter "$plan" id)
 spec_id=$(exec_frontmatter "$plan" spec)
 [ -n "$plan_id" ] || fail "no id: in frontmatter — a plan without an ID cannot be tracked"
 [ -n "$spec_id" ] || fail "no spec: in frontmatter — a plan argues from a spec or records why it cannot"
+
+# The live stores showed the drift: P02 shipped without interfaces/tasks/
+# execution_mode, P03 with execution_mode: null — all under lint that only
+# checked id/spec. Required plan fields are each enforced now.
+exec_mode=$(exec_frontmatter "$plan" execution_mode)
+[ -n "$exec_mode" ] || fail "no execution_mode: in frontmatter — the dispatch model (subagent|inline) must be declared, not implied"
+case "$exec_mode" in
+  subagent|inline) ;;
+  *) fail "execution_mode: '$exec_mode' is neither subagent nor inline" ;;
+esac
+interfaces_inline=$(awk 'BEGIN{infm=0} NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm {
+  if ($0 ~ /^[ \t]*interfaces[ \t]*:/) { sub(/^[ \t]*interfaces[ \t]*:[ \t]*/, ""); print; exit }
+}' "$plan")
+case "$interfaces_inline" in
+  "") : ;;  # block list (interfaces:\n  - ID) — items live on following lines; presence of the key is enough
+  "null") fail "interfaces: is null — list the interface IDs the tasks build against, or [] with the reason stated in the body" ;;
+  "[]") : ;;  # empty list is allowed only with a stated reason in the body
+  *) : ;;   # inline list with items
+esac
+grep -q '^[ \t]*interfaces[ \t]*:' "$plan" || {
+  fail "no interfaces: in frontmatter — list the interface IDs the tasks build against, or [] with the reason stated in the body"
+}
+
+declared_tasks=$(exec_frontmatter "$plan" tasks)
+heading_tasks=$(grep -cE '^### Task [0-9]+:' "$plan" || true)
+if [ -n "$declared_tasks" ] && [ "$declared_tasks" != "null" ] && [ "$declared_tasks" != "$heading_tasks" ]; then
+  fail "tasks: $declared_tasks but the body has $heading_tasks '### Task N:' headings — the count is a contract, not a guess"
+fi
+
+plan_status=$(exec_frontmatter "$plan" status)
+case "$plan_status" in
+  ""|draft|active) ;;
+  *) fail "status: '$plan_status' is not draft or active — superseded plans keep their body but gain superseded_by" ;;
+esac
 
 # --- 2. Task headings carry IDs ---------------------------------------------
 n=0
@@ -46,25 +80,14 @@ while IFS= read -r line; do
 done < <(grep -E '^### Task [0-9]+:' "$plan" || true)
 
 [ "$n" -gt 0 ] || fail "no '### Task N:' headings found — a plan without tasks is not a plan"
-
-# --- 1. Forbidden literal store paths ---------------------------------------
-# Matches any line that names a store path intended as a location. Mentions
-# in prose quoting a script invocation are fine — the pattern anchors on a
-# path-like token (leading slash-segment plus trailing file or dir name).
-# docs/executor/<...> — the tracked store. Scripts resolve these; plans
-# never name them as a Create/Modify target.
-while IFS=: read -r lineno text; do
-  [ -n "$text" ] || continue
-  case "$text" in
-    *docs/executor/*)
-      fail "line $lineno names a literal docs/executor/ path — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
-      ;;
-  esac
-done < <(grep -n 'docs/executor/' "$plan" || true)
-
-# .executor/<...> — the execution store. Same rule. This one also catches
-# the brief/context path form an implementer does not need (the dispatch
-# carries resolved paths already).
+body_start=$(awk 'NR>1 && /^---$/{print NR; exit}' "$plan")
+body_start=${body_start:-$(wc -l < "$plan")}
+fm_tmp=$(mktemp "${TMPDIR:-/tmp}/exec-plan-lint-fm.XXXXXX")
+body_tmp=$(mktemp "${TMPDIR:-/tmp}/exec-plan-lint-body.XXXXXX")
+cleanup() { rm -f "$fm_tmp" "$body_tmp"; }
+trap cleanup EXIT
+awk -v bs="$body_start" 'NR <= bs' "$plan" > "$fm_tmp"
+awk -v bs="$body_start" 'NR >  bs' "$plan" > "$body_tmp"
 while IFS=: read -r lineno text; do
   [ -n "$text" ] || continue
   case "$text" in
@@ -72,8 +95,17 @@ while IFS=: read -r lineno text; do
       fail "line $lineno names a literal .executor/ path — the workspace and its artifacts resolve via exec-workspace/exec-evidence; plans reference scripts, not paths"
       ;;
   esac
-done < <(grep -n '\.executor/' "$plan" || true)
-
+done < <(grep -n '\.executor/' "$body_tmp" || true)
+# docs/executor/<...> — same rule, body scan only (an evidence-file citation
+# in prose is fine; a Create/Modify target under the tracked store is not).
+while IFS=: read -r lineno text; do
+  [ -n "$text" ] || continue
+  case "$text" in
+    *docs/executor/*)
+      fail "line $lineno names a literal docs/executor/ path — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
+      ;;
+  esac
+done < <(grep -n 'docs/executor/' "$body_tmp" || true)
 if [ "$violations" -gt 0 ]; then
   echo "$plan: $violations violation(s) — fix before the planning gate" >&2
   exit 1

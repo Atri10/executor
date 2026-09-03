@@ -170,7 +170,7 @@ Per-kind fields:
 | `dispatches` | `exec-workspace` | — | `dispatches.md` |
 | `report` | the implementer | `task: INIT-0004-P01-T03`, `rounds: 2` | one file per task, appended per fix round |
 | `verdict` | the reviewer | `task`, `round: INIT-0004-P01-T03-R02`, `spec_verdict: PASS`, `quality: APPROVED` | one file per review round |
-| `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion per round |
+| `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion; written to the initiative's tracked `verification/evidence/PNN/` |
 
 `report` and `verdict` files are written by subagents, not scripts — the
 subagent copies the identity block from its brief (or verdict path) and
