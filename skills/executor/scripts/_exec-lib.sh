@@ -45,6 +45,7 @@ exec_frontmatter() {
   local file=$1 key=$2
   [ -f "$file" ] || return 0
   awk -v key="$key" '
+    { sub(/\r$/, "") }                   # CRLF files: compare and match CR-stripped lines
     NR == 1 && $0 != "---" { exit }
     NR == 1 { infm = 1; next }
     infm && $0 == "---" { exit }
@@ -52,6 +53,7 @@ exec_frontmatter() {
       # match "key: value", tolerating surrounding whitespace
       if (match($0, "^[ \t]*" key "[ \t]*:")) {
         v = substr($0, RSTART + RLENGTH)
+        sub(/\r$/, "", v)                   # CRLF files: strip carriage return
         gsub(/^[ \t]+|[ \t]+$/, "", v)
         gsub(/^["'\'']|["'\'']$/, "", v)
         print v

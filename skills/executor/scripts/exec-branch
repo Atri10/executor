@@ -67,6 +67,12 @@ case "$action" in
     ;;
   merge)
     [ "$current" = "$plan_branch" ] || exec_die "you are on '$current', not '$plan_branch' — the audit runs against the plan branch's workspace"
+    # A dirty tree must not ride the checkout: git would carry uncommitted
+    # changes across to the initiative branch (silent contamination) or die
+    # mid-checkout with an error far from its cause.
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      exec_die "working tree has uncommitted changes — commit or stash them before merging"
+    fi
     # Gate: the plan's run must pass the full audit — registry consistent,
     # a verdict for every completed task, and the final verdict present.
     # This is the merge gate; review-before-merge is the whole point of the
