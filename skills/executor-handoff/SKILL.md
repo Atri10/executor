@@ -46,6 +46,15 @@ in an earlier phase; go back to its skill.
 | Every task has a clean or accepted verdict | `reviews/verdicts/` |
 | A final whole-branch review verdict exists and is clean | `reviews/verdicts/<PLAN-ID>-final-verdict.md` |
 | Verification produced observed evidence, not expectation | `docs/executor/<INIT>-*/verification/` and the verification report |
+| The thinking store passes the store check — every document registered, statuses truthful, cross-links resolving | `scripts/exec-store-check` — exit 0 required |
+| Every executed plan has a run row and a workspace | `.executor/INDEX.md` vs `.executor/INIT-*/` — a plan that ran (merged commits, Task-0 references) with no row is a CRITICAL gap; register it before handoff |
+| Every plan's VRFY outcomes are filled — no "To be filled" placeholder survives execution | `docs/executor/<INIT>-*/verification/INIT-0004-VRFY-*` |
+
+Run before anything else in this phase:
+
+```bash
+scripts/exec-store-check              # thinking-store integrity; exit 0 required
+```
 
 Record entry into the phase before doing the work, so an interrupted
 handoff is visible to the next session:

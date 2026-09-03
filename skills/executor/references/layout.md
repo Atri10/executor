@@ -16,8 +16,7 @@ flowchart TB
     INIT --> DESIGN["design/, DSGN"]
     INIT --> SPECS["specs/, SPEC"]
     INIT --> RISKS["risks/, RISK"]
-    INIT --> VERIFY["verification/, VRFY"]
-    INIT --> PLANS["plans/, P01, P02"]
+    INIT --> VERIFY["verification/, VRFY + evidence/PNN/"]
     INIT --> BRAIN["brainstorm/sessions/, timestamp-topic/"]
     BRAIN --> CONTENT["content/, served screens"]
     BRAIN --> EVENTS["events, choices clicked"]
@@ -98,16 +97,9 @@ readable after that worktree is gone.
     │   │   │   └── INIT-0004-P01-final-229e5e7..a91e502.diff
     │   │   └── verdicts/
     │   │       ├── INIT-0004-P01-T03-R01-verdict.md
-    │   │       └── INIT-0004-P01-T03-R02-verdict.md
-    │   └── verification/
-    │       └── evidence/
-    │           └── round-01/
-    │               ├── state.txt
-    │               └── INIT-0004-VRFY-01-V01-unit.txt
-    │           ├── INIT-0004-P01-T03-R02-verdict.md
-    │           └── INIT-0004-P01-final-verdict.md
-    └── P02/
-        └── ...
+    │   │       ├── INIT-0004-P01-T03-R02-verdict.md
+    │   │       └── INIT-0004-P01-final-verdict.md
+    │   └── ...
 ```
 
 ### Why each file exists
@@ -152,45 +144,47 @@ each fix round, so the file is the task's complete implementation history.
 round and commit range so a re-review never overwrites the diff its
 predecessor saw.
 
-**`verification/evidence/round-NN/`** — raw observed output backing each
-outcomes round in the VRFY document. Written by `exec-evidence`:
-`state.txt` records the branch, commit, and tree dirtiness of the state
-under test; one `INIT-NNNN-VRFY-nn-V<nn>-<method>.txt` file per criterion
-holds the command and its observed output. The VRFY outcomes table cites
-these files instead of pasting the output a second time — the tracked
-ledger keeps the verdict, the untracked store keeps the full record.
+**`verification/evidence/PNN/`** — raw observed output backing each VRFY
+document's criteria rounds. This is the ONE deliberate exception to the
+untracked rule, and it lives in the **tracked thinking store**:
+`docs/executor/<initiative>/verification/evidence/PNN/` (one directory per
+plan: `P01`, `P02`, ...). Written by `exec-evidence`:
 
-**`reviews/verdicts/`** — the reviewer's written judgment: spec verdict,
-findings by severity, per-finding ADDRESSED / NOT ADDRESSED on re-reviews.
-Persisted because the judgment is the insight; the diff is just evidence.
-A verdict that lives only in a subagent's response text is lost the moment
-the controller summarizes it.
+- **`state.txt`** — the state under test, stamped once per plan directory:
+  branch, HEAD commit, tree dirtiness, timestamp. First writer wins; the
+  round is one state.
+- **`<VRFY-id>-V<nn>-<method>.txt`** — one file per criterion: the command
+  and its full observed output. Flat names, no per-round subdirectories.
 
-### The placement rule — hard
+The VRFY outcomes table's **Evidence** column names these files, so a
+reader can go from verdict → table → raw output. Evidence is tracked
+because it is the *proof* a claim was proven — it commits on the branch
+that produced it and survives worktree teardown (it lives in the thinking
+store anchored to the working tree, and the main-root execution store never
+holds it). A re-run of a criterion overwrites the file — the newest run is
+the truth; the VRFY outcomes table records the round it cites.
 
-**Every artifact a run produces lives under `.executor/`.** Briefs, context
-files, reports, diffs, verdicts, ledger, rulings, preflight, dispatches —
-all of it. **Nothing a run produces is ever written under `docs/executor/`**
-except by the phase skills that own thinking documents (charter, research,
-architecture, spec, plan, VRFY strategy).
+**Every other artifact a run produces lives under `.executor/`.** Briefs,
+context files, reports, diffs, verdicts, ledger, rulings, preflight,
+dispatches — all of it. **Nothing else a run produces is ever written under
+`docs/executor/`** except the thinking documents themselves (charter,
+research, architecture, spec, plan, VRFY) and the evidence directory above.
 
 The two stores are not interchangeable, and the reason is the worktree
 survival contract: `docs/executor/` is tracked and commits on the branch
 that produced it; `.executor/` is untracked and anchored to the main
 repository root so removing a worktree cannot destroy the execution record.
 
-A verdict, report, or evidence block that lands in `docs/executor/` is a
+A verdict, report, or brief that lands in `docs/executor/` is a
 **contract violation**, not a style choice — it pollutes the tracked
-thinking record with execution noise, and it silently moves the record to a
-place where branch cleanup can lose it. If you catch yourself about to
-write an execution artifact under `docs/executor/`, stop: the correct path
-is under `.executor/`, resolved by the scripts, never hand-built.
+thinking record with execution noise. Evidence is the named exception, not
+a leak: it is thinking-grade proof, written by `exec-evidence` into
+`verification/evidence/PNN/` — never hand-placed anywhere else.
 
-**Verification outcomes are the one deliberate exception.** The evidence
-ledger is appended to the initiative's VRFY document in `docs/executor/`
-because it is the *thinking* record of what was proven — the strategy and
-its outcomes belong together for anyone who clones the repo. That exception
-is named here so it is a decision, not a leak.
+The outcomes ledger itself is likewise thinking-grade: the VRFY document's
+outcomes table records what was proven, and it is appended in
+`docs/executor/` by executor-verification — verdicts together with their
+cited evidence files, for anyone who clones the repo.
 
 ## Path resolution
 
@@ -206,7 +200,7 @@ Never hand-build a path. Use the scripts:
 | Run lifecycle in the registry | `scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
 | Plan gate lint | `scripts/exec-plan-lint PLAN_FILE` |
 | Plan-branch lifecycle | `scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
-| Evidence file for a criterion | `scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin) |
+| Evidence file for a criterion | `scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin; writes the initiative's tracked `verification/evidence/PNN/`) |
 | Review diff for a task or the branch | `scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `scripts/exec-scan-secrets [PATH]` |
 

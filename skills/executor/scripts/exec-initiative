@@ -82,7 +82,9 @@ registry_lock() {
   while ! mkdir "$lock" 2>/dev/null; do
     waited=$((waited + 1))
     if [ "$waited" -gt 100 ]; then          # ~10s: assume the holder died
-      rm -rf "$lock"
+      # Guard the non-empty case: an unset/empty $lock must never expand
+      # `rm -rf` to its argument list's worst case.
+      [ -n "$lock" ] && rm -rf "$lock"
       continue
     fi
     sleep 0.1
