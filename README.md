@@ -99,14 +99,15 @@ assertions, no mock-only coverage.
 |---|---|
 | `exec-initiative` | Allocate initiative IDs, scaffold folders, phase log, initiative branch (`branch INIT-0004`) |
 | `exec-id` | Next free ID of any type — allocation never guesses |
-| `exec-plan-lint` | **Planning gate**: rejects literal store paths in plans, task headings without IDs, missing frontmatter |
+| `exec-plan-lint` | **Planning gate**: rejects literal store paths in plans, task headings without IDs, missing or empty `spec`/`interfaces`/`tasks`/`execution_mode`, task-count mismatch |
 | `exec-workspace` | Resolve and seed a plan's execution workspace: ledger, rulings, preflight scan, dispatch log |
 | `exec-brief` / `exec-context` | Task brief and context files, generated, never hand-built |
 | `exec-review-package` | Review diffs with commit list + stat + `-U10` diff in one file, per round |
 | `exec-run` | Run lifecycle in the registry: `start`/`task`/`complete`/`pause`/`blocked`/`check` |
-| `exec-run check` | **Drift + verdict audit**: registry row vs ledger, a verdict file per completed task, final verdict present — exit 1 names the failure |
+| `exec-run check` | **Drift + verdict + ledger audit**: registry row vs ledger, a verdict file per completed task, completed tasks present in the Task status table, final verdict present — exit 1 names the failure |
 | `exec-branch` | Plan-branch lifecycle: fork from the initiative branch, `merge` **refused** unless the review audit passes |
-| `exec-evidence` | Per-criterion evidence files with a per-round state stamp (branch, commit, dirtiness) |
+| `exec-evidence` | Per-criterion evidence files in the initiative's tracked `verification/evidence/PNN/`, with a per-plan state stamp (branch, commit, dirtiness) |
+| `exec-store-check` | **Thinking-store integrity gate**: registry ↔ folders ↔ Documents table ↔ frontmatter statuses ↔ cross-links ↔ evidence citations ↔ phase-log chronology — the drift class that rotted the first live stores, caught by script |
 | `exec-ruling` | Record a decision taken on the human's behalf — to the rulings log *and* the local decisions store |
 | `exec-scan-secrets` | Credential-shaped content scan across both stores; reports file:line, never the value |
 

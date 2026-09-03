@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+# Lint the TRACKED thinking store (docs/executor/) for contract violations.
+#
+# The live stores showed the drift: the execution store grew script-enforced
+# gates while the thinking store — the record humans and future sessions
+# actually read — was maintained by prose alone. Five documents went
+# unregistered while their initiative's INDEX claimed completeness; six
+# statuses contradicted their own frontmatter; counts disagreed with the
+# bodies they counted. This script makes those failures exit non-zero.
+#
+# Checks:
+#   Registry (docs/executor/INDEX.md)
+#     R1. exists, has a table with the required columns
+#     R2. every initiative folder has a row; every row has a folder
+#     R3. statuses drawn from the contract vocabulary
+#   Initiative INDEX.md
+#     I1. every on-disk document appears in the Documents table (by ID)
+#     I2. every Documents row's Path resolves to a file
+#     I3. row Status matches the document's frontmatter status
+#     I4. phase log has no time travel (Gate passed not before Entered)
+#   Documents
+#     D1. frontmatter present; id/initiative/kind/title/status/timestamps set
+#     D2. id matches the filename's ID segment
+#     D3. initiative matches the containing folder's ID
+#     D4. timestamps ISO-8601 UTC; updated_at >= created_at
+#     D5. kind-specific required fields present (spec counts, ADR fields...)
+#     D6. plan task headings carry IDs; count matches tasks:
+#   Cross-links
+#     X1. plan spec: resolves to a SPEC in the same initiative
+#     X2. VRFY spec: resolves to a SPEC in the same initiative
+#     X3. every evidence file cited by a VRFY exists; orphan evidence listed
+#
+# Usage: exec-store-check [DOCS_STORE_DIR]   (default: resolved via _exec-lib)
+# Exit: 0 clean, 1 findings, 2 usage/setup error
+set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
+
+[ $# -le 1 ] || exec_die "usage: exec-store-check [DOCS_STORE_DIR]"
+
+store=${1:-$(exec_docs_store)}
+[ -d "$store" ] || exec_die "no thinking store at $store"
+
+findings=0
+fail() { echo "FINDING: $*" >&2; findings=$((findings + 1)); }
+note() { echo "note: $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# Frontmatter helpers
+# ---------------------------------------------------------------------------
+
+fm_field() { exec_frontmatter "$1" "$2"; }
+
+fm_iso_ok() {
+  case "$1" in
+    ????-??-??T??:??:??Z) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# UTC seconds since epoch for an ISO-8601 Z timestamp (GNU/BSD date).
+fm_epoch() {
+  date -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
+    || date -u -d "$1" +%s 2>/dev/null \
+    || echo 0
+}
+
+# ---------------------------------------------------------------------------
+# R1–R3: registry
+# ---------------------------------------------------------------------------
+
+reg="$store/INDEX.md"
+if [ ! -f "$reg" ]; then
+  fail "R1: no initiative registry at $reg"
+  reg=""
+fi
+
+declare -a REG_IDS=()
+if [ -n "$reg" ]; then
+  if ! grep -qE '^\| *ID *\|' "$reg"; then
+    fail "R1: registry has no | ID | Title | Status | Phase | Folder | Updated | table"
+  fi
+  while IFS='|' read -r _ id _ status _ folder _; do
+    id=$(printf '%s' "$id" | xargs)
+    [ -n "$id" ] || continue
+    case "$id" in INIT-[0-9][0-9][0-9][0-9]) ;; *) continue ;; esac
+    REG_IDS+=("$id")
+    status=$(printf '%s' "$status" | xargs)
+    case "$status" in
+      active|complete|superseded|abandoned|paused) ;;
+      *) fail "R3: registry row $id status '$status' not in active|complete|superseded|abandoned|paused" ;;
+    esac
+    folder=$(printf '%s' "$folder" | xargs)
+    folder=${folder#\`}; folder=${folder%\`}
+    if [ -n "$folder" ] && [ ! -d "$store/$folder" ]; then
+      fail "R2: registry row $id names folder '$folder' which does not exist"
+    fi
+  done < <(grep -E '^\| *INIT-[0-9]{4} *\|' "$reg")
+
+  # every folder has a row
+  while IFS= read -r d; do
+    base=$(basename "$d")
+    init_id=${base%%-*}   # not enough: INIT-0004-slug -> INIT; handled below
+    init_id=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}')
+    found=0
+    for rid in "${REG_IDS[@]:-}"; do
+      [ "$rid" = "$init_id" ] && { found=1; break; }
+    done
+    [ "$found" -eq 1 ] || fail "R2: initiative folder '$base' has no registry row"
+  done < <(find "$store" -maxdepth 1 -type d -name 'INIT-[0-9][0-9][0-9][0-9]-*' | sort)
+fi
+
+# ---------------------------------------------------------------------------
+# Per-initiative pass
+# ---------------------------------------------------------------------------
+
+fm_status_of_id() { :; }  # placeholder, statuses read inline below
+
+for idir in "$store"/INIT-*/; do
+  [ -d "$idir" ] || continue
+  case "$(basename "$idir")" in
+    INIT-[0-9][0-9][0-9][0-9]-*) ;;
+    *) continue ;;
+  esac
+  init_id=$(basename "$idir"); init_id=${init_id%%-*}; init_id=$(printf '%s' "$(basename "$idir")" | grep -oE '^INIT-[0-9]{4}')
+  idx="$idir/INDEX.md"
+
+  # ---- I1/I2/I3: documents table vs disk -----------------------------------
+  if [ -f "$idx" ]; then
+    declare -A LISTED=()
+    while IFS= read -r row; do
+      row=${row#\|}; row=${row%\|}          # trim outer pipes
+      IFS='|' read -r did _ _ status path <<< "$row"
+      did=$(printf '%s' "$did" | xargs)
+      [ -n "$did" ] || continue
+      case "$did" in INIT-[0-9][0-9][0-9][0-9]-*) ;; *) continue ;; esac
+      LISTED["$did"]=1
+      path=$(printf '%s' "$path" | xargs)
+      path=${path#\`}; path=${path%\`}
+      if [ -n "$path" ] && [ ! -f "$idir/$path" ]; then
+        fail "I2: $init_id Documents row $did points at missing file '$path'"
+      fi
+      # I3: row status vs document frontmatter
+      if [ -n "$path" ] && [ -f "$idir/$path" ]; then
+        doc_status=$(fm_field "$idir/$path" status)
+        row_status=$(printf '%s' "$status" | xargs)
+        if [ -n "$doc_status" ] && [ "$doc_status" != "$row_status" ]; then
+          fail "I3: $init_id row $did says status '$row_status' but the document's frontmatter says '$doc_status' — document wins, fix the row"
+        fi
+      fi
+    done < <(grep -E '^\| *INIT-[0-9][0-9][0-9][0-9]-[A-Z]+' "$idx")
+    # every on-disk doc listed
+    while IFS= read -r f; do
+      rel=${f#"$idir"}
+      base=$(basename "$f")
+      seg=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}-(CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY)-[0-9]+|^INIT-[0-9]{4}-P[0-9]{2}') || seg=""
+      [ -n "$seg" ] || { note "unregistered-content file skipped: $rel (no document ID segment)"; continue; }
+      [ -n "${LISTED[$seg]:-}" ] || fail "I1: $rel exists on disk but has no Documents-table row in $init_id INDEX.md"
+    done < <(find "$idir" -type f -name '*.md' \
+              ! -name 'INDEX.md' ! -name 'README.md' ! -path '*/brainstorm/*' ! -path '*/evidence/*' | sort)
+
+    # I4: phase-log time travel
+    while IFS= read -r row; do
+      row=${row#\|}; row=${row%\|}
+      IFS='|' read -r phase entered gate _ <<< "$row"
+      phase=$(printf '%s' "$phase" | xargs)
+      case "$phase" in
+        intake|discovery|architecture|design|specification|planning|execution|review|verification|handoff) ;;
+        *) continue ;;
+      esac
+      entered=$(printf '%s' "$entered" | xargs)
+      gate=$(printf '%s' "$gate" | xargs)
+      case "$entered" in -|"—"|"") continue ;; esac
+      e=$(fm_epoch "${entered}T00:00:00Z"); g=$e
+      case "$gate" in
+        -|"—"|"**skipped**"|"") ;;
+        *) g=$(fm_epoch "${gate}T00:00:00Z") ;;
+      esac
+      if [ "$g" -lt "$e" ]; then
+        fail "I4: $init_id phase log row '$phase' passed its gate ($gate) before the phase was entered ($entered) — time travel"
+      fi
+    done < <(grep -E '^\| *(intake|discovery|architecture|design|specification|planning|execution|review|verification|handoff) *\|' "$idx")
+  fi
+
+  # ---- D1–D6: every document ------------------------------------------------
+  while IFS= read -r f; do
+    rel=${f#"$idir"}
+    base=${rel#/}; seg=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}-(CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY)-[0-9]+|INIT-[0-9]{4}-P[0-9]{2}') || seg=""
+
+    # D1: frontmatter present at all
+    if ! head -1 "$f" | grep -q '^---$'; then
+      fail "D1: $rel has no YAML frontmatter — unreachable by any index or script"
+      continue
+    fi
+
+    fid=$(fm_field "$f" id)
+    fkind=$(fm_field "$f" kind)
+    fstatus=$(fm_field "$f" status)
+    fcreated=$(fm_field "$f" created_at)
+    fupdated=$(fm_field "$f" updated_at)
+
+    [ -n "$fid" ] || fail "D1: $rel frontmatter has no id:"
+    [ -n "$fkind" ] || fail "D1: $rel frontmatter has no kind:"
+    [ -n "$fstatus" ] || fail "D1: $rel frontmatter has no status:"
+    case "$fstatus" in
+      draft|active|superseded|withdrawn|abandoned|"") ;;
+      *) fail "D1: $rel status '$fstatus' not in draft|active|superseded|withdrawn|abandoned" ;;
+    esac
+    # D2: id matches filename segment
+    if [ -n "$fid" ] && [ -n "$seg" ]; then
+      [ "$fid" = "$seg" ] || fail "D2: $rel frontmatter id '$fid' does not match filename segment '$seg'"
+    fi
+
+    # D3: initiative matches folder
+    finit=$(fm_field "$f" initiative)
+    [ -n "$finit" ] || fail "D3: $rel frontmatter has no initiative:"
+    if [ -n "$finit" ] && [ "$finit" != "$init_id" ]; then
+      fail "D3: $rel frontmatter initiative '$finit' does not match containing folder $init_id"
+    fi
+
+    # D4: timestamp shape and ordering
+    if [ -n "$fcreated" ] && ! fm_iso_ok "$fcreated"; then
+      fail "D4: $rel created_at '$fcreated' is not ISO-8601 UTC (YYYY-MM-DDTHH:MM:SSZ)"
+    fi
+    if [ -n "$fupdated" ] && ! fm_iso_ok "$fupdated"; then
+      fail "D4: $rel updated_at '$fupdated' is not ISO-8601 UTC"
+    fi
+    if fm_iso_ok "$fcreated" && fm_iso_ok "$fupdated"; then
+      [ "$(fm_epoch "$fupdated")" -ge "$(fm_epoch "$fcreated")" ] || \
+        fail "D4: $rel updated_at ($fupdated) is before created_at ($fcreated)"
+    fi
+
+    # D5: kind-specific required fields
+    case "$fkind" in
+      spec)
+        for k in implements decisions verification plans; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (spec) missing $k: field"
+        done
+        ;;
+      adr)
+        for k in decision alternatives_considered consequences_accepted reversibility informs; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (adr) missing $k: field"
+        done
+        ;;
+      interface)
+        for k in provides consumers stability; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (interface) missing $k: field"
+        done
+        ;;
+      research|options)
+        for k in question sources confidence; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel ($fkind) missing $k: field"
+        done
+        [ "$fkind" = options ] && grep -qE '^recommends:' "$f" || true
+        ;;
+      risk)
+        for k in method risks_identified mitigations_planned accepted_without_mitigation; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (risk) missing $k: field"
+        done
+        ;;
+      verification)
+        for k in spec criteria_count evidence_types; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (verification) missing $k: field"
+        done
+        ;;
+      plan)
+        for k in spec interfaces tasks execution_mode workspace; do
+          grep -qE "^${k}:" "$f" || fail "D5: $rel (plan) missing $k: field"
+        done
+        ;;
+    esac
+
+    # D6: plan task headings carry IDs and match declared count
+    if [ "$fkind" = plan ]; then
+      nhead=0
+      while IFS= read -r line; do
+        hnum=$(printf '%s' "$line" | sed -n 's/^### Task \([0-9][0-9]*\):.*/\1/p')
+        [ -n "$hnum" ] || continue
+        nhead=$((nhead + 1))
+        printf '%s' "$line" | grep -qE 'INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}' || \
+          fail "D6: $rel Task heading $hnum carries no backticked task ID token"
+      done < <(grep -E '^### Task [0-9]+:' "$f" || true)
+      declared=$(fm_field "$f" tasks)
+      if [ -n "$declared" ] && [ "$declared" != "null" ] && [ "$declared" != "$nhead" ]; then
+        fail "D6: $rel tasks: $declared but body has $nhead task headings"
+      fi
+      # X1: plan spec resolves in this initiative
+      pspec=$(fm_field "$f" spec)
+      if [ -n "$pspec" ] && [ "$pspec" != "null" ]; then
+        case "$pspec" in
+          "$init_id"-*) find "$idir" -name "${pspec}-*.md" -print -quit | grep -q . || \
+            fail "X1: $rel spec '$pspec' resolves to no document in $init_id" ;;
+          *) fail "X1: $rel spec '$pspec' is a cross-initiative citation — forbidden outside charter fields" ;;
+        esac
+      fi
+    fi
+
+    # X2: VRFY spec resolves
+    if [ "$fkind" = verification ]; then
+      vspec=$(fm_field "$f" spec)
+      if [ -n "$vspec" ] && [ "$vspec" != "null" ]; then
+        case "$vspec" in
+          "$init_id"-*) find "$idir" -name "${vspec}-*.md" -print -quit | grep -q . || \
+            fail "X2: $rel spec '$vspec' resolves to no document in $init_id" ;;
+          *) fail "X2: $rel spec '$vspec' is a cross-initiative citation — forbidden outside charter fields" ;;
+        esac
+        # X3: evidence citations resolve; orphans reported
+        evdir="$idir/verification/evidence"
+        cited=0
+        while IFS= read -r ev; do
+          [ -n "$ev" ] || continue
+          cited=$((cited + 1))
+          find "$idir/verification" -name "$ev" -print -quit | grep -q . || \
+            fail "X3: $rel cites evidence file '$ev' which does not exist under verification/"
+        done < <(grep -oE '[A-Za-z0-9._-]+\.(txt|log)' "$f" | sort -u)
+        if [ "$cited" -gt 0 ] && [ -d "$evdir" ]; then
+          while IFS= read -r ef; do
+            ebase=$(basename "$ef")
+            [ "$ebase" = "state.txt" ] || [ "$ebase" = "README.md" ] || [ "$ebase" = "index.md" ] && continue
+            grep -qF "$ebase" "$f" || note "orphan evidence: $ebase is on disk but cited by no VRFY document"
+          done < <(find "$evdir" -type f \( -name '*.txt' -o -name '*.log' \) | sort)
+        fi
+      fi
+    fi
+  done < <(find "$idir" -maxdepth 3 -type f -name '*.md' \
+            ! -name 'INDEX.md' ! -name 'README.md' ! -path '*/brainstorm/*' ! -path '*/evidence/*' | sort)
+done
+
+if [ "$findings" -gt 0 ]; then
+  echo "store check: $findings finding(s)" >&2
+  exit 1
+fi
+echo "store check: clean"
