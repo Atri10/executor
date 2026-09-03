@@ -31,6 +31,43 @@ git clone git@github.com:Atri10/executor.git
 cp -R executor/skills/* <your-agents-skills-dir>/
 ```
 
+Pin to a release tag instead of `main` for stability:
+
+```bash
+git clone --branch v0.1.0 git@github.com:Atri10/executor.git
+```
+
+### One-paste install for any LLM agent
+
+Paste this into your agent — Claude Code, Cursor, Aider, Codex, omp, or any
+other harness. It discovers the right skills directory itself and verifies
+the install:
+
+```text
+Install The Executor skill library for me:
+
+1. Clone https://github.com/Atri10/executor.git into a temp directory
+   (use --branch v0.1.0 for the latest release, or default branch for main).
+2. Find my agent's skills directory. Candidates, in order — use the first
+   that exists, or ask me if none do:
+   - ~/.omp/agent/skills/            (omp)
+   - ~/.claude/skills/               (Claude Code)
+   - ~/.cursor/skills/               (Cursor)
+   - .claude/skills/                 (repo-local Claude Code)
+   - ~/.aider/skills/ or as my harness documents
+3. Copy every directory from the clone's skills/ folder into that skills
+   directory (each is one skill: skills/executor, skills/executor-spec, ...).
+4. Verify: run bash <skills-dir>/executor/scripts/exec-run with no arguments
+   — it must print a usage line and exit non-zero. Then confirm the ten
+   SKILL.md files exist under the skills directory.
+5. Tell me which directory you installed into, and how to invoke the
+   router in my harness (usually /skill:executor or just asking for
+   "the executor").
+
+Do not modify any file inside the clone or the skills directory other
+than the copy operation itself.
+```
+
 Then invoke the root router:
 
 ```text
