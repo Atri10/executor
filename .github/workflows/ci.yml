@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck (bash scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        # The scripts run inside users' agents with broad filesystem and git
+        # access; a shell bug there is a security event, not a style nit.
+        # Warning-level (-S warning) is the floor; errors already fail.
+        run: |
+          find skills/executor/scripts -type f -name 'exec-*' -print0 \
+            | xargs -0 shellcheck --severity=warning
+
+  prompt-injection:
+    name: Prompt-injection lint (skills are prompts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint skill markdown for injection patterns
+        # Every SKILL.md is executed as instruction by agents. This blocks
+        # override directives, concealment, exfiltration endpoints,
+        # fetch-and-execute, and credential literals from entering main.
+        run: python3 scripts/lint-prompt-injection.py skills/
+
+  skill-validation:
+    name: Skill contract (frontmatter, triggers, fences)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate skill files
+        run: bash scripts/validate-skills.sh skills
+
+  secret-scan:
+    name: Secret scan (both stores)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Executor secret scan on the repo itself
+        run: bash skills/executor/scripts/exec-scan-secrets .
+      - name: Gitleaks (defense in depth, full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  script-smoke:
+    name: Script smoke (usage, errors, lifecycle fixture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every script parses and prints usage on no args
+        run: |
+          set -e
+          for f in skills/executor/scripts/exec-*; do
+            bash -n "$f"
+          done
+      - name: Plan lint catches the known violation
+        run: |
+          set -e
+          mkdir -p /tmp/fx/plans
+          printf -- '---\nid: INIT-0001-P01\nspec: S\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\nCreate: docs/executor/x/y/\n' > /tmp/fx/plans/p.md
+          if bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/p.md; then
+            echo "lint accepted a forbidden literal store path"; exit 1
+          fi
+      - name: exec-run drift detection fires
+        run: |
+          set -e
+          cd "$(mktemp -d)"
+          git init -q -b main
+          git config user.email ci@example.com
+          git config user.name ci
+          mkdir -p docs/executor/INIT-0001-x/plans
+          printf -- '---\nid: INIT-0001-P01\nspec: S\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
+          printf '# X\n' > docs/executor/INIT-0001-x/INDEX.md
+          git add -A && git commit -qm init
+          bash "$OLDPWD/skills/executor/scripts/exec-workspace" docs/executor/INIT-0001-x/plans/INIT-0001-P01.md > /dev/null
+          S="$OLDPWD/skills/executor/scripts"
+          P=docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
+          bash "$S/exec-run" "$P" start > /dev/null
+          echo "INIT-0001-P01-T01: complete" >> .executor/INIT-0001/P01/progress.md
+          if bash "$S/exec-run" "$P" check; then
+            echo "check passed with an unjudged completed task"; exit 1
+          fi

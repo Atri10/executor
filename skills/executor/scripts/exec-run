@@ -16,7 +16,6 @@ set -euo pipefail
 
 plan=$1
 action=$2
-n=${3:-}
 [ -f "$plan" ] || exec_die "no such plan file: $plan"
 
 plan_id=$(exec_frontmatter "$plan" id)

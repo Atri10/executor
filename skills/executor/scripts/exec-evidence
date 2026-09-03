@@ -28,8 +28,8 @@ shift 4
 
 plan_id=$(exec_frontmatter "$plan" id)
 [ -n "$plan_id" ] || exec_die "no id: in plan frontmatter — evidence needs a plan ID"
-init=$(exec_initiative_of "$plan_id") || exec_die "cannot derive initiative from $plan_id"
-seg=$(exec_plan_segment_of "$plan_id") || exec_die "cannot derive plan segment from $plan_id"
+exec_initiative_of "$plan_id" >/dev/null || exec_die "cannot derive initiative from $plan_id"
+exec_plan_segment_of "$plan_id" >/dev/null || exec_die "cannot derive plan segment from $plan_id"
 
 # Round must be a plain integer (01, 02, ...).
 case "$round" in
