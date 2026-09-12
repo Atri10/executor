@@ -44,8 +44,9 @@ in an earlier phase; go back to its skill.
 |---|---|
 | Every task in every plan is complete | each plan's `.executor/<INIT>/<Pnn>/progress.md` |
 | Every task has a clean or accepted verdict | `reviews/verdicts/` |
-| A final whole-branch review verdict exists and is clean | `reviews/verdicts/<PLAN-ID>-final-verdict.md` |
+| The LATEST final verdict is clean | `reviews/verdicts/` — if any `<PLAN-ID>-final-R<n>-verdict.md` exists, it supersedes the base `<PLAN-ID>-final-verdict.md`; the base file being clean proves nothing once a later round failed |
 | Verification produced observed evidence, not expectation | `docs/executor/<INIT>-*/verification/` and the verification report |
+| Every FAILED/NOT-RUN/UNAVAILABLE criterion has an explicit human acceptance recorded | the verification phase's acceptance record — a ruling naming the criterion, the state it was accepted at, and the residual risk. An acceptance the human never made does not exist |
 | The thinking store passes the store check — every document registered, statuses truthful, cross-links resolving | `scripts/exec-store-check` — exit 0 required |
 | Every executed plan has a run row and a workspace | `.executor/INDEX.md` vs `.executor/INIT-*/` — a plan that ran (merged commits, Task-0 references) with no row is a CRITICAL gap; register it before handoff |
 | Every plan's VRFY outcomes are filled — no "To be filled" placeholder survives execution | `docs/executor/<INIT>-*/verification/INIT-0004-VRFY-*` |
@@ -195,6 +196,14 @@ approve something you know is broken.
 
 Record the command and its observed outcome; it becomes the evidence line
 in the final message. Never write an expected result as an observed one.
+
+**Full-suite scope:** run the suite that covers the changed surface. For
+a docs-only initiative the "suite" is the store check plus any
+documented render/lint checks — a test runner that would exercise
+nothing is not required to run for ceremony. The verification phase's
+capability map already recorded what evidence was feasible; handoff
+re-runs what is feasible now, on the current tree. A required check
+that exists but fails still blocks.
 
 ## Step 4 — Detect environment
 

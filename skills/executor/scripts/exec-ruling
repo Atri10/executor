@@ -27,7 +27,9 @@ init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
 dir=$(exec_workspace_dir "$plan")
 stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# 1. Append to the plan's rulings log.
+# 1. Append to the plan's rulings log (locked: concurrent rulings must
+# not interleave or lose records —).
+store_lock "$dir"
 {
   echo
   echo "## $task_id — $stamp"
@@ -38,11 +40,16 @@ stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo
   echo "**Cost if wrong:** $cost"
 } >> "$dir/rulings.md"
+store_unlock "$dir"
 
-# 2. Mirror into .local/decisions/ using that store's sequence convention.
+# 2. Mirror into .local/decisions/ using that store's sequence
+# convention. The sequence scan+write is locked against concurrent
+# rulings so two simultaneous calls cannot claim the same
+# sequence number.
 root=$(exec_root)
 ldir="$root/.local/decisions"
 mkdir -p "$ldir"
+store_lock "$ldir"
 
 max=0
 for f in "$ldir"/[0-9][0-9][0-9][0-9]-*.md; do
@@ -89,6 +96,7 @@ the moment of decision, not reconstructed.
 with \`supersedes\` pointing here. The plan's rulings log at
 \`${dir#"$root"/}/rulings.md\` holds the same entry in execution order.
 EOF
+store_unlock "$ldir"
 
 echo "$dir/rulings.md"
 echo "$ldir/$fname"

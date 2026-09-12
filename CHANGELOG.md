@@ -4,6 +4,105 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+## [Unreleased] — 2026-09-12
+
+### Fixed
+- 2026-09-12 — **Review context survives rounds.** `exec-context` no
+  longer silently clips plan Interfaces (was 40 lines) or Global
+  Constraints (was 30); sections are extracted whole. Ruling records
+  are matched whole — Decided, Why, and Cost stay together — and any
+  backticked file counts, not just code extensions. Literal source
+  content round-trips: `printf %b` no longer transforms escape
+  sequences. `exec-review-package` extracts whole requirement nodes
+  (was `head -6`), fails closed when the referenced spec cannot be
+  resolved, records base/head SHAs and plan/spec blob hashes in the
+  package header, and labels fix-delta ranges as delta semantics
+  instead of "Missing" findings.
+- 2026-09-12 — **Verification evidence is immutable and state-bound.**
+  `exec-evidence` writes one file per round (`…-V03-R01-smoke.txt`);
+  same-round re-runs append `-attempt2`, `-attempt3` instead of
+  overwriting prior proof. State stamps are per round and carry the
+  commit actually exercised. Captures publish atomically (temp +
+  rename): a failed capture (missing input file) leaves prior evidence
+  intact and creates no partial artifact. The documented method enum
+  (`unit|integration|smoke|manual|static`) is enforced before any
+  filesystem mutation; criterion aliases (`#3`, `V3`, `V03`) resolve to
+  one canonical identity.
+- 2026-09-12 — **Gates parse verdicts, not filenames.** A shared
+  semantic audit (`exec_run_audit`) backs `exec-run check`, `exec-run
+  complete`, and `exec-branch audit`: `spec_verdict: FAIL` verdict
+  files, incomplete task sets, duplicate completion events, and a
+  failing latest final re-review (which supersedes an earlier clean
+  final verdict) all block. `complete` validates before mutating the
+  registry; a refused completion leaves prior state unchanged. An
+  empty dispatch table (valid for inline runs) no longer silently
+  fails `check` under `pipefail`.
+- 2026-09-12 — **Phase transitions are validated before mutation.**
+  `exec-initiative phase` refuses passed-before-entered, entering past
+  a non-passed predecessor, re-entry, and re-passing; skips are
+  recorded events that unblock the next phase.
+- 2026-09-12 — **Store and plan contracts close their gaps.**
+  `exec-store-check` validates the full registry schema, rejects
+  duplicate initiative rows, requires title/created_at/updated_at in
+  frontmatter, scopes kind-specific required fields to parsed
+  frontmatter (body code fences no longer satisfy checks), validates
+  real calendar dates, detects filename-ID mismatches in nested
+  directories, and scans for orphan evidence initiative-wide regardless
+  of any single VRFY's citation count. `exec-initiative new` refuses
+  titles containing pipes or newlines before they corrupt YAML and
+  pipe tables. `exec-plan-lint` normalizes CRLF once (the body scan no
+  longer silently skipped), counts and validates task headings with
+  CommonMark fence tracking (fenced examples are not tasks), requires
+  task IDs to name this plan and match the heading number, rejects
+  duplicate task numbers, and treats read-only `docs/executor/`
+  citations as legitimate — only Create/Modify/Test targets violate.
+- 2026-09-12 — **Concurrency and identity guards.** Registry writes
+  (`exec-run`) and ruling appends/sequence allocation (`exec-ruling`)
+  take a store lock with unique temp names. `exec-id` refuses the
+  two-digit namespace boundary instead of silently emitting IDs its
+  own scanner can never see again. `exec-workspace` refuses reuse when
+  the existing ledger names a different plan or spec (rename support
+  preserved). `exec-branch start` refuses dirty trees;
+  `exec-initiative branch` refuses reuse with mismatched recorded
+  provenance.
+- 2026-09-12 — **Visual companion stop contract.** `stop-server.sh`
+  resolves both runtime state layouts — the flat runtime root that
+  `start-server.sh` actually returns and the legacy nested `state/`
+  form.
+
+### Changed
+- 2026-09-12 — **Skill contracts realigned with the fixes.** Re-review
+  runs two jobs (impact review of the fix first, then finding closure);
+  impact scope is bounded by causality, not the diff; location never
+  sets severity. Test changes are graded by what they protect —
+  legitimate contract migrations are not auto-Critical. Evidence
+  demands are bounded: name the failure, the coverage gap, and a
+  feasible method, or record uncertainty. Implementers separate write
+  scope from read scope (follow dependencies; NEEDS_CONTEXT only for
+  the undiscoverable) and pick the strongest feasible evidence per
+  surface (capability map replaces the unconditional TDD Iron Law).
+  Self-review adds impact, edge-case families, and assumption
+  challenges. Verification's freshness rule is state-bound, not
+  session-bound, and the `verification passed` transition is described
+  as mechanically validated. Handoff requires the latest final verdict
+  and an explicit recorded human acceptance for every
+  FAILED/NOT-RUN/UNAVAILABLE criterion. Final review resolves the
+  merge base from recorded initiative provenance instead of hardcoded
+  `main`. Brainstorm sessions are recorded reasoning in any mode
+  (text first-class), with explicit skipped/declined records; visual
+  mode is a capability inside a session, not its definition.
+
+### Added
+- 2026-09-12 — **Regression suite:** `scripts/test-issue9-fixes.sh`
+  recreates 14 reproduced failure scenarios in disposable git fixtures
+  and asserts the fixed behavior (context completeness, evidence
+  immutability/aliases/atomicity, method validation, semantic audit,
+  completion-before-mutation, empty dispatch, phase gates, ID
+  boundary, workspace identity, plan-lint CRLF/citation/fence,
+  frontmatter-scoped required fields, pipe-title refusal). CI gains a
+  valid-control plan-lint negative fixture and an empty-dispatch
+  clean-run case.
+
 ## [0.1.0] — 2026-09-03
 
 **The genesis release.** The Executor takes a major idea from intake through

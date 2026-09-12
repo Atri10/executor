@@ -43,23 +43,43 @@ case "$exec_mode" in
   subagent|inline) ;;
   *) fail "execution_mode: '$exec_mode' is neither subagent nor inline" ;;
 esac
-interfaces_inline=$(awk 'BEGIN{infm=0} NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm {
-  if ($0 ~ /^[ \t]*interfaces[ \t]*:/) { sub(/^[ \t]*interfaces[ \t]*:[ \t]*/, ""); print; exit }
-}' "$plan")
+interfaces_inline=$(awk '
+  NR == 1 { sub(/\r$/, ""); if ($0 == "---") { infm = 1; next } else exit }
+  infm && /^---[[:space:]]*$/ { exit }
+  infm {
+    if ($0 ~ /^[ \t]*interfaces[ \t]*:/) { sub(/^[ \t]*interfaces[ \t]*:[ \t]*/, ""); print; exit }
+  }
+' "$plan")
 case "$interfaces_inline" in
   "") : ;;  # block list (interfaces:\n  - ID) — items live on following lines; presence of the key is enough
   "null") fail "interfaces: is null — list the interface IDs the tasks build against, or [] with the reason stated in the body" ;;
   "[]") : ;;  # empty list is allowed only with a stated reason in the body
   *) : ;;   # inline list with items
 esac
-grep -q '^[ \t]*interfaces[ \t]*:' "$plan" || {
-  fail "no interfaces: in frontmatter — list the interface IDs the tasks build against, or [] with the reason stated in the body"
-}
-
 declared_tasks=$(exec_frontmatter "$plan" tasks)
-heading_tasks=$(grep -cE '^### Task [0-9]+:' "$plan" || true)
+# Fence-aware heading count: a '### Task N:' inside a fenced example is
+# documentation, not a real task. Uses the shared CommonMark fence
+# tracker so backtick/tilde/long fences all behave the same way here as
+# in brief/context extraction.
+heading_tasks=$(awk '
+  {
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (stripped ~ /^(`{3,}|~{3,})/) {
+      match(stripped, /^(`{3,}|~{3,})/)
+      len = RLENGTH
+      ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+    }
+    if (!infence && $0 ~ /^### Task [0-9]+:/) count++
+  }
+  END { print count + 0 }
+' "$plan")
 if [ -n "$declared_tasks" ] && [ "$declared_tasks" != "null" ] && [ "$declared_tasks" != "$heading_tasks" ]; then
-  fail "tasks: $declared_tasks but the body has $heading_tasks '### Task N:' headings — the count is a contract, not a guess"
+  fail "tasks: $declared_tasks but the body has $heading_tasks real '### Task N:' headings (fenced examples excluded) — the count is a contract, not a guess"
 fi
 
 plan_status=$(exec_frontmatter "$plan" status)
@@ -69,25 +89,56 @@ case "$plan_status" in
 esac
 
 # --- 2. Task headings carry IDs ---------------------------------------------
+# Real headings only: the shared fence tracker excludes fenced examples.
+# IDs must name THIS plan and match the heading number.
 n=0
+collected_headings=$(awk '
+  {
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (stripped ~ /^(`{3,}|~{3,})/) {
+      match(stripped, /^(`{3,}|~{3,})/)
+      len = RLENGTH
+      ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+    }
+    if (!infence && $0 ~ /^### Task [0-9]+:/) print
+  }
+' "$plan")
 while IFS= read -r line; do
   n=$((n + 1))
   heading_num=$(printf '%s' "$line" | sed -n 's/^### Task \([0-9][0-9]*\):.*/\1/p')
   [ -n "$heading_num" ] || continue
-  if ! printf '%s' "$line" | grep -qE 'INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}'; then
+  tid=$(printf '%s' "$line" | grep -oE 'INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}' | head -1)
+  if [ -z "$tid" ]; then
     fail "Task heading $heading_num carries no task ID token (want: ### Task $heading_num: <name> — \`$plan_id-T$(exec_pad2 "$heading_num")\`)"
+  else
+    expected="${plan_id}-T$(exec_pad2 "$heading_num")"
+    [ "$tid" = "$expected" ] || fail "Task heading $heading_num carries ID '$tid' but this plan expects '$expected' — a heading that names another plan's task is a dispatch trap"
   fi
-done < <(grep -E '^### Task [0-9]+:' "$plan" || true)
-
+done <<< "$collected_headings"
 [ "$n" -gt 0 ] || fail "no '### Task N:' headings found — a plan without tasks is not a plan"
-body_start=$(awk 'NR>1 && /^---$/{print NR; exit}' "$plan")
+# Duplicate heading numbers are ambiguous for exec-brief (it concatenates
+# both sections) and for any resume scan. Refuse them.
+dup_nums=$(printf '%s\n' "$collected_headings" | sed -n 's/^### Task \([0-9][0-9]*\):.*/\1/p' | sort | uniq -d)
+if [ -n "$dup_nums" ]; then
+  fail "duplicate Task heading number(s): $(printf '%s' "$dup_nums" | tr '\n' ' ') — two headings with the same number cannot both be dispatched"
+fi
+body_start=$(awk 'NR>1 { sub(/\r$/, ""); if ($0 == "---") { print NR; exit } }' "$plan")
 body_start=${body_start:-$(wc -l < "$plan")}
 fm_tmp=$(mktemp "${TMPDIR:-/tmp}/exec-plan-lint-fm.XXXXXX")
 body_tmp=$(mktemp "${TMPDIR:-/tmp}/exec-plan-lint-body.XXXXXX")
 cleanup() { rm -f "$fm_tmp" "$body_tmp"; }
 trap cleanup EXIT
-awk -v bs="$body_start" 'NR <= bs' "$plan" > "$fm_tmp"
-awk -v bs="$body_start" 'NR >  bs' "$plan" > "$body_tmp"
+# Normalize CRLF once: the frontmatter reader strips \r, so the body
+# split must see the same delimiters or a CRLF plan silently loses its
+# body to the forbidden-path scan.
+sed 's/\r$//' "$plan" > "$fm_tmp"
+awk -v bs="$body_start" 'NR <= bs' "$fm_tmp" > "$body_tmp"
+awk -v bs="$body_start" 'NR >  bs' "$fm_tmp" > "$body_tmp"
 while IFS=: read -r lineno text; do
   [ -n "$text" ] || continue
   case "$text" in
@@ -96,13 +147,15 @@ while IFS=: read -r lineno text; do
       ;;
   esac
 done < <(grep -n '\.executor/' "$body_tmp" || true)
-# docs/executor/<...> — same rule, body scan only (an evidence-file citation
-# in prose is fine; a Create/Modify target under the tracked store is not).
+# docs/executor/<...>: only a MUTATION target (Create/Modify/Test:) is a
+# violation. A read-only citation ("consult docs/executor/INDEX.md",
+# "do not modify") is legitimate — the contract governs where artifacts
+# are created, not what a plan may read.
 while IFS=: read -r lineno text; do
   [ -n "$text" ] || continue
   case "$text" in
-    *docs/executor/*)
-      fail "line $lineno names a literal docs/executor/ path — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
+    *[Cc]reate:*docs/executor/*|*[Mm]odify:*docs/executor/*|*[Tt]est:*docs/executor/*)
+      fail "line $lineno names a literal docs/executor/ path as a mutation target — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
       ;;
   esac
 done < <(grep -n 'docs/executor/' "$body_tmp" || true)

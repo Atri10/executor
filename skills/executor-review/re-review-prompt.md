@@ -98,48 +98,73 @@ Subagent (general-purpose):
     spawn duplicates one of them at full cost, and its verdict counts for
     nothing.
 
-    ## Scope — Hard Boundary
+    ## Scope — Two Jobs
 
-    Your scope is the findings list and the fix diff.
+    This round has two distinct jobs. Do BOTH, in this order:
 
-    - **Verdict every finding** in [OPEN_FINDING_IDS].
-    - **Inspect the fix diff** for problems the fix itself introduced.
-    - **Do NOT re-review code the fix did not touch.** An issue entirely
-      outside the fix diff goes under Out-of-Scope Observations: it does not
-      block this round and does not extend the loop. A whole-branch review
-      happens after all tasks are complete, and that is where wandering scope
-      belongs.
+    1. **Impact review of the fix** (first, before reading the findings
+       list in detail): what does the fix change behaviorally, and what
+       unchanged code does that behavior touch? Follow the causal
+       relationships the fix creates or modifies — callers of changed
+       functions, shared state, error paths, configuration, lifecycle.
+       A regression the fix introduced in unchanged code is IN SCOPE,
+       no matter which file it lives in.
+    2. **Finding closure**: verdict every finding in [OPEN_FINDING_IDS]
+       against the current implementation.
 
-    "Attempted" is not addressed. ADDRESSED means the specific defect the
-    prior finding named no longer exists, and you can point at the line that
-    proves it. A fix that moves the defect, comments it, or guards it in one
-    of two call paths is NOT ADDRESSED.
+    Impact review is bounded by causality, not by the diff: you follow
+    what the change actually affects, not the whole repository. If
+    reading the fix raises a concrete risk in a file it did not touch,
+    reading that file to resolve the risk is in scope; wandering
+    through unrelated modules is not. Unrelated pre-existing problems
+    you notice go under Out-of-Scope Observations and do not block this
+    round.
 
+    **Location does not set severity, and scope does not set severity.**
+    A defect introduced by this fix is graded by its consequence, same
+    as one inside the diff.
     **Root cause, or it is not addressed.** The fix report must carry a
     root-cause line per finding — why the code behaved this way, and where
-    the wrong behavior originated. Verdict that line too:
-    - Root cause named and the fix alters that condition → ADDRESSED.
-    - Root cause misidentified (the fix addresses a different cause) →
-      NOT ADDRESSED, even if the reported symptom is gone.
-    - No root-cause line at all → NOT ADDRESSED; the fix is unverifiable.
+    the wrong behavior originated.
 
-    **Test-weakening is a NOT ADDRESSED, always.** A fix that changes a
-    test's expectations so the test passes — loosening an assertion,
-    removing a case, widening a boundary, deleting a negative test — is the
-    implementer making the failure disappear instead of fixing the code.
-    Every hunk in the fix diff that touches a test file must be verdict:
-    it either (a) adds/strengthens an assertion consistent with the
-    finding, or (b) is test-weakening. (b) is NOT ADDRESSED and is itself
-    a Critical finding.
+    **Test changes are graded by what they protect, not by their
+    direction.** Every hunk in the fix diff that touches a test file
+    gets a verdict:
+    - Adds or strengthens an assertion consistent with the finding →
+      fine.
+    - Deletes or rewrites a test whose contract the task deliberately
+      changed, with the change documented and the replacement coverage
+      named → legitimate migration, not weakening.
+    - Loosens an assertion, removes a case, or deletes coverage so the
+      failing code passes, with no contract change or replacement →
+      test-weakening. NOT ADDRESSED, and itself a Critical finding.
+
+    If you cannot tell which case applies, ask the implementer for the
+    contract change instead of assuming the worst.
+
+    ## Evidence Demands Are Bounded
+
+    Request a test or a re-run only when you can name: the plausible
+    failure it would catch, why existing evidence does not already cover
+    it, and a feasible way to exercise it in this environment. If no
+    feasible method exists (missing hardware, unavailable service, a
+    surface with no test harness), say so — the correct output is a
+    recorded uncertainty or a NOT-RUN criterion, not an infeasible
+    demand that loops the fix round.
+
+    Warnings in reported output: distinguish NEW warnings caused by this
+    change from pre-existing baseline noise. Only new actionable
+    warnings are findings.
 
     ## Tests
 
     The implementer re-ran the tests covering the amended code and appended
     the results. Do not re-run the suite to confirm their report. Run a test
     only when reading the code raises a specific doubt no existing run
-    answers — and then a focused test, never a package-wide suite. Warnings or
-    other noise in the reported output are findings; test output should be
-    pristine.
+    answers — and then a focused test, never a package-wide suite.
+    Warnings or other noise in reported output are handled under
+    Evidence Demands Are Bounded: new actionable warnings are findings,
+    baseline noise is not.
 
     Evidence you cannot see is not evidence that does not exist. If the fix
     report looks truncated, re-read it at its stated path before calling it
