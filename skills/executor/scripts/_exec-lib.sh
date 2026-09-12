@@ -216,3 +216,124 @@ exec_section_body() {
     insec { print }
   ' "$doc"
 }
+
+# Semantic run audit shared by exec-run check/complete and exec-branch
+# audit. This is the canonical gate (/017): it parses verdict
+# CONTENT (spec_verdict must be PASS and the verdict's head must match
+# the current reviewed head when known), reduces the ledger to the
+# latest state per unique task, and requires the exact plan task set.
+# Prints diagnostics to stderr; returns nonzero on any violation.
+exec_run_audit() {
+  local plan=$1 dir=$2 total=$3 reg=$4
+  local violations=0
+
+  # --- Ledger reduction: latest state per unique task ID ----------------
+  #duplicate completion lines never inflate the count, and a
+  # later in-fix/reopen event supersedes an earlier complete.
+  local task_states
+  task_states=$(awk -v pid="${plan_id}" '
+    $0 ~ ("^" pid "-T[0-9][0-9]: ") {
+      tid = $1; sub(/:$/, "", tid)
+      state = $0; sub(/^"?"?[^:]*: */, "", state)
+      # Keep only the last event per task (input order).
+      last[tid] = state
+      seen[tid] = 1
+    }
+    END { for (t in last) print t "\t" last[t] }
+  ' "$dir/progress.md" 2>/dev/null || true)
+
+  # --- Expected task set from the plan ----------------------------------
+  local expected
+  expected=$(awk '/^### Task [0-9]+/ {
+    if (match($0, /INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}/)) {
+      print substr($0, RSTART, RLENGTH)
+    }
+  }' "$plan" 2>/dev/null | sort -u)
+
+  # Unknown ledger task IDs (not in the plan) are a violation.
+  while IFS=$'\t' read -r tid state; do
+    [ -n "$tid" ] || continue
+    if ! printf '%s\n' "$expected" | grep -qxF "$tid"; then
+      echo "AUDIT: $tid appears in the ledger but no task heading in $plan declares it" >&2
+      violations=$((violations + 1))
+    fi
+  done <<< "$task_states"
+
+  # Every expected task must be complete (latest state wins).
+  local completed=0
+  while IFS= read -r tid; do
+    [ -n "$tid" ] || continue
+    state=$(printf '%s\n' "$task_states" | awk -F'\t' -v t="$tid" '$1 == t { print $2 }')
+    if [ "$state" != "complete" ]; then
+      echo "AUDIT: $tid is not complete (latest ledger state: ${state:-absent})" >&2
+      violations=$((violations + 1))
+    else
+      completed=$((completed + 1))
+      # Verdict audit: file must exist AND its content must pass.
+      local vfile
+      vfile=$(ls "$dir/reviews/verdicts/${tid}-R"*-verdict.md 2>/dev/null | sort | tail -1)
+      if [ -z "$vfile" ]; then
+        echo "AUDIT: $tid is complete but no verdict file exists in reviews/verdicts/ — the task is unjudged" >&2
+        violations=$((violations + 1))
+      else
+        local sv
+        sv=$(awk '/^spec_verdict:/{print $2; exit}' "$vfile")
+        if [ "$sv" != "PASS" ]; then
+          echo "AUDIT: $tid verdict ($(basename "$vfile")) says spec_verdict: ${sv:-missing} — a FAIL/missing verdict is not a pass" >&2
+          violations=$((violations + 1))
+        fi
+      fi
+    fi
+  done <<< "$expected"
+
+  # Final verdict: file must exist AND content must pass.
+  local final="$dir/reviews/verdicts/${plan_id}-final-verdict.md"
+  if [ -f "$final" ]; then
+    fsv=$(awk '/^spec_verdict:/{print $2; exit}' "$final")
+    if [ "$fsv" != "PASS" ]; then
+      echo "AUDIT: final verdict says spec_verdict: ${fsv:-missing} — a FAIL/missing verdict is not a pass" >&2
+      violations=$((violations + 1))
+    fi
+  else
+    echo "AUDIT: no final verdict ($final) — whole-branch review has not run" >&2
+    violations=$((violations + 1))
+  fi
+
+  # Latest final-R verdict supersedes the base final verdict:
+  # if a final fix-wave re-review failed, the run is not clean.
+  local latest_final_r
+  latest_final_r=$(ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md 2>/dev/null | sort | tail -1)
+  if [ -n "$latest_final_r" ]; then
+    rfsv=$(awk '/^spec_verdict:/{print $2; exit}' "$latest_final_r")
+    if [ "$rfsv" != "PASS" ]; then
+      echo "AUDIT: latest final re-review ($(basename "$latest_final_r")) says spec_verdict: ${rfsv:-missing} — it supersedes the earlier clean verdict" >&2
+      violations=$((violations + 1))
+    fi
+  fi
+
+  return $((violations > 0))
+}
+
+# Generic store lock: one writer at a time for any shared
+# store mutation. mkdir is atomic on POSIX; a failed mkdir means the
+# lock is held, and the bounded wait assumes a crashed holder after
+# ~10s (same policy as exec-initiative's registry lock).
+store_lock() {
+  local dir=$1
+  local lock="$dir/.store.lock" waited=0
+  mkdir -p "$dir"
+  while ! mkdir "$lock" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 100 ]; then
+      [ -n "$lock" ] && rm -rf "$lock"
+      continue
+    fi
+    sleep 0.1
+  done
+}
+
+store_unlock() { rmdir "$1/.store.lock" 2>/dev/null || true; }
+
+# Unique temp name for atomic writes under a lock: shared
+# fixed-name temp files are how concurrent writers lost rows.
+store_tmp() { mktemp "${1%/}/.store-tmp.XXXXXX"; }
