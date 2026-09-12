@@ -1,4 +1,0 @@
-branch: fix/issue9-context-and-gates
-commit: fb25590e66d316d1fcd84345c46fd889cd159a69
-recorded_at: 2026-09-12T08:21:44Z
-dirty: 3 changed paths
