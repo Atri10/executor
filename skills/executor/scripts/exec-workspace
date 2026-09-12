@@ -53,6 +53,19 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 <!-- Append-only, one line per state change, newest last. Example:
      INIT-0004-P01-T03: dispatched (model cheap, agent impl-t03-a, base a1b2c3d) -->
 EOF
+else
+  #reuse is only safe when the ledger describes THIS plan.
+  # Rename support is deliberate (ID-addressed), but a different plan
+  # file or a different spec must not silently inherit the old run's
+  # ledger and verdicts.
+  ledger_plan=$(awk '/^plan:/{print $2; exit}' "$dir/progress.md")
+  ledger_spec=$(awk '/^spec:/{print $2; exit}' "$dir/progress.md")
+  if [ -n "$ledger_plan" ] && [ "$ledger_plan" != "$plan_id" ]; then
+    exec_die "workspace $dir holds a ledger for $ledger_plan but $plan names $plan_id — refuse to mix runs; resolve the stale workspace explicitly"
+  fi
+  if [ -n "$ledger_spec" ] && [ "$ledger_spec" != "$spec_id" ] && [ "$ledger_spec" != "(none)" ]; then
+    exec_die "workspace $dir was seeded against spec $ledger_spec but this plan names $spec_id — the contract changed; start a new workspace or record the revision deliberately"
+  fi
 fi
 
 [ -f "$dir/rulings.md" ] || cat > "$dir/rulings.md" <<EOF

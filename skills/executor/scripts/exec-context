@@ -129,8 +129,8 @@ if [ -n "$rulings_file" ]; then
   # Rulings for this task, or rulings mentioning any file this task
   # touches. Whole ruling records are included — heading through the
   # next heading — so the Why and Cost lines never detach from the
-  # decision (EX9-005). No extension whitelist: any backticked path in
-  # the Files block counts, including docs and configs (EX9-005).
+  # decision. No extension whitelist: any backticked path in
+  # the Files block counts, including docs and configs.
   files=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep -oE '`[^`]+`' | sed 's/`//g' | sed 's/:.*$//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
   files_tmp=$(mktemp)
   printf '%s\n' "$files" > "$files_tmp"

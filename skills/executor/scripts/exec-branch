@@ -40,6 +40,13 @@ current=$(git branch --show-current)
 
 case "$action" in
   start)
+    #never switch branches with uncommitted work in play — the
+    # edits ride the checkout into the new branch and get committed to
+    # the wrong history. The merge path already guards; start guards
+    # too, before any checkout.
+    if [ -n "$(git status --porcelain)" ]; then
+      exec_die "working tree has uncommitted changes — commit, stash, or clean them before starting a plan branch (unrelated work must not ride the checkout)"
+    fi
     # The initiative branch must exist first: exec-initiative branch INIT-NNNN.
     if ! git show-ref --verify --quiet "refs/heads/$init_branch"; then
       exec_die "no initiative branch $init_branch — run: exec-initiative branch $init"
@@ -92,25 +99,20 @@ case "$action" in
     fi
     ;;
   audit)
-    # Thin wrapper so `merge` and humans invoke the same gate.
+    #one canonical semantic audit shared with exec-run. The
+    # previous existence-only copy accepted FAIL verdicts and stale
+    # content; the shared gate parses verdict content and the exact
+    # task set.
     ws=$(exec_workspace_dir "$plan")
     reg="$(exec_run_store)/INDEX.md"
     [ -f "$reg" ] || exec_die "no run registry — run exec-workspace first"
-    done_count=$(grep -cE "^${plan_id}-T[0-9]{2}: complete" "$ws/progress.md" 2>/dev/null || true)
-    done_count=${done_count:-0}
-    [ "$done_count" -gt 0 ] || exec_die "no completed tasks in the ledger — nothing to merge"
-    missing=0
-    while IFS= read -r task_id; do
-      [ -n "$task_id" ] || continue
-      ls "$ws/reviews/verdicts/${task_id}-R"*-verdict.md >/dev/null 2>&1 || {
-        echo "AUDIT: $task_id complete but unjudged (no verdict file)" >&2
-        missing=$((missing + 1))
-      }
-    done < <(grep -E "^${plan_id}-T[0-9]{2}: complete" "$ws/progress.md" | sed -E "s/^(${plan_id}-T[0-9]{2}):.*/\1/" | sort -u)
-    [ "$missing" -eq 0 ] || exec_die "$missing completed task(s) without a verdict file"
-    [ -f "$ws/reviews/verdicts/${plan_id}-final-verdict.md" ] \
-      || exec_die "no final verdict ($ws/reviews/verdicts/${plan_id}-final-verdict.md) — whole-branch review has not run"
-    echo "$plan_id: audit passed"
+    total=$(grep -c '^### Task ' "$plan" 2>/dev/null || true)
+    total=${total:-0}
+    if exec_run_audit "$plan" "$ws" "$total" "$reg"; then
+      echo "$plan_id: audit passed"
+    else
+      exec_die "audit failed — see AUDIT lines above"
+    fi
     ;;
   abandon)
     git show-ref --verify --quiet "refs/heads/$plan_branch" || exec_die "no plan branch to abandon: $plan_branch"

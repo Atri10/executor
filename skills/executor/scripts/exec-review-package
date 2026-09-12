@@ -44,7 +44,7 @@ else
 fi
 
 out="$dir/reviews/diffs/${label}-${b7}..${h7}.diff"
-# EX9-007: the package is revision-bound. Record the exact SHAs judged and
+#the package is revision-bound. Record the exact SHAs judged and
 # the plan/spec content hashes so the same identity cannot silently carry
 # different bytes after an uncommitted spec edit.
 spec_id=$(exec_frontmatter "$plan" spec)
@@ -132,7 +132,7 @@ $(printf '%s\n' "$seam" | sed 's/^/    /')
     fi
   fi
   req_ids=$(printf '%s\n' "$task_body" | grep -oE 'INIT-[0-9]{4}-SPEC-[0-9]{2}-R[0-9]{2}' | sort -u)
-  # EX9-009: requirement IDs without a resolvable spec is a construction
+  #requirement IDs without a resolvable spec is a construction
   # error, not an empty section. Fail before writing any package file so
   # a reviewer never receives "authoritative" context with requirements
   # silently missing.
@@ -148,7 +148,7 @@ the diff against the spec's own words, not the brief's restatement.
 "
     while IFS= read -r rid; do
       rnum=$(printf '%s' "$rid" | grep -oE 'R[0-9]{2}$')
-      # EX9-004: the full requirement node, never a fixed line window.
+      #the full requirement node, never a fixed line window.
       rtext=$(exec_requirement_body "$spec_file" "$rnum" | sed '/^$/d')
       if [ -n "$rtext" ]; then
         requirement_text="${requirement_text}\`${rid}\` — ${rtext}\n"
