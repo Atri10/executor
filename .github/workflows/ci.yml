@@ -56,21 +56,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   script-smoke:
-    name: Script smoke (usage, errors, lifecycle fixture)
+    name: Script smoke (syntax, gates, lifecycle fixture)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Every script parses and prints usage on no args
+      - name: Every script parses
         run: |
           set -e
           for f in skills/executor/scripts/exec-*; do
             bash -n "$f"
           done
-      - name: Plan lint catches the known violation
+      - name: Plan lint rejects a forbidden store path (and only that)
         run: |
           set -e
+          # The control is a valid plan: proves the negative case fails
+          # for the targeted contract, not for missing frontmatter.
           mkdir -p /tmp/fx/plans
-          printf -- '---\nid: INIT-0001-P01\nspec: S\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\nCreate: docs/executor/x/y/\n' > /tmp/fx/plans/p.md
+          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > /tmp/fx/plans/valid.md
+          bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/valid.md
+          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Create: docs/executor/x/y/\n' > /tmp/fx/plans/p.md
           if bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/p.md; then
             echo "lint accepted a forbidden literal store path"; exit 1
           fi
@@ -82,7 +86,7 @@ jobs:
           git config user.email ci@example.com
           git config user.name ci
           mkdir -p docs/executor/INIT-0001-x/plans
-          printf -- '---\nid: INIT-0001-P01\nspec: S\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
+          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
           printf '# X\n' > docs/executor/INIT-0001-x/INDEX.md
           git add -A && git commit -qm init
           bash "$OLDPWD/skills/executor/scripts/exec-workspace" docs/executor/INIT-0001-x/plans/INIT-0001-P01.md > /dev/null
@@ -93,3 +97,26 @@ jobs:
           if bash "$S/exec-run" "$P" check; then
             echo "check passed with an unjudged completed task"; exit 1
           fi
+      - name: exec-run check accepts a clean inline run (empty dispatch table)
+        run: |
+          set -e
+          cd "$(mktemp -d)"
+          git init -q -b main
+          git config user.email ci@example.com
+          git config user.name ci
+          mkdir -p docs/executor/INIT-0001-x/plans
+          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
+          printf '# X\n' > docs/executor/INIT-0001-x/INDEX.md
+          git add -A && git commit -qm init
+          bash "$OLDPWD/skills/executor/scripts/exec-workspace" docs/executor/INIT-0001-x/plans/INIT-0001-P01.md > /dev/null
+          S="$OLDPWD/skills/executor/scripts"
+          P=docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
+          W=.executor/INIT-0001/P01
+          bash "$S/exec-run" "$P" start > /dev/null
+          printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
+          printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+          printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+          # Empty dispatch table: valid for inline runs, must not fail check.
+          printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
+          printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
+          bash "$S/exec-run" "$P" check
