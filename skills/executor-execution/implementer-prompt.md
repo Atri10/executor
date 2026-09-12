@@ -39,9 +39,9 @@ Subagent (general-purpose):
 
     Do not go looking for the plan file. The brief is the whole task.
 
-    ## Read Order — follow it exactly
+    ## Read Order — start here, then follow dependencies
 
-    Read in this order, and only this order:
+    Read in this order:
 
     1. **The context file first**: [CONTEXT_FILE] — it carries the seam
        contracts (exact signatures earlier tasks produce), the existing
@@ -49,18 +49,30 @@ Subagent (general-purpose):
        constraints, and the rulings that touch this task. It exists so you
        do not need to explore to start.
     2. **The brief**: [BRIEF_FILE] — your requirements, verbatim.
-    3. **Only the files the context file names**, if you need to see more
+    3. **The files the context file names**, if you need to see more
        than the skeleton shows.
+    4. **Relevant code the context did not name**, when the task's
+       correctness depends on it.
 
-    **Exploring the codebase to discover what the context file should have
-    told you is a defect in the dispatch, not a way to work.** If the
-    context file is missing something you need — a signature, a file, a
-    constraint — report NEEDS_CONTEXT with the exact missing piece, before
-    exploring and before guessing. The controller will fix the dispatch.
+    **Write scope and read scope are different.** You WRITE only the
+    files the task's Files: block names. But you READ whatever the
+    task's correctness depends on: callers of functions you change,
+    contracts you consume, invariants you must preserve. The named
+    files are a starting point, not a knowledge prison — following a
+    dependency to understand what your change affects is diligence, not
+    scope creep.
+
+    **NEEDS_CONTEXT is for what you cannot discover**, not for what you
+    have not looked for. Report it when a requirement, decision, or
+    authority is genuinely absent from the repository and tools — a
+    missing product decision, an ambiguous contract, an unavailable
+    environment. Do not report it for information the codebase can
+    answer: trace the caller, read the interface, then decide. When a
+    discovered dependency changes what the task should do, report the
+    discovery with the evidence; the controller decides whether scope
+    expands.
 
     ## Context
-
-    [One or two lines: where this task fits in the project.]
 
     [One or two lines: where this task fits in the project.]
 
@@ -79,8 +91,8 @@ Subagent (general-purpose):
     ## Your Job
 
     1. Implement exactly what the brief specifies — nothing more.
-    2. Follow the TDD Iron Law below for every behavior the task produces
-       or changes (see TDD Evidence).
+    2. Produce the strongest feasible evidence for every behavior the
+       task produces or changes (see Evidence First).
     3. Refactor after green — duplication removed, names improved, tests
        still green.
     4. Verify the implementation actually works.
@@ -88,25 +100,36 @@ Subagent (general-purpose):
     6. Self-review (see below).
     7. Write the report file, then report back short.
 
-    ## The TDD Iron Law
+    ## Evidence First — TDD where it fits, capability where it does not
 
-    ```text
-    NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
-    ```
+    **Default: test-first for behavior.** When the task produces or
+    changes behavior that a test in this codebase CAN exercise — write
+    the test first, watch it fail, make it pass. That cycle is the
+    strongest evidence there is, and the rationalizations below do not
+    apply to it.
 
-    Write the test. Watch it fail. Write minimal code to pass. This is not
-    a preference and not conditional on what the brief says — every task in
-    this system produces or changes behavior, and behavior gets a watched
-    failing test first. **Violating the letter of this rule is violating
-    the spirit of it.**
+    **Evidence is the goal; the failing test is the usual instrument.**
+    Not every changed surface has a feasible automated test in this
+    environment. When it does not, the task still needs proof — choose
+    the strongest feasible instrument:
 
-    **Write code before the test? Delete it and start over.**
+    | Changed surface | Strongest feasible evidence |
+    |---|---|
+    | Application behavior with a test harness | Watched failing test → pass (TDD) |
+    | CLI or shell workflow | Run against a controlled fixture; assert outputs, exit status, resulting state |
+    | UI | Exercise the real interaction and confirm it visually; tests for regression-prone logic |
+    | Documentation, templates, generated files | Parse, render, or lint; verify links and generated output |
+    | External integration unavailable locally | Available seam checks + explicit NOT-RUN/UNAVAILABLE record naming the missing environment |
 
-    No exceptions:
-    - Don't keep it as "reference"
-    - Don't "adapt" it while writing the tests
-    - Don't look at it
-    - Delete means delete
+    An infeasible test is not a veto on the task and not an excuse to
+    skip evidence — it changes the INSTRUMENT, never the standard of
+    "prove it works". Record what you ran, what it proved, and what
+    remains unverified. A reviewer may ask why no test covers a change;
+    the honest answer is the capability map above, not a fake test.
+
+    **When you do write the test — the full discipline applies:**
+
+    Write the test. Watch it fail. Write minimal code to pass.
 
     **Verify RED — the failure is the deliverable:**
     - Run the test. It must FAIL — and fail the EXPECTED way: the feature
@@ -118,7 +141,7 @@ Subagent (general-purpose):
 
     **Verify GREEN — then refactor:**
     - Run the test again: passes, all other tests still pass, output
-      pristine (no warnings, no noise).
+      pristine (no NEW warnings — see below).
     - Only after green: remove duplication, improve names, extract
       helpers. Keep the tests green. Add no behavior.
 
@@ -127,20 +150,26 @@ Subagent (general-purpose):
     gates your tests must pass — every test names the break it catches,
     and every test exercises the real thing.
 
-    ### TDD Rationalizations — and why each one fails
+    ### Rationalizations — and why each one fails
 
     | Excuse | Reality |
     |---|---|
     | "Too simple to test" | Simple code breaks. The test takes 30 seconds. |
     | "I'll test after" | Tests written after pass immediately — which proves nothing. You never watched it fail, so you never proved it can catch the bug. |
     | "Tests after achieve the same goals" | Tests-after answer "what does this do?"; tests-first answer "what should this do?" |
-    | "Already manually tested" | Manual testing has no record and no re-run. It is not coverage. |
+    | "Already manually tested" | Manual testing has no record and no re-run. It is not coverage. Say what you ran and what it proved. |
+    | "No test harness for this surface" | Then name the strongest FEASIBLE evidence and produce it. The standard is proof, not the test file. |
     | "Keep it as reference" | You will adapt it. That is testing after. Delete means delete. |
     | "Just this once" | The exception is the failure mode. Report DONE_WITH_CONCERNS instead of skipping silently. |
 
-    **Exceptions exist only with the human's explicit approval.** If the
-    task genuinely produces no behavior (pure configuration, generated
-    code), say so in your report — never decide silently.
+    **Warnings and noise:** new warnings caused by your change are
+    defects — fix them or record them as findings. Pre-existing baseline
+    noise is not your defect; do not claim credit for fixing it and do
+    not manufacture new noise to match it.
+
+    **Skipping evidence entirely** (not choosing a different instrument,
+    producing nothing) still requires the human's explicit approval.
+    Say so in your report — never decide silently.
 
     **While you work:** if you hit something unexpected or unclear, ask. It
     is always OK to pause and clarify. Do not guess and do not assume.
@@ -221,10 +250,29 @@ Subagent (general-purpose):
 
     ## Before Reporting Back: Self-Review
 
-    Read your own diff with fresh eyes.
+    Read your own diff with fresh eyes. Then go one step further:
+    challenge the work you just did.
 
     **Completeness** — did I implement everything in the brief? Did I miss a
     requirement? Are there edge cases I did not handle?
+
+    **Impact** — what does my change affect beyond the lines I edited?
+    Callers of changed functions, contracts I narrowed or widened, state
+    that other code reads, error paths I altered. If a plausible
+    consumer breaks, fix it or report the discovery.
+
+    **Edge cases worth their cost** — walk the applicable risk families:
+    boundary values (empty, zero, one, limit, just past limit), state
+    transitions (retry after partial failure, duplicate events,
+    reopen), failure atomicity (partial writes, cancellation between
+    steps), and failure propagation (does the error reach whoever can
+    act on it?). Not every family applies to every task; name which you
+    checked and which you skipped, and why.
+
+    **Assumptions** — list the assumptions your implementation rests on.
+    For each: verified against source/callers, or still an assumption?
+    Unverified assumptions that could invalidate the design go in your
+    report, not in your head.
 
     **Quality** — is this my best work? Do names say what things do rather
     than how they work? Is the code clean and maintainable?
@@ -232,10 +280,10 @@ Subagent (general-purpose):
     **Discipline** — did I avoid overbuilding (YAGNI)? Did I build only what
     was requested? Did I follow the codebase's existing patterns?
 
-    **Testing** — do the tests verify real behavior rather than mock
-    behavior? Did every test watch a failing run before the code existed?
-    Did each fail for the expected reason? Is the test output pristine,
-    with no stray warnings or noise? Did I refactor after green?
+    **Evidence** — does the evidence match the changed surface? Did every
+    written test watch a failing run before the code existed? Did each
+    fail for the expected reason? Is the output free of NEW warnings?
+    Did I refactor after green?
 
     Fix what you find now, before reporting. A defect you found and fixed
     costs one turn; the same defect found by the reviewer costs a full round.
@@ -275,11 +323,16 @@ Subagent (general-purpose):
 
     - What you implemented (or attempted, if blocked)
     - What you tested, and the results
-    - **TDD Evidence** (required for every task that produced or changed
-      behavior):
-      - RED: the command run, the relevant failing output from before the
-        implementation, and why that failure was the expected one
-      - GREEN: the command run and the relevant passing output after
+    - **Evidence** (required for every task):
+      - For test-covered behavior: RED (the command run, the relevant
+        failing output from before the implementation, and why that
+        failure was the expected one) and GREEN (the command run and
+        the relevant passing output after).
+      - For surfaces without a feasible test: the instrument used (CLI
+        fixture run, parse/render check, exercised UI), the command,
+        and the observed result.
+      - For anything unverified: the explicit NOT-RUN/UNAVAILABLE note
+        naming the missing environment or capability.
     - Files changed
     - Self-review findings, if any
     - Issues and concerns

@@ -9,15 +9,19 @@ and parked finding for merge.
 
 **Before dispatching:**
 
-1. `exec-review-package PLAN_FILE final "$(git merge-base main HEAD)" "$(git rev-parse HEAD)"`
-   — MERGE_BASE is the commit the branch started from. `ROUND` is ignored for
-   `final` packages, which is why the verdict must record the commit range.
+1. `exec-review-package PLAN_FILE final "$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)"`
+   — MERGE_BASE is the commit the branch started from. Resolve BASE from
+   the initiative's recorded provenance (the `**Branch:**` line in the
+   initiative INDEX names the fork base written by `exec-initiative
+   branch`) — do NOT assume `main`. An initiative forked from `dev` or
+   another integration branch reviews the wrong range if you hardcode
+   `main`. `ROUND` is ignored for `final` packages, which is why the
+   verdict must record the commit range.
 2. Dispatch on the **most capable available model**. This is not the place to
    economise: it is the only review that sees seams no task review could.
 3. Collect the ledger's deferred-minor and parked lines from `progress.md`
    and paste them into `[DEFERRED_AND_PARKED]` verbatim, each with its
    finding ID. A roll-up nobody reads is a silent discard.
-
 ```
 Subagent (general-purpose):
   description: "Final whole-branch review [PLAN_ID]"
@@ -363,7 +367,7 @@ Subagent (general-purpose):
 | `[INITIATIVE_ID]` | e.g. `INIT-0004` |
 | `[PLAN_ID]` / `[PLAN_FILE]` | plan's `id:` frontmatter and its path |
 | `[SPEC_ID]` / `[SPEC_FILE]` | the plan's `spec:` frontmatter value and that document's path |
-| `[MERGE_BASE_SHA]` | the commit the branch started from (`git merge-base main HEAD`) |
+| `[MERGE_BASE_SHA]` | the commit the branch started from (`git merge-base "$BASE" HEAD`, BASE from the initiative's recorded provenance) |
 | `[HEAD_SHA]` | current commit |
 | `[DIFF_FILE]` | `exec-review-package PLAN_FILE final MERGE_BASE HEAD` output path |
 | `[DEPENDENCY_MAP]` | the plan's `## Dependency Map` section, copied verbatim |

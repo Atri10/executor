@@ -302,22 +302,49 @@ decision so it is not lost.
 
 ## Brainstorm Sessions
 
-Visual sessions live inside the **tracked** thinking store:
+Brainstorming is the recorded exploration of a design question — options,
+counterarguments, evidence — not a document format. A session exists when
+there was reasoning worth keeping, in whatever mode it happened.
+
+### When a session exists
+
+At discovery entry, decide explicitly whether the initiative needs
+ideation beyond what the charter states. If it does — the problem has
+genuinely open design questions, competing approaches, or unknowns the
+charter does not resolve — run a brainstorm session and record it:
 
 ```text
 docs/executor/INIT-0004-<slug>/brainstorm/sessions/<UTC-timestamp>-<topic>/
 ```
 
-This is deliberate: the Executor keeps visual evidence in the tracked
-thinking store instead of a disposable scratch directory. **The mockups and
-the options shown are part of the reasoning record.** A year later, "why is
-the wizard three steps" is answered by the three-step and five-step mockups
-the human chose between — that evidence is worth more than the sentence in
-the options document.
+A text session is a first-class session. It records: the question,
+goals and constraints, the options considered, counterarguments and
+evidence for each, the direction chosen (or open questions remaining),
+and links to the RSCH/OPTS/ADR/DSGN documents the reasoning produced.
+A session that produced no decision records that honestly — its value
+is the rejected options and why.
 
-Offer the companion **just-in-time**, never upfront, and only when a question
-is genuinely clearer shown than told. Read
+### When no session exists
+
+If ideation is not needed (the charter already pins the approach, or
+the work is a continuation with no open design questions), record the
+skip explicitly — a line in the RSCH/OPTS body or the initiative INDEX
+notes: brainstorming considered, not needed, because <reason>. A
+declined visual offer is also recorded, once, so the next session does
+not re-offer the same thing the human already turned down.
+
+An empty `brainstorm/sessions/` directory with no record either way is
+a gap: nobody can later tell whether ideation was skipped deliberately
+or never considered.
+
+### Visual mode is a capability, not the definition
+
+The visual companion renders mockups and screens INSIDE a session when
+a question is genuinely clearer shown than told. It is offered
+just-in-time, never upfront, and only with explicit consent. Read
 [visual-companion.md](visual-companion.md) before starting the server.
+Visual artifacts live in the tracked store (see below); the session
+record itself may be text-only.
 
 **Synthetic data only** in every mockup and screen — session state can capture
 whatever was on screen, and this directory is tracked from the moment it is
