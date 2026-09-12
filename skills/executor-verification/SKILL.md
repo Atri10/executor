@@ -20,13 +20,23 @@ citation rule, and the phase table. Scripts referenced below live in
 NO COMPLETION CLAIM WITHOUT FRESH EVIDENCE FROM THE CURRENT STATE
 ```
 
-If you have not run the check **in this session, against the code as it exists
-now**, you cannot say it passes. Not "should pass", not "passes now", not
-"verified earlier". Previous evidence is evidence about a previous commit.
+Evidence is bound to state, not to a session. The freshness rule:
 
-**Violating the letter of this rule is violating the spirit of it.** The rule
-covers exact phrases, paraphrases, synonyms, implications, and any wording that
-would leave a reader believing the work is done.
+- Evidence recorded against the current, unchanged state is **not
+  re-run**. Re-running a green check to feel better is wasted work,
+  not rigour — this holds across session boundaries and resumes.
+- **Any change to the code under test invalidates every piece of
+  evidence that exercised it.** After a fix lands, the affected
+  requirements return to `NOT-RUN` and a new outcomes round is
+  appended at the new commit. Unaffected evidence stays valid.
+- A new round never edits an old one. `round 02` records what changed
+  and why it was re-run.
+
+The Iron Law follows from the freshness rule: if you have not run the
+check against the code as it exists now — this session or an unchanged
+prior one — you cannot say it passes. Not "should pass", not "passes
+now", not "verified earlier". Previous evidence is evidence about a
+previous commit.
 
 ## The Gate Function
 
@@ -275,15 +285,10 @@ router.int.ts:88 expected 409, received 500
 
 ### Per-state evidence
 
-Evidence belongs to a commit, not to a session.
-
-- Evidence recorded against the current, unchanged state is **not re-run**.
-  Re-running a green check to feel better is wasted work, not rigour.
-- **Any change to the code under test invalidates every piece of evidence
-  that exercised it.** After a fix lands, the affected requirements return to
-  `NOT-RUN` and a new outcomes round is appended with the new commit.
-- A new round never edits an old one. `round 02` records what changed and why
-  it was re-run.
+The freshness rule above is the single source of truth for evidence
+validity. This section's operational rule: evidence lives in the
+tracked verification store per round, so any reader can see which
+commit each criterion was proven at.
 
 ### Evidence files
 
@@ -396,9 +401,21 @@ exec-initiative phase INIT-0004 verification entered "12 criteria, VRFY-01"
 exec-initiative phase INIT-0004 verification passed  "12/12 proven at a91e502"
 ```
 
-`passed` is written only after the gate actually passes. A run with unproven
-requirements stays `entered` and is reported — an `entered` phase with an
-honest note is recoverable; a false `passed` is a lie in a tracked index.
+`passed` is written only after the gate actually passes. The transition
+command validates this mechanically: a VRFY with a `FAILED` criterion
+that has no accepted-risk ruling, a missing outcome row, or evidence
+absent from the current state is refused — the phase stays `entered`
+and the refusal names the criterion. A run with unproven requirements
+stays `entered` and is reported — an `entered` phase with an honest
+note is recoverable; a false `passed` is a lie in a tracked index.
+
+**The loop closes on evidence, not on rounds.** After a fix lands,
+append a new outcomes round at the new commit and re-run every criterion
+the fix could have affected — not just the failed one. A fix that
+changes shared code invalidates the evidence that covered its
+consumers; the affected-evidence rule in this document's freshness
+section applies. Verification ends when every criterion is PROVEN at
+the current state, or the human explicitly accepts the residual set.
 
 **Verification is the phase that must not be skipped**, because skipping it
 means the initiative asserts nothing. If the human explicitly waives it (a

@@ -13,9 +13,18 @@ if [[ -z "$SESSION_DIR" ]]; then
   exit 1
 fi
 
-STATE_DIR="${SESSION_DIR}/state"
-PID_FILE="${STATE_DIR}/server.pid"
-SERVER_ID_FILE="${STATE_DIR}/server-instance-id"
+# The state directory is the RUNTIME root returned by start-server.sh
+# (state_dir in its JSON), which already contains server.pid directly —
+# it is not a session directory with a nested state/ segment. Accept
+# both layouts so an older habit keeps working, but resolve the one
+# that actually holds the pid file.
+if [[ -f "${SESSION_DIR}/server.pid" ]]; then
+  STATE_DIR="${SESSION_DIR}"
+elif [[ -f "${SESSION_DIR}/state/server.pid" ]]; then
+  STATE_DIR="${SESSION_DIR}/state"
+else
+  STATE_DIR="${SESSION_DIR}/state"
+fi
 
 mark_stopped() {
   local reason="$1"

@@ -153,24 +153,38 @@ Subagent (general-purpose):
     of broadening your search. The controller resolves those; it holds the
     cross-task context you do not.
 
-    ### TDD evidence check (mechanical — run it on every task)
+    ### Evidence check (run it on every task)
 
-    The implementer contract requires a watched failing test before any
-    production code. Verify it in the report:
+    The implementer contract requires the strongest feasible evidence
+    for every behavior change: test-first where a test harness exists,
+    and a named alternative instrument where it does not. Verify the
+    report:
 
-    1. **RED evidence present?** The report must contain the failing
-       output from BEFORE the implementation existed, with the command
-       that produced it, and a statement of why that failure was expected.
-    2. **GREEN evidence present?** The same command, passing, after.
-    3. **RED plausible?** The failure should be "feature missing /
-       behavior wrong", not a typo, import error, or setup problem —
-       those are errors, not a RED.
+    1. **Test-covered behavior:** RED evidence present (failing output
+       from BEFORE the implementation, with the command, and why that
+       failure was expected)? GREEN evidence present (same command,
+       passing, after)? RED plausible — "feature missing / behavior
+       wrong", not a typo or setup error?
+    2. **Non-test surfaces:** does the report name the instrument used
+       (CLI fixture run, parse/render check, exercised UI) with the
+       command and observed result?
+    3. **Unverified claims:** does the report carry an explicit
+       NOT-RUN/UNAVAILABLE note naming the missing environment where
+       something could not be exercised?
 
-    **GREEN-only evidence is a spec-compliance finding.** A report with
-    no RED section means the tests may have been written after the code,
-    which means nobody proved the tests can fail — record it as an
-    Important finding: "TDD evidence missing — no failing-test output
-    before implementation."
+    **Behavior change with NO evidence of any kind is a spec-compliance
+    finding.** A report with neither RED/GREEN nor a named instrument
+    means the change is unproven — record it as an Important finding:
+    "no evidence for behavior change — neither a watched failing test
+    nor a named alternative instrument."
+
+    **Demanding a test you cannot justify is a reviewer defect, not a
+    finding.** Before flagging "no test for X", name: the plausible
+    failure a test would catch, why the reported evidence does not
+    cover it, and the feasible method in THIS environment. If no
+    feasible method exists, the correct output is a recorded uncertainty
+    or a cannot-verify item — not an infeasible demand that loops the
+    fix round.
 
     **Test-quality grading (Part 2):** when the diff contains tests, grade
     them against the two principles in the test-quality doctrine
@@ -198,11 +212,16 @@ Subagent (general-purpose):
 
     ## Part 2: Code Quality
 
-    **Code quality:** clean separation of concerns? proper error handling?
-    DRY without premature abstraction? edge cases handled?
-
-    **Tests:** do the new and changed tests verify real behaviour rather than
-    mocks? are the task's edge cases covered?
+    **Artifact placement (mechanical):** does the diff create or write
+    files under `docs/executor/` outside the kinds the verification
+    contract requires — appending an Outcomes round to the VRFY
+    document and writing raw evidence files (`.txt`/`.log`) under the
+    initiative's `verification/evidence/` directory via exec-evidence?
+    Those two are intended tracked-store outputs. Hand-built
+    `.executor/` paths and run ledgers/dispatches written into the
+    tracked store remain violations: execution artifacts live only
+    under `.executor/`, resolved by the scripts. Cite the placement
+    contract as an **Important** finding.
 
     **Structure:** does each file have one clear responsibility with a
     well-defined interface? are units decomposed so they can be understood and

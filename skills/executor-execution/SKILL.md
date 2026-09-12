@@ -637,7 +637,8 @@ landed fix is stale — re-package and re-dispatch once; there is no second
 fix wave after it.
 
 ```bash
-../executor/scripts/exec-review-package "$PLAN" final "$(git merge-base main HEAD)" HEAD
+BASE=$(awk '/^\*\*Branch:/{print}' "$IDX" | grep -oE 'forked from `[a-zA-Z0-9/_-]+`' | grep -oE '`[a-zA-Z0-9/_-]+`' | tr -d '`' | head -1)
+../executor/scripts/exec-review-package "$PLAN" final "$(git merge-base "$BASE" HEAD)" HEAD
 # → .../reviews/diffs/INIT-0004-P01-final-229e5e7..a91e502.diff
 ```
 
@@ -843,7 +844,7 @@ Re-reviewer: Missing progress reporting — ADDRESSED (src/recovery.js:41).
 ... tasks 3-7 ...
 
 --- Final review ---
-$ ../executor/scripts/exec-review-package "$PLAN" final $(git merge-base main HEAD) HEAD
+$ ../executor/scripts/exec-review-package "$PLAN" final $(git merge-base "$BASE" HEAD) HEAD
 /repo/.executor/INIT-0004/P01/reviews/diffs/INIT-0004-P01-final-229e5e7..a91e502.diff
 
 [Dispatch whole-branch reviewer, most capable model, pointed at the ledger's
