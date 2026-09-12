@@ -138,12 +138,81 @@ exec_workspace_dir() {
 exec_task_id() {
   local plan=$1 n=$2
   awk -v n="$n" '
-    /^```/ { infence = !infence }
-    !infence && $0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)") {
+    {
+      line = $0
+      indent = 0
+      while (substr(line, indent + 1, 1) == " ") indent++
+      stripped = substr(line, indent + 1)
+      if (stripped ~ /^(`{3,}|~{3,})/) {
+        match(stripped, /^(`{3,}|~{3,})/)
+        len = RLENGTH
+        ch = substr(stripped, 1, 1)
+        if (!infence) { infence = 1; flen = len; fch = ch }
+        else if (ch == fch && len >= flen) { infence = 0 }
+      }
+    }
+    !infence && $0 ~ ("^### Task[ \t]+" n "([^0-9]|$)") {
       if (match($0, /INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}/)) {
         print substr($0, RSTART, RLENGTH)
       }
       exit
     }
   ' "$plan"
+}
+
+# Task body extraction shared by exec-brief, exec-context, and
+# exec-review-package. Fence tracking follows CommonMark rules the plan
+# format relies on: backtick and tilde fences, fence length (a shorter
+# run does not close a longer one), and indentation up to three spaces.
+# Everything else (indented code blocks) is out of scope for plans and
+# rejected by plan lint, not silently parsed here.
+exec_task_body() {
+  local plan=$1 n=$2
+  awk -v n="$n" '
+    {
+      line = $0
+      # Measure leading whitespace for fence detection (max 3 spaces).
+      indent = 0
+      while (substr(line, indent + 1, 1) == " ") indent++
+      stripped = substr(line, indent + 1)
+      if (stripped ~ /^(`{3,}|~{3,})/) {
+        match(stripped, /^(`{3,}|~{3,})/)
+        len = RLENGTH
+        ch = substr(stripped, 1, 1)
+        if (!infence) { infence = 1; flen = len; fch = ch }
+        else if (ch == fch && len >= flen) { infence = 0 }
+        # A closing fence of the same char and sufficient length closes.
+        # A longer opening fence requires an equal-or-longer closer.
+      }
+    }
+    !infence && $0 ~ ("^### Task[ \t]+" n "([^0-9]|$)") { intask = 1; next }
+    !infence && intask && /^### Task[ \t]+[0-9]+([^0-9]|$)/ { exit }
+    intask { print }
+  ' "$plan"
+}
+
+# Extract one numbered requirement's full text from a spec document.
+# Requirement heading form: '### R01 — <title>'. Body runs to the next
+# '### ' heading (any level-3 heading ends it, per the spec contract).
+exec_requirement_body() {
+  local spec=$1 rid=$2
+  awk -v rid="$rid" '
+    /^### / && index($0, "### " rid " ") == 1 { inreq = 1; next }
+    inreq && /^### / { exit }
+    inreq { print }
+  ' "$spec"
+}
+
+# Extract a full '## Section' body from a document, to the next '## '
+# heading. Used for Interfaces and Global Constraints so long sections
+# are never silently truncated.
+exec_section_body() {
+  local doc=$1 section=$2
+  awk -v sec="$section" '
+    /^## / {
+      if (insec) exit
+      if (index($0, "## " sec) == 1) { insec = 1; next }
+    }
+    insec { print }
+  ' "$doc"
 }

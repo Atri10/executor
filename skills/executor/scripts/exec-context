@@ -34,13 +34,7 @@ else
 fi
 
 # Task body (same extraction exec-brief uses).
-task_body=$(awk -v n="$n" '
-  /^```/ { infence = !infence }
-  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
-    intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
-  }
-  intask { print }
-' "$plan")
+task_body=$(exec_task_body "$plan" "$n")
 [ -n "$task_body" ] || exec_die "task $n not found in $plan (no heading matching 'Task $n')"
 
 # --- 1. Provided-by: what earlier tasks expose that this task consumes ----
@@ -49,11 +43,7 @@ task_body=$(awk -v n="$n" '
 provided_by=""
 consumes=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Interfaces:\*\*/,/^\*\*Requirements:\*\*/p' | grep '^\s*- Consumes:' || true)
 if [ -n "$consumes" ]; then
-  interfaces=$(awk '
-    /^## Interfaces$/ { insection = 1; next }
-    insection && /^## / { exit }
-    insection { print }
-  ' "$plan" | sed '/^$/d' | head -40)
+  interfaces=$(exec_section_body "$plan" "Interfaces")
   provided_by="## Provided by earlier tasks (verbatim from the plan's Interfaces)
 
 These are the exact signatures earlier tasks produce. Consume them as-is —
@@ -86,29 +76,31 @@ Read these skeletons before touching the files. They are the current state
 at HEAD — your changes must fit them, not replace their conventions.
 
 "
+  surface_lines=""
   while IFS= read -r path; do
     [ -z "$path" ] && continue
     if git cat-file -e "HEAD:$path" 2>/dev/null; then
-      skeleton=$(git show "HEAD:$path" 2>/dev/null | grep -E '^(def |class |export |const |function |type |interface |public |private |impl |fn |func |async )' | head -30 || true)
+      skeleton=$(git show "HEAD:$path" 2>/dev/null | grep -E '^(def |class |export |const |function |type |interface |public |private |impl |fn |func |async )' || true)
       if [ -n "$skeleton" ]; then
-        surface="${surface}\`$path\` — symbol skeleton:\n\`\`\`\n$(printf '%s\n' "$skeleton" | sed 's/^/    /')\n\`\`\`\n"
+        surface_lines+="\`$path\` — symbol skeleton:"$'\n'
+        surface_lines+="\`\`\`"$'\n'
+        while IFS= read -r sym; do surface_lines+="    $sym"$'\n'; done <<< "$skeleton"
+        surface_lines+="\`\`\`"$'\n'
       else
-        surface="${surface}\`$path\` — exists at HEAD (no extractable top-level symbols).\n"
+        surface_lines+="\`$path\` — exists at HEAD (no extractable top-level symbols)."$'\n'
       fi
     else
-      surface="${surface}\`$path\` — does not exist yet (this task creates it).\n"
+      surface_lines+="\`$path\` — does not exist yet (this task creates it)."$'\n'
     fi
   done <<< "$modify_paths"
-  surface="${surface}\n"
+  if [ -n "$surface_lines" ]; then
+    surface="${surface}${surface_lines}"
+  fi
 fi
 
 # --- 3. Global constraints: the binding block, one source -----------------
 constraints=""
-gc=$(awk '
-    /^## Global Constraints$/ { insection = 1; next }
-    insection && /^## / { exit }
-    insection { print }
-  ' "$plan" | sed '/^$/d' | head -30)
+gc=$(exec_section_body "$plan" "Global Constraints")
 if [ -n "$gc" ]; then
   constraints="## Global constraints that bind this task (from the plan)
 
@@ -134,21 +126,36 @@ if [ -n "$plan_id" ]; then
   [ -f "$ws/rulings.md" ] && rulings_file="$ws/rulings.md"
 fi
 if [ -n "$rulings_file" ]; then
-  # Rulings for this task, or rulings mentioning any file this task touches.
-  files=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep -oE '`[^`]+`' | sed 's/`//g' | grep -E '\.(py|ts|js|go|rs|rb|java|sh|c|cpp|h|hpp)$' || true)
+  # Rulings for this task, or rulings mentioning any file this task
+  # touches. Whole ruling records are included — heading through the
+  # next heading — so the Why and Cost lines never detach from the
+  # decision (EX9-005). No extension whitelist: any backticked path in
+  # the Files block counts, including docs and configs (EX9-005).
+  files=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep -oE '`[^`]+`' | sed 's/`//g' | sed 's/:.*$//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
   files_tmp=$(mktemp)
   printf '%s\n' "$files" > "$files_tmp"
   matches=$(awk -v tid="$task_id" '
     BEGIN { while ((getline fl < "'"$files_tmp"'") > 0) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", fl); if (fl != "") files[n++] = fl } }
-    /^## / { cur = $0 }
-    {
-      whole = $0
-      if (index(cur, tid) > 0) { print; next }
-      for (i = 0; i < n; i++) {
-        if (index(whole, files[i]) > 0) { print; next }
+    /^## / {
+      # A ruling record spans from its heading to the next heading.
+      # Print whole records: matching the task ID or any touched file
+      # anywhere in the record keeps Decided, Why, and Cost together.
+      if (record != "" && record !~ "\n") { record = record "\n" }
+      if (record != "") { pending[++pn] = record }
+      record = $0 "\n"
+      next
+    }
+    { record = record $0 "\n" }
+    END {
+      if (record != "") { pending[++pn] = record }
+      for (i = 1; i <= pn; i++) {
+        if (index(pending[i], tid) > 0) { printf "%s", pending[i]; continue }
+        for (j = 0; j < n; j++) {
+          if (index(pending[i], files[j]) > 0) { printf "%s", pending[i]; break }
+        }
       }
     }
-  ' "$rulings_file" | head -40 || true)
+  ' "$rulings_file" || true)
   rm -f "$files_tmp"
   if [ -n "$matches" ]; then
     parked="## Rulings touching this task
@@ -190,7 +197,7 @@ init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
   echo "---"
   echo
   [ -n "$provided_by" ] && printf '%s\n' "$provided_by"
-  [ -n "$surface" ] && printf '%b\n' "$surface"
+  [ -n "$surface" ] && printf '%s\n' "$surface"
   [ -n "$constraints" ] && printf '%s\n' "$constraints"
   [ -n "$parked" ] && printf '%s\n' "$parked"
 } > "$out"

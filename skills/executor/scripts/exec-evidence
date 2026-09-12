@@ -40,6 +40,14 @@ exec_plan_segment_of "$plan_id" >/dev/null || exec_die "cannot derive plan segme
 case "$round" in
   ''|*[!0-9]*) exec_die "round must be numeric (like '01'), got: $round" ;;
 esac
+rseg=$(printf '%02d' "$((10#$round))")
+
+# Method must be one of the documented kinds (EX9-013): reject before any
+# filesystem mutation so an invalid invocation creates no artifact.
+case "$method" in
+  unit|integration|smoke|manual|static) ;;
+  *) exec_die "method must be unit|integration|smoke|manual|static, got: $method" ;;
+esac
 
 # The VRFY document id: the plan's spec's `verification:` field, resolved
 # through the SPEC document. Falls back to the spec id when the SPEC is
@@ -51,27 +59,26 @@ if [ -n "$spec_id" ]; then
   [ -n "$spec_file" ] && vrfy_id=$(exec_frontmatter "$spec_file" verification)
 fi
 [ -n "$vrfy_id" ] || vrfy_id="$spec_id"
-# Normalize the criterion to a V<nn> file segment: "#3" -> V03, "V03" -> V03.
+# Normalize the criterion to a canonical V<nn> segment: "#3", "V3", and
+# "V03" all resolve to V03 (EX9-013). Non-canonical aliases never produce
+# a second, divergent identity for the same criterion.
 num=${criterion#\#}
 num=${num#V}
 case "$num" in
   ''|*[!0-9]*) exec_die "criterion must be numeric (like '#3' or 'V03'), got: $criterion" ;;
 esac
-case "$criterion" in
-  \#*) vseg="V$(printf '%02d' "$((10#$num))")" ;;
-  V[0-9]*) vseg="$criterion" ;;
-  *) exec_die "criterion must look like '#3' or 'V03', got: $criterion" ;;
-esac
+vseg="V$(printf '%02d' "$((10#$num))")"
 
 idir=$(exec_initiative_dir "$init_id")
 [ -n "$idir" ] || exec_die "cannot resolve initiative dir for $plan_id — is the initiative registered in docs/executor/INDEX.md?"
 edir="$idir/verification/evidence/$(exec_plan_segment_of "$plan_id")"
 mkdir -p "$edir"
 
-# state.txt: the state under test, stamped once per plan directory, never
-# overwritten by a later criterion (first writer wins; the plan directory
-# is one state — the VRFY outcomes table names the round it cites).
-state="$edir/state.txt"
+# state.txt is per-round (EX9-011): evidence belongs to the state that
+# produced it, and a later round runs on a different state. The VRFY
+# outcomes table names the round it cites; each round's state file names
+# the commit that round actually exercised.
+state="$edir/state-R${rseg}.txt"
 if [ ! -f "$state" ]; then
   {
     echo "branch: $(git -C "$(exec_root)" branch --show-current 2>/dev/null || echo unknown)"
@@ -81,12 +88,27 @@ if [ ! -f "$state" ]; then
   } > "$state"
 fi
 
-out="$edir/${vrfy_id}-${vseg}-${method}.txt"
+# Output path embeds the round (EX9-010): a re-run of the same criterion
+# in a later round is a distinct, immutable artifact — never an overwrite
+# of the earlier round's proof.
+out="$edir/${vrfy_id}-${vseg}-R${rseg}-${method}.txt"
+# Same criterion/method/round re-captured (a re-run inside one round) is a
+# distinct attempt: attempt2, attempt3, ... Never overwrite an existing
+# proof — even within the same round (EX9-010).
+attempt=1
+while [ -e "$out" ]; do
+  attempt=$((attempt + 1))
+  out="$edir/${vrfy_id}-${vseg}-R${rseg}-${method}-attempt${attempt}.txt"
+done
+tmp=$(mktemp "$edir/.evidence-tmp.XXXXXX") || exec_die "cannot create temp file in $edir"
+cleanup_tmp() { rm -f "$tmp"; }
+trap cleanup_tmp EXIT
 {
   echo "criterion: $vrfy_id $vseg"
   echo "method: $method"
-  echo "round: $(printf '%02d' "$((10#$round))")"
+  echo "round: $rseg"
   echo "recorded_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "state: $(git -C "$(exec_root)" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "---"
   if [ $# -gt 0 ]; then
     for f in "$@"; do
@@ -96,6 +118,11 @@ out="$edir/${vrfy_id}-${vseg}-${method}.txt"
   else
     cat
   fi
-} > "$out"
+} > "$tmp"
+# Atomic publish (EX9-012): the destination appears only when the full
+# artifact is written. A failed capture (missing input, interrupted run)
+# never truncates or replaces an existing proof.
+mv "$tmp" "$out"
+trap - EXIT
 
 echo "$out"

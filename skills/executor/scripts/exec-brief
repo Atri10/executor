@@ -36,13 +36,7 @@ else
   out="$dir/briefs/${task_id}-brief.md"
 fi
 
-body=$(awk -v n="$n" '
-  /^```/ { infence = !infence }
-  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
-    intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
-  }
-  intask { print }
-' "$plan")
+body=$(exec_task_body "$plan" "$n")
 
 [ -n "$body" ] || exec_die "task $n not found in $plan (no heading matching 'Task $n')"
 
