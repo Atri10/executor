@@ -1,7 +1,0 @@
-criterion: INIT-0001-SPEC-01 V03
-method: smoke
-round: 02
-recorded_at: 2026-09-12T08:22:01Z
-state: fb25590e66d316d1fcd84345c46fd889cd159a69
----
-ROUND02
