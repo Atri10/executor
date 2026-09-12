@@ -122,13 +122,15 @@ more-capable model), re-reviewed scoped to the fix diff, and at the cap
 adjudicated by recorded ruling — never silently dropped. Re-reviews check
 the fix addressed the *root cause*, and whether any test was weakened.
 
-### TDD is mechanical, not aspirational
+### Evidence is capability-aware, not ceremony
 
-The implementer contract requires a watched failing test before any
-production code, with RED/GREEN evidence in the report. The reviewer runs
-a **mechanical TDD evidence check** on every task and a test-quality
-doctrine gates the tests themselves: no change detectors, no mirror
-assertions, no mock-only coverage.
+The implementer contract asks for the **strongest feasible evidence**
+for every behavior change: a watched failing test where a test harness
+exists, a named alternative instrument where it does not (CLI fixture
+run, parse/render check, exercised UI), and an explicit NOT-RUN/UNAVAILABLE
+record where nothing feasible exists. Reviewers verify evidence, and a
+reviewer who cannot name the failure a demanded test would catch does
+not get to demand it.
 
 ### Script-enforced state, everywhere
 
@@ -141,9 +143,9 @@ assertions, no mock-only coverage.
 | `exec-brief` / `exec-context` | Task brief and context files, generated, never hand-built |
 | `exec-review-package` | Review diffs with commit list + stat + `-U10` diff in one file, per round |
 | `exec-run` | Run lifecycle in the registry: `start`/`task`/`complete`/`pause`/`blocked`/`check` |
-| `exec-run check` | **Drift + verdict + ledger audit**: registry row vs ledger, a verdict file per completed task, completed tasks present in the Task status table, final verdict present — exit 1 names the failure |
+| `exec-run check` | **Drift + semantic audit**: registry row vs ledger, verdict CONTENT (a FAIL verdict blocks), exact task set with latest-state reduction, final verdict lineage (a failing final re-review supersedes an earlier clean one), completed tasks present in the Task status table — exit 1 names the failure |
 | `exec-branch` | Plan-branch lifecycle: fork from the initiative branch, `merge` **refused** unless the review audit passes |
-| `exec-evidence` | Per-criterion evidence files in the initiative's tracked `verification/evidence/PNN/`, with a per-plan state stamp (branch, commit, dirtiness) |
+| `exec-evidence` | Per-criterion evidence files in the initiative's tracked `verification/evidence/PNN/`, immutable per round (`-attempt2` on same-round reruns), atomic publish, per-round state stamp (branch, commit, dirtiness) |
 | `exec-store-check` | **Thinking-store integrity gate**: registry ↔ folders ↔ Documents table ↔ frontmatter statuses ↔ cross-links ↔ evidence citations ↔ phase-log chronology — the drift class that rotted the first live stores, caught by script |
 | `exec-ruling` | Record a decision taken on the human's behalf — to the rulings log *and* the local decisions store |
 | `exec-scan-secrets` | Credential-shaped content scan across both stores; reports file:line, never the value |
@@ -176,6 +178,11 @@ file, and a verdict file carrying YAML frontmatter. Findings are labelled
 (`INIT-0004-SPEC-01-R07`), and live in files a fixer reads directly — the
 controller transcribes nothing. The final whole-branch review walks every
 declared cross-task seam and triages every deferred or parked finding.
+
+**Re-reviews do two jobs:** impact review of the fix (following what it
+actually affects — including unchanged callers) before finding closure,
+so a regression the fix introduced in untouched code is still caught,
+and a fix-only lens never hides it.
 
 ### Every generated artifact carries frontmatter
 
