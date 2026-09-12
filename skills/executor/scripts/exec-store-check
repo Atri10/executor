@@ -52,16 +52,23 @@ fm_field() { exec_frontmatter "$1" "$2"; }
 
 fm_iso_ok() {
   case "$1" in
-    ????-??-??T??:??:??Z) return 0 ;;
+    ????-??-??T??:??:??Z)
+      # Shape alone accepts xxxx-xx-xxTxx:xx:xxZ. Verify the calendar
+      # fields are real: a failed parse must not fall back to "valid".
+      date -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s >/dev/null 2>&1 \
+        || date -u -d "$1" +%s >/dev/null 2>&1 \
+        || return 1
+      return 0 ;;
     *) return 1 ;;
   esac
 }
 
 # UTC seconds since epoch for an ISO-8601 Z timestamp (GNU/BSD date).
+# Callers only invoke this after fm_iso_ok, so a parse failure here is a
+# real error, not a silent 0.
 fm_epoch() {
   date -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
-    || date -u -d "$1" +%s 2>/dev/null \
-    || echo 0
+    || date -u -d "$1" +%s 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -76,13 +83,25 @@ fi
 
 declare -a REG_IDS=()
 if [ -n "$reg" ]; then
-  if ! grep -qE '^\| *ID *\|' "$reg"; then
-    fail "R1: registry has no | ID | Title | Status | Phase | Folder | Updated | table"
-  fi
+  # R1: the registry table must carry the full documented schema. A
+  # header missing any required column means rows cannot be parsed
+  # reliably — refuse rather than guess.
+  header=$(grep -E '^\| *ID *\|' "$reg" | head -1 || true)
+  for col in 'ID' 'Title' 'Status' 'Phase' 'Folder' 'Updated'; do
+    printf '%s' "$header" | grep -qF "| $col |" || fail "R1: registry table missing required column '$col'"
+  done
   while IFS='|' read -r _ id _ status _ folder _; do
     id=$(printf '%s' "$id" | xargs)
     [ -n "$id" ] || continue
     case "$id" in INIT-[0-9][0-9][0-9][0-9]) ;; *) continue ;; esac
+    # Duplicate initiative rows corrupt resolution (first-match wins
+    # downstream); refuse them here.
+    for rid in "${REG_IDS[@]:-}"; do
+      if [ "$rid" = "$id" ]; then
+        fail "R2: registry has duplicate rows for $id"
+        break
+      fi
+    done
     REG_IDS+=("$id")
     status=$(printf '%s' "$status" | xargs)
     case "$status" in
@@ -99,7 +118,6 @@ if [ -n "$reg" ]; then
   # every folder has a row
   while IFS= read -r d; do
     base=$(basename "$d")
-    init_id=${base%%-*}   # not enough: INIT-0004-slug -> INIT; handled below
     init_id=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}')
     found=0
     for rid in "${REG_IDS[@]:-}"; do
@@ -113,8 +131,6 @@ fi
 # Per-initiative pass
 # ---------------------------------------------------------------------------
 
-fm_status_of_id() { :; }  # placeholder, statuses read inline below
-
 for idir in "$store"/INIT-*/; do
   [ -d "$idir" ] || continue
   case "$(basename "$idir")" in
@@ -123,6 +139,9 @@ for idir in "$store"/INIT-*/; do
   esac
   init_id=$(basename "$idir"); init_id=${init_id%%-*}; init_id=$(printf '%s' "$(basename "$idir")" | grep -oE '^INIT-[0-9]{4}')
   idx="$idir/INDEX.md"
+  # Initiative-wide evidence citation accumulator for the orphan scan.
+  cited_tmp=$(mktemp)
+  : > "$cited_tmp"
 
   # ---- I1/I2/I3: documents table vs disk -----------------------------------
   if [ -f "$idx" ]; then
@@ -185,22 +204,19 @@ for idir in "$store"/INIT-*/; do
   while IFS= read -r f; do
     rel=${f#"$idir"}
     base=${rel#/}; seg=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}-(CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY)-[0-9]+|INIT-[0-9]{4}-P[0-9]{2}') || seg=""
-
-    # D1: frontmatter present at all
-    if ! head -1 "$f" | grep -q '^---$'; then
-      fail "D1: $rel has no YAML frontmatter — unreachable by any index or script"
-      continue
-    fi
-
     fid=$(fm_field "$f" id)
     fkind=$(fm_field "$f" kind)
     fstatus=$(fm_field "$f" status)
     fcreated=$(fm_field "$f" created_at)
     fupdated=$(fm_field "$f" updated_at)
+    ftitle=$(fm_field "$f" title)
 
     [ -n "$fid" ] || fail "D1: $rel frontmatter has no id:"
     [ -n "$fkind" ] || fail "D1: $rel frontmatter has no kind:"
     [ -n "$fstatus" ] || fail "D1: $rel frontmatter has no status:"
+    [ -n "$ftitle" ] || fail "D1: $rel frontmatter has no title:"
+    [ -n "$fcreated" ] || fail "D1: $rel frontmatter has no created_at:"
+    [ -n "$fupdated" ] || fail "D1: $rel frontmatter has no updated_at:"
     case "$fstatus" in
       draft|active|superseded|withdrawn|abandoned|"") ;;
       *) fail "D1: $rel status '$fstatus' not in draft|active|superseded|withdrawn|abandoned" ;;
@@ -229,42 +245,42 @@ for idir in "$store"/INIT-*/; do
         fail "D4: $rel updated_at ($fupdated) is before created_at ($fcreated)"
     fi
 
-    # D5: kind-specific required fields
+    # D5: kind-specific required fields — scoped to frontmatter only.
+    # A `key:` line in a body code fence is an example, not metadata.
     case "$fkind" in
       spec)
         for k in implements decisions verification plans; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (spec) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (spec) missing $k: field in frontmatter"
         done
         ;;
       adr)
         for k in decision alternatives_considered consequences_accepted reversibility informs; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (adr) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (adr) missing $k: field in frontmatter"
         done
         ;;
       interface)
         for k in provides consumers stability; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (interface) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (interface) missing $k: field in frontmatter"
         done
         ;;
       research|options)
         for k in question sources confidence; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel ($fkind) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel ($fkind) missing $k: field in frontmatter"
         done
-        [ "$fkind" = options ] && grep -qE '^recommends:' "$f" || true
         ;;
       risk)
         for k in method risks_identified mitigations_planned accepted_without_mitigation; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (risk) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (risk) missing $k: field in frontmatter"
         done
         ;;
       verification)
         for k in spec criteria_count evidence_types; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (verification) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (verification) missing $k: field in frontmatter"
         done
         ;;
       plan)
         for k in spec interfaces tasks execution_mode workspace; do
-          grep -qE "^${k}:" "$f" || fail "D5: $rel (plan) missing $k: field"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (plan) missing $k: field in frontmatter"
         done
         ;;
     esac
@@ -303,26 +319,32 @@ for idir in "$store"/INIT-*/; do
             fail "X2: $rel spec '$vspec' resolves to no document in $init_id" ;;
           *) fail "X2: $rel spec '$vspec' is a cross-initiative citation — forbidden outside charter fields" ;;
         esac
-        # X3: evidence citations resolve; orphans reported
+        # X3: evidence citations resolve. Cited names accumulate
+        # initiative-wide so the orphan scan below sees every VRFY's
+        # citations, not just this document's.
         evdir="$idir/verification/evidence"
-        cited=0
         while IFS= read -r ev; do
           [ -n "$ev" ] || continue
-          cited=$((cited + 1))
+          printf '%s\n' "$ev" >> "$cited_tmp"
           find "$idir/verification" -name "$ev" -print -quit | grep -q . || \
             fail "X3: $rel cites evidence file '$ev' which does not exist under verification/"
         done < <(grep -oE '[A-Za-z0-9._-]+\.(txt|log)' "$f" | sort -u)
-        if [ "$cited" -gt 0 ] && [ -d "$evdir" ]; then
-          while IFS= read -r ef; do
-            ebase=$(basename "$ef")
-            [ "$ebase" = "state.txt" ] || [ "$ebase" = "README.md" ] || [ "$ebase" = "index.md" ] && continue
-            grep -qF "$ebase" "$f" || note "orphan evidence: $ebase is on disk but cited by no VRFY document"
-          done < <(find "$evdir" -type f \( -name '*.txt' -o -name '*.log' \) | sort)
-        fi
       fi
     fi
   done < <(find "$idir" -maxdepth 3 -type f -name '*.md' \
             ! -name 'INDEX.md' ! -name 'README.md' ! -path '*/brainstorm/*' ! -path '*/evidence/*' | sort)
+
+  # Orphan scan: runs regardless of how many citations any single VRFY
+  # carries — evidence on disk that no VRFY cites is reported even when
+  # every VRFY cites nothing.
+  if [ -d "$idir/verification/evidence" ]; then
+    while IFS= read -r ef; do
+      ebase=$(basename "$ef")
+      case "$ebase" in state.txt|README.md|index.md) continue ;; esac
+      grep -qxF "$ebase" "$cited_tmp" || note "orphan evidence: $init_id/$ebase is on disk but cited by no VRFY document"
+    done < <(find "$idir/verification/evidence" -type f \( -name '*.txt' -o -name '*.log' \) | sort)
+  fi
+  rm -f "$cited_tmp"
 done
 
 if [ "$findings" -gt 0 ]; then
