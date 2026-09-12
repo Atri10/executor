@@ -337,3 +337,15 @@ store_unlock() { rmdir "$1/.store.lock" 2>/dev/null || true; }
 # Unique temp name for atomic writes under a lock: shared
 # fixed-name temp files are how concurrent writers lost rows.
 store_tmp() { mktemp "${1%/}/.store-tmp.XXXXXX"; }
+
+# True when a `key:` line appears inside the document's frontmatter block
+# (the first ---...--- region). Body code fences and prose never satisfy
+# required-field checks.
+exec_frontmatter_has() {
+  local file=$1 key=$2
+  awk -v key="$key" '
+    NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit 1 }
+    NR > 1 && /^---[[:space:]]*$/ { exit found ? 0 : 1 }
+    $0 ~ ("^" key ":") { found = 1 }
+  ' "$file"
+}

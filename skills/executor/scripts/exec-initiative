@@ -169,6 +169,12 @@ append_registry_row() {
 cmd_new() {
   local title=${1:-}
   [ -n "$title" ] || usage
+  # Titles flow into YAML frontmatter, headings, and pipe tables. A
+  # raw '|' or newline shifts table columns and breaks the registry;
+  # refuse these characters instead of corrupting the stores.
+  case "$title" in
+    *\|*|*$'\n'*) exec_die "title must not contain '|' or newlines — it is interpolated into YAML and pipe tables verbatim" ;;
+  esac
   local store idx id slug dir stamp
   store=$(exec_docs_store)
   slug=$(slugify "$title")
