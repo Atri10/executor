@@ -75,10 +75,14 @@ fi
 # implementer can start without exploring the whole codebase.
 surface=""
 # Declared path extraction: a leading backticked span IS the path (the
-# grammar quotes paths), and the only sanctioned colon is the trailing
-# :N / :N-M line-range — stripped last so a colon-bearing path is never
-# cut at its first colon the way 's/:.*$//' did.
-modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^\s*- Modify:' || true; } | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/^`([^`]*)`.*/\1/' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/:[0-9]+(-[0-9]+)?$//')
+# grammar quotes paths). Sanctioned decoration is stripped in grammar
+# order — take the backticked span, drop a trailing ' (annotation)' the
+# plan grammar allows after it (`path` (add DbContentStore)), then the
+# trailing :N / :N-M line-range — so a colon-bearing path is never cut
+# at its first colon the way 's/:.*$//' did. [[:space:]] classes, never
+# \s: BSD sed reads \s as a literal 's', which left a leading space that
+# defeated the ^` anchor and made the annotation part of the "path".
+modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^[[:space:]]*- Modify:' || true; } | sed -E 's/^[[:space:]]*- Modify:[[:space:]]*//' | sed -E 's/^`([^`]*)`.*/\1/' | sed 's/`//g' | sed -E 's/[[:space:]]*\(.*\)[[:space:]]*$//' | sed -E 's/:[0-9]+(-[0-9]+)?$//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 if [ -n "$modify_paths" ]; then
   surface="## Existing surface of the files you will modify
 

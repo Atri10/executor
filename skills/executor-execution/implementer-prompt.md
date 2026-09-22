@@ -31,11 +31,15 @@ Subagent (general-purpose):
 
     ## Your Requirements Live in the Brief
 
-    **Read the brief first: [BRIEF_FILE]** — it is your requirements, and
-    the exact values in it are verbatim. Numbers, magic strings, signatures,
-    error messages, and test cases are copied exactly as written, never
-    paraphrased, rounded, renamed, or "improved". If something in the brief
-    looks wrong, report it as a concern — do not silently correct it.
+    **Read the brief first: [BRIEF_FILE]** — it is your requirements.
+    Signatures, exact values, file lists, and test expectations are
+    verbatim contract: numbers, magic strings, and error messages are
+    copied exactly as written, never paraphrased, rounded, renamed, or
+    "improved". Implementation code in the brief is a reference sketch,
+    not authority — where a sketch and the contract disagree, the contract
+    wins; implement the contract and record the divergence in your report.
+    If the contract itself looks wrong, report it as a concern — do not
+    silently correct it.
 
     Do not go looking for the plan file. The brief is the whole task.
 
@@ -48,7 +52,8 @@ Subagent (general-purpose):
        surface of the files you will modify, the binding global
        constraints, and the rulings that touch this task. It exists so you
        do not need to explore to start.
-    2. **The brief**: [BRIEF_FILE] — your requirements, verbatim.
+    2. **The brief**: [BRIEF_FILE] — your requirements: contract verbatim,
+       implementation sketches advisory.
     3. **The files the context file names**, if you need to see more
        than the skeleton shows.
     4. **Relevant code the context did not name**, when the task's
@@ -362,6 +367,11 @@ Rounds 1-3 resume the original agent — send the open findings verbatim plus:
 ```text
 Review findings on [TASK_ID] (round [R] of 5).
 
+    This package includes [BRIEF_FILE] and [CONTEXT_FILE] — the
+    authoritative contract. Re-read it before fixing: the findings below
+    are the reviewer's paraphrase of that contract, and where they
+    disagree the contract wins.
+
     **Before fixing: name the root cause.** For each finding, answer in one
     line: why does the code behave this way, and where does the wrong
     behavior originate? A fix that addresses the symptom — guards one call
@@ -386,5 +396,6 @@ Review findings on [TASK_ID] (round [R] of 5).
 
 ```text
 A prior implementer attempted this task [N] times; you own it now. Read the
-report file for what was tried — [REPORT_FILE].
+report file for what was tried — [REPORT_FILE] — and the authoritative
+contract — [BRIEF_FILE] and [CONTEXT_FILE].
 ```

@@ -194,18 +194,30 @@ exec_task_body() {
 }
 
 # Extract one numbered requirement's full text from a spec document.
-# Requirement heading form: '### R01 — <title>'. Body runs to the next
-# level-2 or level-3 heading (a '## ' section after the requirements is
-# not part of the last requirement).
+# Requirement body for the grammars real specs use: heading forms
+# '### R01 — t', '### R01: t', bare '### R01', '### R01. t', and
+# paragraph-form 'R01. <text>' / 'R01: <text>' items (INIT-0004-SPEC-02
+# writes requirements as paragraphs, not headings). A heading-form body
+# runs to the next heading; a paragraph item runs to the next R<nn> item
+# or heading, and its 'R01.' marker is not part of the text. rid followed
+# by a non-alphanumeric or EOL only — R011 never matches R01.
 exec_requirement_body() {
   local spec=$1 rid=$2
   awk -v rid="$rid" '
-    /^#{2,3} / {
+    /^#+[ \t]+/ {
       if (inreq) exit
       h = $0; sub(/^#+[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
-      if (index(h, rid " ") == 1) inreq = 1
+      if (h ~ ("^" rid "([^0-9A-Za-z]|$)")) inreq = 1
       next
     }
+    !inreq && $0 ~ ("^" rid "[.:]([ \t]+|$)") {
+      inreq = 1
+      line = $0
+      sub(("^" rid "[.:][ \t]*"), "", line)
+      if (line != "") print line
+      next
+    }
+    inreq && /^R[0-9][0-9][.:][ \t]/ { exit }
     inreq { print }
   ' "$spec"
 }

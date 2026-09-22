@@ -6,20 +6,23 @@ description: Use when a spec has passed its phase gate and must become implement
 # Planning
 
 Turn `INIT-NNNN-SPEC-nn` into `INIT-NNNN-Pnn`: a document whose every task
-carries an ID, exact file paths, real code in every code step, exact
-signatures, and a dependency map. Planning ends when the human picks an
+carries an ID, exact file paths, exact signatures, verbatim test
+expectations, and a dependency map. Planning ends when the human picks an
 execution mode.
 
-**Write for an engineer with zero context for this codebase and questionable
-taste.** Assume a skilled developer who knows almost nothing about our
-toolset or problem domain, and who does not know good test design well.
-Document which files they touch, what code goes in them, what tests prove
-it, and how to run those tests. DRY. YAGNI. TDD. Frequent commits.
+**Write for an engineer with zero context for this codebase.** Assume a
+skilled developer who knows almost nothing about our toolset or problem
+domain. Document which files they touch, what each change must do, what
+tests prove it, and how to run those tests — the WHAT and the WHERE are
+yours to pin down. The HOW inside those files — local names, internal
+structure, error-handling style — is the implementer's own decision inside
+that contract. DRY. YAGNI. TDD. Frequent commits.
 
 That framing is not politeness. Under `executor-execution` each task is
 dispatched to a **fresh subagent that reads only its own brief** — the task's
 verbatim text plus an identity header. Anything you leave implicit is
-unavailable to the person implementing it.
+unavailable to the person implementing it — and any implementation you
+write out in full is a design decision they no longer make, bugs included.
 
 ## Before You Write Anything
 
@@ -374,6 +377,9 @@ Expected: FAIL — `NameError: name 'score' is not defined`
 
 - [ ] **Step 3: Write the minimal implementation**
 
+Sketch — the `Produces` signature, the `ValueError` contract, and purity are
+what bind; the body is one workable shape, not authority:
+
 ```python
 def score(cell: CellId, load: int) -> float:
     if load < 0:
@@ -400,9 +406,37 @@ Expected: PASS — 2 passed
 
 **Steps are bite-sized — one action, 2-5 minutes each — in TDD rhythm:**
 write the failing test → run it and see it fail → minimal implementation →
-run it and see it pass → refactor → commit. Every code step carries a fenced
-code block. Every run step names the exact command and the exact expected
-output.
+run it and see it pass → refactor → commit. Every run step names the exact
+command and the exact expected output.
+
+**A task body is a contract, and its contents bind at two strengths.**
+
+| Content | Status in the brief |
+|---|---|
+| `**Files:**` create/modify/test lists | contract — verbatim; the implementer writes only these |
+| `Consumes:`/`Produces:` signatures and error contracts | contract — verbatim |
+| Invariants, exact values, acceptance criteria | contract — verbatim |
+| Test code | contract — verbatim, in full; tests are the acceptance contract |
+| `**Implements:**` requirement IDs | contract — what the reviewer grades against |
+| Implementation code | sketch — reference only, never authority |
+
+**Test code stays verbatim.** Test cases are the acceptance contract; they
+may be full fenced blocks, and the implementer copies them exactly.
+
+**Implementation code is limited to seams.** Signatures, protocol and DDL
+definitions, interface definitions, and short sketches of the non-obvious
+branch earn their place — labeled as sketches, like Step 3 above. A fenced
+implementation-language block over ~40 lines does not belong in a plan; it
+belongs in an IFCE or design doc, or nowhere.
+
+**A plan whose tasks carry complete implementations is over-specified.** It
+pre-spends the implementer's design decisions, reduces the dispatch to a
+transcription job, and copies the plan author's bugs into the diff
+verbatim. Model selection at dispatch routes by task complexity, not by how
+much code the plan already contains — a code-complete plan is not a cheaper
+task, it is a defective one. If a task seems to need its whole body written
+out, the design belongs upstream (IFCE, ADR, or a thicker `Consumes:`/
+`Produces:` contract) — not in the task body.
 
 **The TDD rhythm is not optional for tasks producing or changing behavior.**
 The TDD Iron Law binds every implementer; the plan is where it becomes
@@ -460,11 +494,14 @@ failures** — never write them:
 - "TBD", "TODO", "implement later", "fill in details"
 - "Add appropriate error handling" / "add validation" / "handle edge cases"
 - "Write tests for the above" without the actual test code
-- "Similar to Task N" instead of repeating the code — **the engineer may be
-  reading tasks out of order**, and under `executor-execution` they are
+- "Similar to Task N" instead of restating the contract — **the engineer may
+  be reading tasks out of order**, and under `executor-execution` they are
   reading exactly one task and nothing else
-- Steps that describe *what* to do without showing *how* — code steps
-  require code blocks
+- Steps that describe *what* to do with no checkable acceptance criteria —
+  an unverifiable step is a defect whether or not it shows code
+- Implementation code blocks that pre-spend the implementer's design
+  decisions — full file bodies, complete class implementations. Keep the
+  signatures, invariants, and test expectations; drop the bodies
 - References to types, functions, or methods defined in no task and in no
   interface document
 
@@ -639,14 +676,15 @@ inside them. That is exactly why every defect above must be caught here.
 | Excuse | Reality |
 |---|---|
 | "The implementer can look up the signature" | They read one brief. Copy it in, or they invent one. |
-| "Task 5 is similar to Task 3" | Briefs are dispatched independently and out of order. Repeat the code. |
+| "Task 5 is similar to Task 3" | Briefs are dispatched independently and out of order. Restate the contract — files, signatures, tests. |
 | "I'll add the task IDs when execution starts" | `exec-brief` errors out; the plan is undispatchable until you do. |
 | "The dependency map is obvious from the tasks" | Obvious to you, holding all seven. The controller serialises dispatch from that table. |
 | "The interface isn't defined yet, I'll approximate" | That is an architecture gap and an unwritten ADR. Stop and go back. |
 | "Global Constraints cover it, no need to repeat" | The block never reaches the brief. Restate anything a task can violate. |
 | "Citing requirement numbers in prose is the same thing" | `R07` is greppable and reviewable; "requirement 7" drifts the moment the spec is renumbered. |
 | "One giant task is simpler to review" | A reviewer cannot reject half of it, so they approve all of it. |
-| "'Add error handling' is clear enough" | It is the single most rejected step in review. Write the raise and the test. |
+| "'Add error handling' is clear enough" | It is the single most rejected step in review. Specify the raise contract and write the test. |
+| "Writing the code in the plan prevents implementer mistakes" | It transcribes the plan author's mistakes instead — verbatim, into the diff. The contract travels in the brief; bodies are the implementer's job. |
 | "I'll fix the type mismatch during execution" | It surfaces as an import error mid-dispatch and costs a full review round. |
 | "I'll start executing while the human reviews the plan" | The gate ends your turn. Work past an unpicked mode is work the approval cannot cover. |
 | "Inline mode means I can skip the brief ceremony" | Inline removes the dispatch, not the task boundaries, the TDD steps, or the per-task commits. |

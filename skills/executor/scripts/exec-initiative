@@ -83,6 +83,76 @@ validate_phase_transition() {
   return 0
 }
 
+# ------------------------------------------------------------------
+# Artifact gate: a `passed` row asserts the phase produced its
+# deliverable, not just that the log moved. The checks below are
+# existence-level — a non-empty file carrying the initiative's ID
+# prefix under the right subdirectory. Content quality is
+# exec-store-check's job; this gate only refuses a pass recorded
+# against nothing.
+
+# True when at least one non-empty file under $1 is named $2. An absent
+# directory means none; -print -quit stops at the first match.
+has_artifact() {
+  find "$1" -type f -name "$2" ! -size 0 -print -quit 2>/dev/null | grep -q .
+}
+
+# True when the charter carries at least one content line beyond
+# frontmatter and '#' headings. The seed writes such lines itself (the
+# italic section prompts), so the seeded skeleton already counts — the
+# gate is existence-level: it refuses a missing, emptied, or
+# headings-only charter, and the human's charter approval remains the
+# substantive intake gate.
+charter_has_content() {
+  local f=$1
+  [ -f "$f" ] || return 1
+  awk '
+    { sub(/\r$/, "") }
+    NR == 1 && $0 ~ /^---[[:space:]]*$/ { infm = 1; next }
+    infm && $0 ~ /^---[[:space:]]*$/    { infm = 0; next }
+    infm                                { next }
+    $0 ~ /^[[:space:]]*$/               { next }
+    $0 ~ /^[[:space:]]*#/               { next }
+    $0 ~ /^[[:space:]]*---+[[:space:]]*$/        { next }
+    { found = 1; exit }
+    END { exit !found }
+  ' "$f"
+}
+
+# Print one line per required artifact absent under the initiative dir
+# ($3); return nonzero iff anything was printed. Phases with no
+# thinking-store deliverable at this layer — design (waivable),
+# execution/review/verification (run-axis, audited by exec-run), handoff
+# (the merge itself) — print nothing.
+phase_artifacts_missing() {
+  local id=$1 phase=$2 dir=$3 missing=0
+  case "$phase" in
+    intake)
+      charter_has_content "$dir/charter.md" || {
+        echo "charter.md — missing, empty, or stripped to frontmatter and headings alone"
+        missing=$((missing + 1))
+      } ;;
+    discovery)
+      has_artifact "$dir/discovery" "${id}-RSCH-[0-9]*.md" \
+        || has_artifact "$dir/discovery" "${id}-OPTS-[0-9]*.md" \
+        || { echo "discovery/${id}-RSCH-nn-*.md or discovery/${id}-OPTS-nn-*.md"
+             missing=$((missing + 1)); } ;;
+    architecture)
+      has_artifact "$dir/architecture" "${id}-ARCH-[0-9]*.md" \
+        || { echo "architecture/${id}-ARCH-nn-*.md"; missing=$((missing + 1)); } ;;
+    specification)
+      has_artifact "$dir/specs"        "${id}-SPEC-[0-9]*.md" \
+        || { echo "specs/${id}-SPEC-nn-*.md";        missing=$((missing + 1)); }
+      has_artifact "$dir/risks"        "${id}-RISK-[0-9]*.md" \
+        || { echo "risks/${id}-RISK-nn-*.md";        missing=$((missing + 1)); }
+      has_artifact "$dir/verification" "${id}-VRFY-[0-9]*.md" \
+        || { echo "verification/${id}-VRFY-nn-*.md"; missing=$((missing + 1)); } ;;
+    planning)
+      has_artifact "$dir/plans" "${id}-P[0-9][0-9]*.md" \
+        || { echo "plans/${id}-Pnn-*.md"; missing=$((missing + 1)); } ;;
+  esac
+  return "$missing"
+}
 
 usage() {
   # Bound by the Usage comment block, not a fixed line range — a literal
@@ -287,6 +357,13 @@ cmd_phase() {
   [ -n "$id" ] && [ -n "$phase" ] && [ -n "$event" ] || usage
   case " $PHASES " in *" $phase "*) ;; *) exec_die "unknown phase: $phase (want one of: $PHASES)" ;; esac
   case "$event" in entered|passed|skipped) ;; *) exec_die "event must be entered, passed, or skipped" ;; esac
+  # A skipped phase always carries a reason — the documented contract,
+  # enforced here. A **skipped** row with no note is indistinguishable
+  # from an oversight, which is the distinction the phase log exists to
+  # make.
+  if [ "$event" = "skipped" ] && [ -z "${note//[[:space:]]/}" ]; then
+    exec_die "phase $phase skipped requires a reason note — a skipped phase always carries one"
+  fi
   # The note lands verbatim in a pipe-table cell — a raw '|' or newline
   # shifts columns and breaks the log. Same contract as title in cmd_new.
   case "$note" in
@@ -303,6 +380,24 @@ cmd_phase() {
   # discovered later by store-check.
   validate_phase_transition "$id" "$phase" "$event" "$idx" \
     || exec_die "illegal phase transition: $phase $event refused (see reason above)"
+
+  # A `passed` event asserts the phase's deliverable exists on disk, not
+  # only that the log row advanced — ordering was checked above, output
+  # presence is checked here, before any mutation. `entered` and
+  # `skipped` carry no artifact requirement; a skip stays legal.
+  if [ "$event" = "passed" ]; then
+    local missing
+    if ! missing=$(phase_artifacts_missing "$id" "$phase" "$dir"); then
+      exec_die "phase $phase cannot pass: the gate requires the artifact, not just the log row — missing under $dir:
+$(printf '%s\n' "$missing" | sed 's/^/  /')"
+    fi
+    # These phases produce no thinking-store document at this layer —
+    # their gate evidence lives on the run axis (exec-run audit).
+    case "$phase" in
+      execution|review|verification)
+        echo "note: phase $phase artifacts are verified on the run axis" >&2 ;;
+    esac
+  fi
 
   if grep -q "^| $phase |" "$idx"; then
     awk -v phase="$phase" -v event="$event" -v d="$(today)" -v note="$note" '

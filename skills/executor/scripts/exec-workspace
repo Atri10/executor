@@ -100,6 +100,13 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ## Method
 
 *What was checked: the dependency map rows, the file map, the interface signatures, the test expectations. State the inputs you walked so a reader can see the scan's scope.*
+
+Check every task pair sharing a file, every interface contract the plan cites, and every task against itself:
+
+- Signature resolution — every consumed reference resolves to a produced signature: same name, same shape, same argument order.
+- Interface-contract consistency — two contracts defining the same field or type declare the same shape; dict[str, list[str]] beside a record shape for one name is a conflict, not a dialect.
+- Prose-vs-code consistency — implementation code embedded in a task body does not contradict that task's own Requirements/Produces line.
+- Unspecified contract points — a field used across a seam whose element type or shape no cited contract defines gets a Finding row naming the field and the seam.
 EOF
 
 [ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF

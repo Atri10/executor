@@ -328,14 +328,15 @@ is the rejected options and why.
 
 If ideation is not needed (the charter already pins the approach, or
 the work is a continuation with no open design questions), record the
-skip explicitly — a line in the RSCH/OPTS body or the initiative INDEX
-notes: brainstorming considered, not needed, because <reason>. A
-declined visual offer is also recorded, once, so the next session does
-not re-offer the same thing the human already turned down.
+skip in the initiative `INDEX.md` — the canonical location, and the one
+`exec-store-check` greps. One line containing "brainstorm" is enough:
+`*Brainstorming considered at discovery entry: not needed — <reason>.*`
+A declined visual offer is recorded there too, once, so the next
+session does not re-offer the same thing the human already turned down.
 
-An empty `brainstorm/sessions/` directory with no record either way is
-a gap: nobody can later tell whether ideation was skipped deliberately
-or never considered.
+An empty `brainstorm/sessions/` directory with no recorded session or
+skip is a gap `exec-store-check` fails on: nobody can later tell
+whether ideation was skipped deliberately or never considered.
 
 ### Visual mode is a capability, not the definition
 

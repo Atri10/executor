@@ -20,6 +20,12 @@ Every task review returns **two** verdicts:
    missing, nothing extra, nothing misunderstood?
 2. **Code quality** — is it well-built, tested, maintainable?
 
+The yardstick is the contract: the spec requirements, the interface
+documents, and the brief — never the reviewer's own taste. When the defect
+is in the contract itself, the finding says so at contract level — "the
+contract itself is defective: <what is wrong and where>" — rather than
+grading the implementer for following it.
+
 A review missing either is not a review. The implementer's self-review never
 replaces it — self-review is the implementer grading its own work, which is
 the thing a reviewer exists to check.
@@ -220,11 +226,20 @@ Two routes leave the loop before it starts:
 A fix round is one fix dispatch plus one scoped re-review. Five rounds
 maximum per task.
 
+A reviewer-vs-agent dispute about what the contract requires — or an
+agent's claim that the work belongs to another task or plan — is a ruling
+trigger, not a round: settle it with `exec-ruling` before dispatching
+further. A recorded ruling is obeyed and never re-litigated inside the
+loop.
+
+- **Every fix package carries the findings verbatim and the brief and
+  context file paths** — the fixer reads the contract itself, not a
+  paraphrase of it.
 - **Rounds 1-3 — resume the original implementer.** Its context is intact.
   Send it the verdict file path and the open finding IDs. If your harness
   cannot message a live subagent, dispatch a fresh one with the brief path,
-  the report path, the verdict path, and the IDs — the files are the
-  persistent memory either way.
+  the context-file path, the report path, the verdict path, and the IDs —
+  the files are the persistent memory either way.
 - **Rounds 4-5 — fresh implementer, one tier up**, framed: "A prior
   implementer attempted this task N times; you own it now. Read the report
   file for what was tried." Three failed resumes means the implementer cannot
@@ -265,6 +280,11 @@ call — a silent discard is forbidden.
 | Reviewer is wrong, or the point is contestable | Park with a ruling saying why the code stands. The final review sees both sides. |
 | Real, but nothing downstream builds on it | Park with a ruling that says it is real and deferred. |
 | Real and load-bearing — a later task builds on it, or it reveals a plan defect | Rule on the smallest change that unblocks the dependent work, record it, carry it into the next task's dispatch. Parking a structural failure lets every dependent task build on it. |
+
+A cap disposition defers only polish and scope. A correctness finding is
+never dispositioned as polish: its addendum names the severity class and
+why deferral is safe, and the finding is flagged for the final reviewer to
+re-judge.
 
 Adjudicate **only at the cap**. Adjudicating earlier to end a loop is
 pre-judging with a different name. Stop and ask the human only when the
@@ -325,6 +345,11 @@ exec-review-package PLAN_FILE final "$(git merge-base main HEAD)" "$(git rev-par
 - Hand it the ledger's **deferred-minor and parked lines** so it can triage
   which must be fixed before merge. Those lines are why the ledger exists;
   a deferred minor nobody triages was discarded, not deferred.
+- Hand it every **round-cap disposition and controller addendum** that
+  closed a finding, as named inputs to re-examine — a verdict whose body
+  says FAIL but an addendum closed is listed in the review's inputs and
+  re-judged on its merits. The addendum is the controller's argument, not a
+  verdict of its own.
 - Verdict file: `reviews/verdicts/<PLAN-ID>-final-verdict.md`.
 
 If it returns findings:
