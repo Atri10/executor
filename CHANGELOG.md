@@ -4,7 +4,7 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
-## [Unreleased] — 2026-09-22
+## [0.3.0] — 2026-09-22
 
 ### Added
 - 2026-09-22 — **`exec-fix-package` assembles the fix dispatch.** One
@@ -113,7 +113,7 @@ project is tagged; between releases, entries are dated and `main` moves.
   workspace tree and `references/frontmatter.md` adds the
   `fix-package` kind to the execution-artifact vocabulary.
 
-## [Unreleased] — 2026-09-12
+## [0.2.0] — 2026-09-12
 
 ### Fixed
 - 2026-09-12 — **Review context survives rounds.** `exec-context` no
