@@ -200,8 +200,6 @@ Subagent (general-purpose):
     quality: APPROVED | NEEDS_FIXES  # filled at the gate
     ---
 
-    <!-- Executor verdict — written by the reviewer subagent -->
-
     **Round:** `[ROUND_ID]`  (scoped re-review of `[PRIOR_ROUND_ID]`)
     **Task:** `[TASK_ID]`
     **Plan:** `[PLAN_ID]` — `[PLAN_FILE]`

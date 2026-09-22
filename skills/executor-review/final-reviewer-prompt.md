@@ -243,8 +243,6 @@ Subagent (general-purpose):
     quality: APPROVED | NEEDS_FIXES  # filled at the gate
     ---
 
-    <!-- Executor verdict — written by the reviewer subagent -->
-
     **Round:** `[PLAN_ID]-final`
     **Plan:** `[PLAN_ID]` — `[PLAN_FILE]`
     **Spec:** `[SPEC_ID]`

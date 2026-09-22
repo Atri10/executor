@@ -21,7 +21,7 @@ supersedes: null
 superseded_by: null
 spec: INIT-0004-SPEC-01
 criteria_count: 9
-evidence_types: [unit, integration, manual, smoke]
+evidence_types: [unit, integration, manual, smoke, static]
 ---
 
 # Cell placement — verification strategy
@@ -105,7 +105,7 @@ nothing will ever prove it. Fix it here, before the gate.
 |---|---|
 | ID | `V<nn>`, sequential, never renumbered — plans and verdicts cite them |
 | Criterion | The `R<nn>` or `C<nn>` proven, plus its short name |
-| Method | `unit` \| `integration` \| `manual` \| `smoke`, matching `evidence_types` |
+| Method | `unit` \| `integration` \| `manual` \| `smoke` \| `static`, matching `evidence_types` |
 | Procedure | The exact command, or numbered manual steps. Copy-paste correct |
 | Evidence | The observed output that counts as proof |
 | Status | `pending` until executed |
@@ -156,6 +156,7 @@ that a single row would miss.
 | `integration` | The behaviour crosses a boundary — HTTP, DB, filesystem, process | Status code, row count, file content |
 | `manual` | A human must observe a rendered state or perform a real interaction | Numbered steps, one observation per step |
 | `smoke` | Proving the thing runs at all, or a constraint on the environment | Command output, version string, exit 0 |
+| `static` | The requirement is a property of the artifact itself — a signature, a config value, a schema — provable without running it | The cited file:line, or the linter/type-checker command output |
 
 Prefer the cheapest method that actually observes the requirement. A unit
 test that mocks the boundary the requirement is about proves nothing —

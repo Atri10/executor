@@ -69,6 +69,44 @@ project is tagged; between releases, entries are dated and `main` moves.
   resolves both runtime state layouts — the flat runtime root that
   `start-server.sh` actually returns and the legacy nested `state/`
   form.
+- 2026-09-12 — **The merge gate can pass after a fix round.** The run
+  audit demanded `spec_verdict: PASS` from the latest verdict file, but
+  re-review verdicts carry `spec_verdict: null` by template — one fix
+  round permanently poisoned `exec-run check`, `exec-run complete`, and
+  `exec-branch merge`. A verdict is now clean iff frontmatter
+  `spec_verdict` is PASS or null (re-reviews judged findings, not the
+  spec) AND `quality: APPROVED`; both fields are frontmatter-scoped, so
+  a `spec_verdict:` line in the verdict body is prose, not a verdict.
+  The audit also accepts the documented ledger annotation
+  (`complete (commits a1b2..b7c8, …)`) and computes the expected task
+  set fence-aware, so a fenced `### Task` example can no longer become
+  an uncompletable task.
+- 2026-09-12 — **Generated markdown carries no HTML comments.** Seeded
+  files (`exec-initiative` charter, the four `exec-workspace` ledgers,
+  `exec-brief`, `exec-context`) and the architecture/ADR/design/
+  interface templates emit italic guidance lines instead of `<!-- -->`
+  blocks, and all four templates now say to replace them (previously
+  only the ARCH template did). Verdict skeletons drop their marker
+  comment — frontmatter `kind: verdict` carries the provenance.
+  `layout.md`'s rendering rule is now a blanket ban, not a placement
+  rule.
+- 2026-09-12 — **Plan and lint bookkeeping corrections.**
+  `exec-plan-lint` drops a dead double-write of its body temp file and
+  reports real file line numbers for forbidden paths (was body-relative
+  offsets). `exec-evidence` sanitizes the resolved VRFY id before
+  building a filename from it, validates input files before stamping
+  state, and its header comment matches its real output names
+  (`state-R<nn>.txt`, `…-V<nn>-R<nn>-<method>.txt`, `-attemptN`).
+  `exec-initiative`'s INT/TERM trap exits instead of continuing
+  unlocked, `phase skipped` preserves a recorded Entered date, and
+  `branch` writes `**Branch:**` under `**Status:**` instead of at EOF —
+  where it used to push later phase-log rows outside the table.
+  `exec-branch abandon` validates its flag and branch existence before
+  any destructive fallback, and `merge` surfaces audit diagnostics
+  instead of swallowing them. `stop-server.sh` assigns the PID/ID file
+  paths it was checking, so `stop` actually stops. `exec-scan-secrets`
+  covers source/config extensions and checks every target. Store check
+  exempts `state-R*.txt` in its orphan scan.
 
 ### Changed
 - 2026-09-12 — **Skill contracts realigned with the fixes.** Re-review
@@ -102,6 +140,18 @@ project is tagged; between releases, entries are dated and `main` moves.
   frontmatter-scoped required fields, pipe-title refusal). CI gains a
   valid-control plan-lint negative fixture and an empty-dispatch
   clean-run case.
+- 2026-09-12 — **Markdown structure is linted, not hoped for.**
+  `validate-skills.sh` rejects HTML comments outside `html`/`xml`/`svg`
+  code fences in every skill markdown file, and `exec-store-check`
+  gains D7 (the same rule for tracked thinking-store docs), D5 branches
+  for `charter`, `architecture`, and `design` kinds plus `recommends`
+  for options docs, and D1 presence checks for `supersedes`/
+  `superseded_by`. The regression suite grows to 21 cases (re-review
+  verdict acceptance and rejection, comment-free seeds, D7, annotated
+  ledger lines, fenced task examples, fenced store-path lint
+  exemptions) and now runs in CI; shellcheck
+  and `bash -n` cover `_exec-lib.sh`, `visual-companion/*.sh`, and
+  `scripts/*.sh`, matching what CONTRIBUTING documented.
 
 ## [0.1.0] — 2026-09-03
 
@@ -111,8 +161,8 @@ strict per-initiative ID namespace ("nothing floats"), separated thinking
 and execution stores, and a script-enforced contract at every state
 transition: plans lint before they dispatch, reviews gate merges, verdict
 audits catch unjudged work, and the stores themselves check their own
-integrity. Ten skills, fourteen `exec-*` scripts, one CI pipeline of five
-gates.
+integrity. Ten skills, thirteen `exec-*` scripts (plus the shared
+`_exec-lib.sh`), one CI pipeline of five gates.
 
 ### Added
 - 2026-09-03 — **Evidence lives in the tracked store:** `exec-evidence`

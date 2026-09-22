@@ -19,7 +19,11 @@ jobs:
         # access; a shell bug there is a security event, not a style nit.
         # Warning-level (-S warning) is the floor; errors already fail.
         run: |
-          find skills/executor/scripts -type f -name 'exec-*' -print0 \
+          # Every shell file the repo ships: the exec-* tools, the shared
+          # library they all source, the visual-companion helpers, and the
+          # repo's own scripts/ (validators and regression tests).
+          find skills/executor/scripts scripts -type f \
+            \( -name 'exec-*' -o -name '*.sh' \) -print0 \
             | xargs -0 shellcheck --severity=warning
 
   prompt-injection:
@@ -63,9 +67,10 @@ jobs:
       - name: Every script parses
         run: |
           set -e
-          for f in skills/executor/scripts/exec-*; do
+          while IFS= read -r -d '' f; do
             bash -n "$f"
-          done
+          done < <(find skills/executor/scripts scripts -type f \
+                     \( -name 'exec-*' -o -name '*.sh' \) -print0)
       - name: Plan lint rejects a forbidden store path (and only that)
         run: |
           set -e
@@ -114,9 +119,11 @@ jobs:
           W=.executor/INIT-0001/P01
           bash "$S/exec-run" "$P" start > /dev/null
           printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
-          printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
-          printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+          printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+          printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
           # Empty dispatch table: valid for inline runs, must not fail check.
           printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
           printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
           bash "$S/exec-run" "$P" check
+      - name: Regression suite (scripts/test-issue9-fixes.sh)
+        run: bash scripts/test-issue9-fixes.sh

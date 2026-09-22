@@ -10,9 +10,9 @@ intent (charter, spec, plan) or activity (commits, reports, verdicts). None of
 that is proof that the software works. This phase produces proof, or names
 exactly what is unproven.
 
-Read [`skill://executor`](../executor/SKILL.md) first for the ID grammar, the
+Read [`../executor/SKILL.md`](../executor/SKILL.md) first for the ID grammar, the
 citation rule, and the phase table. Scripts referenced below live in
-`skill://executor/scripts/` and are written here as `exec-<name>`.
+`../executor/scripts/` and are written here as `exec-<name>`.
 
 ## The Iron Law
 
@@ -241,12 +241,12 @@ real. A `PROVEN` row with no recorded output is an assertion, not a record; a
 
 | Criterion | Evidence | Status | Command | State |
 |---|---|---|---|---|
-| INIT-0004-VRFY-01 #1 | unit — `evidence/P01/...V01-unit.txt` | PROVEN | `bun test test/placement.test.ts` | a91e502 |
-| INIT-0004-VRFY-01 #2 | integration — `evidence/P01/...V02-integration.txt` | FAILED | `bun test test/router.int.ts` | a91e502 |
-| INIT-0004-VRFY-01 #3 | smoke — `evidence/P01/...V03-smoke.txt` | PROVEN | `bun run start` + POST `/place` | a91e502 |
+| INIT-0004-VRFY-01 #1 | unit — `evidence/P01/...V01-R01-unit.txt` | PROVEN | `bun test test/placement.test.ts` | a91e502 |
+| INIT-0004-VRFY-01 #2 | integration — `evidence/P01/...V02-R01-integration.txt` | FAILED | `bun test test/router.int.ts` | a91e502 |
+| INIT-0004-VRFY-01 #3 | smoke — `evidence/P01/...V03-R01-smoke.txt` | PROVEN | `bun run start` + POST `/place` | a91e502 |
 | INIT-0004-VRFY-01 #4 | manual | NOT-RUN | — | — |
 
-<!-- rows #5–#12 omitted in this example -->
+*(rows #5–#12 omitted in this example)*
 
 ### INIT-0004-VRFY-01 #1 — PROVEN
 
@@ -302,13 +302,15 @@ bun test test/placement.test.ts
 EOF
 ```
 
-This writes `docs/executor/<initiative>/verification/evidence/P01/state.txt`
-(the commit, branch, and dirtiness stamped once per plan directory) and
-`.../P01/INIT-0004-VRFY-01-V03-unit.txt` (the command and its observed
+This writes `docs/executor/<initiative>/verification/evidence/P01/state-R01.txt`
+(the commit, branch, and dirtiness stamped once per round) and
+`.../P01/INIT-0004-VRFY-01-V03-R01-unit.txt` (the command and its observed
 output). Evidence is tracked because it is the proof behind the verdict —
 it commits on the branch that produced it and survives worktree teardown.
-The outcomes table's **Evidence** column then names the file
-(`evidence/P01/...V03-unit.txt`), so a reader can go from verdict →
+Re-runs never overwrite: a new round writes a new `-R<nn>-` file, and a
+repeat inside one round writes a `-attemptN` sibling. The outcomes table's
+**Evidence** column then names the file
+(`evidence/P01/...V03-R01-unit.txt`), so a reader can go from verdict →
 table → raw output without trusting anyone's summary.
 
 When the evidence run is a subagent dispatch rather than a command you run
@@ -349,7 +351,7 @@ A finding carries exactly this, appended in the outcomes round:
 **Requirement:** <verbatim>
 **Observed:** <the output line that contradicted it>
 **State:** a91e502
-**Severity:** blocking            <!-- blocking | non-blocking -->
+**Severity:** [blocking | non-blocking]
 **Where it appears to live:** `src/router/place.ts` — capacity check after insert
 **Re-verification:** re-run `bun test test/router.int.ts` and the #3 smoke path
 ```
@@ -401,13 +403,15 @@ exec-initiative phase INIT-0004 verification entered "12 criteria, VRFY-01"
 exec-initiative phase INIT-0004 verification passed  "12/12 proven at a91e502"
 ```
 
-`passed` is written only after the gate actually passes. The transition
-command validates this mechanically: a VRFY with a `FAILED` criterion
-that has no accepted-risk ruling, a missing outcome row, or evidence
-absent from the current state is refused — the phase stays `entered`
-and the refusal names the criterion. A run with unproven requirements
-stays `entered` and is reported — an `entered` phase with an honest
-note is recoverable; a false `passed` is a lie in a tracked index.
+`passed` is written only after the gate actually passes. What the
+transition command enforces mechanically is ordering: `passed` is refused
+unless this phase's row already shows `entered`, and a phase that already
+passed cannot pass again. It does not read the outcomes round — whether
+every criterion is PROVEN or carries an explicit human acceptance is the
+gate you presented above, the human's call, not the script's check. A run
+with unproven requirements stays `entered` and is reported — an `entered`
+phase with an honest note is recoverable; a false `passed` is a lie in a
+tracked index.
 
 **The loop closes on evidence, not on rounds.** After a fix lands,
 append a new outcomes round at the new commit and re-run every criterion

@@ -86,11 +86,18 @@ Every PR runs five checks; all must pass before merge:
 Run all of them locally before pushing:
 
 ```bash
-shellcheck --severity=warning skills/executor/scripts/exec-* skills/executor/scripts/_exec-lib.sh
+find skills/executor/scripts scripts -type f \( -name 'exec-*' -o -name '*.sh' \) -print0 \
+  | xargs -0 shellcheck --severity=warning
 python3 scripts/lint-prompt-injection.py skills/
 bash scripts/validate-skills.sh skills
 bash skills/executor/scripts/exec-scan-secrets .
+bash scripts/test-issue9-fixes.sh
 ```
+
+`test-issue9-fixes.sh` is the regression suite: twenty-one fixture cases that
+rebuild disposable repositories and assert each enforced contract. Add a
+case whenever a fix teaches a script to refuse something it used to
+accept.
 
 The injection linter is heuristic and errs toward false positives — a
 flagged line is a human-review prompt in the PR diff, not an accusation.
