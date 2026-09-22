@@ -105,7 +105,7 @@ flowchart TB
 
 ```bash
 date -u +%Y-%m-%dT%H:%M:%SZ
-scripts/exec-initiative phase INIT-0004 specification entered
+../executor/scripts/exec-initiative phase INIT-0004 specification entered
 ```
 
 `date -u` is the only source of `created_at` and `updated_at` in all three
@@ -118,9 +118,9 @@ print a timestamp.
 ### 2. Allocate the three IDs
 
 ```bash
-scripts/exec-id INIT-0004 SPEC
-scripts/exec-id INIT-0004 RISK
-scripts/exec-id INIT-0004 VRFY
+../executor/scripts/exec-id INIT-0004 SPEC
+../executor/scripts/exec-id INIT-0004 RISK
+../executor/scripts/exec-id INIT-0004 VRFY
 ```
 
 `exec-id` scans filenames **and** file contents, so a misfiled document
@@ -202,7 +202,7 @@ a fix touched requirement text.
 ### 8. Scan for secrets
 
 ```bash
-scripts/exec-scan-secrets docs/executor/INIT-0004-<slug>
+../executor/scripts/exec-scan-secrets docs/executor/INIT-0004-<slug>
 ```
 
 Exit 0 clean, exit 1 findings. It prints `file:line: possible <kind>` and
@@ -220,7 +220,7 @@ variable name, not the value; `<placeholder>`, `REDACTED`, `YOUR_*`, and
 Only after explicit approval:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 specification passed "3 docs, 14 reqs"
+../executor/scripts/exec-initiative phase INIT-0004 specification passed "3 docs, 14 reqs"
 ```
 
 Set all three documents `status: active`, update their `updated_at`, fix
@@ -567,7 +567,7 @@ review nobody can trust.
 
 ### Superseding, step by step
 
-1. `scripts/exec-id INIT-0004 SPEC` → the new ID.
+1. `../executor/scripts/exec-id INIT-0004 SPEC` → the new ID.
 2. Write the new spec. `supersedes: INIT-0004-SPEC-01`. Requirement
    numbers that survive **keep their numbers**; every citation in every
    plan, verdict, and VRFY row depends on it. New requirements take the

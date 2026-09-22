@@ -36,7 +36,7 @@ the thing a reviewer exists to check.
 
 ## Scripts
 
-Scripts live in the contract skill at `agent/skills/executor/scripts/`.
+Scripts live in the contract skill at `../executor/scripts/`.
 Commands below are written bare (`exec-review-package …`); invoke them from
 that path.
 

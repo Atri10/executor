@@ -4,7 +4,7 @@ One per seam crossed by more than one task or plan. Path:
 `docs/executor/INIT-NNNN-<slug>/architecture/INIT-NNNN-IFCE-nn-<slug>.md`
 
 Allocate the ID immediately before writing:
-`scripts/exec-id INIT-NNNN IFCE`
+`../../executor/scripts/exec-id INIT-NNNN IFCE`
 
 **The failure this document prevents:** two implementers, each seeing only
 their own task, build incompatible halves of one seam because the plan
@@ -13,6 +13,9 @@ integration is a rewrite and neither implementer was wrong.
 
 Write it so that a reader who never sees the other side of the seam cannot
 guess anything. Anything guessable will be guessed differently.
+
+Copy the structure below. Guidance sits in italic lines — replace each one
+with content.
 
 ## Frontmatter
 
@@ -50,8 +53,7 @@ list cannot be changed safely, because nobody knows who breaks.
 
 ## Scope
 
-<!-- Which components sit on each side. Name them from the ARCH inventory so
-     a reader can find both halves. -->
+*Which components sit on each side. Name them from the ARCH inventory so a reader can find both halves.*
 
 Provider: `sqlite-cell-store` (adapter). Consumer: `placement-service`
 (policy). The port itself is owned by policy — the adapter implements it, per
@@ -59,8 +61,7 @@ the boundary table in `INIT-0004-ARCH-01`.
 
 ## Data types
 
-<!-- Every type crossing the seam, exact. Units, nullability, ranges,
-     encodings. "A timestamp" is four incompatible representations. -->
+*Every type crossing the seam, exact. Units, nullability, ranges, encodings. "A timestamp" is four incompatible representations.*
 
 ```ts
 type CellId = string;        // "r1-c007"; ^[a-z0-9]+-c[0-9]{3}$; never empty
@@ -82,8 +83,7 @@ interface Placement {
 }
 ```
 
-<!-- Use the initiative's actual language. The point is exactness, not the
-     notation. -->
+*Use the initiative's actual language. The point is exactness, not the notation.*
 
 ## Operations
 
@@ -152,9 +152,7 @@ retry after a timeout is always safe.
 
 ## Lifecycle
 
-<!-- What must be initialised before what, and what is guaranteed at each
-     stage. Two correct implementations can still deadlock or double-apply
-     without this section. -->
+*What must be initialised before what, and what is guaranteed at each stage. Two correct implementations can still deadlock or double-apply without this section.*
 
 1. `open(config)` resolves before any other call; calls before it raise
    `NotOpen`.
@@ -176,8 +174,7 @@ retry after a timeout is always safe.
 
 ## Worked call
 
-<!-- One end-to-end example, so both implementers are reading the same
-     sequence rather than inferring it. -->
+*One end-to-end example, so both implementers are reading the same sequence rather than inferring it.*
 
 ```ts
 const cells = await store.candidates("de", "medium");
@@ -193,8 +190,7 @@ try {
 
 ## Change log
 
-<!-- Every change after stability reaches `stable`, so a consumer can tell
-     whether the document changed under them. -->
+*Every change after stability reaches `stable`, so a consumer can tell whether the document changed under them.*
 
 | Date | Change | Consumers updated |
 |---|---|---|

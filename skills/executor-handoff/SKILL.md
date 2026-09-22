@@ -10,7 +10,7 @@ where a leaked credential is caught before it becomes permanent, and where
 the record stops being a working file and becomes an archive. It is also
 where a session that ran out of room hands the initiative to the next one.
 
-Scripts referenced below live in `agent/skills/executor/scripts/` and are
+Scripts referenced below live in `../executor/scripts/` and are
 written here as `exec-*`. Never hand-build a store path; resolve it.
 
 **Nothing in either store is ever deleted by this skill.** See §8.
@@ -47,14 +47,14 @@ in an earlier phase; go back to its skill.
 | The LATEST final verdict is clean | `reviews/verdicts/` — if any `<PLAN-ID>-final-R<n>-verdict.md` exists, it supersedes the base `<PLAN-ID>-final-verdict.md`; the base file being clean proves nothing once a later round failed |
 | Verification produced observed evidence, not expectation | `docs/executor/<INIT>-*/verification/` and the verification report |
 | Every FAILED/NOT-RUN/UNAVAILABLE criterion has an explicit human acceptance recorded | the verification phase's acceptance record — a ruling naming the criterion, the state it was accepted at, and the residual risk. An acceptance the human never made does not exist |
-| The thinking store passes the store check — every document registered, statuses truthful, cross-links resolving | `scripts/exec-store-check` — exit 0 required |
+| The thinking store passes the store check — every document registered, statuses truthful, cross-links resolving | `../executor/scripts/exec-store-check` — exit 0 required |
 | Every executed plan has a run row and a workspace | `.executor/INDEX.md` vs `.executor/INIT-*/` — a plan that ran (merged commits, Task-0 references) with no row is a CRITICAL gap; register it before handoff |
 | Every plan's VRFY outcomes are filled — no "To be filled" placeholder survives execution | `docs/executor/<INIT>-*/verification/INIT-0004-VRFY-*` |
 
 Run before anything else in this phase:
 
 ```bash
-scripts/exec-store-check              # thinking-store integrity; exit 0 required
+../executor/scripts/exec-store-check  # thinking-store integrity; exit 0 required
 ```
 
 Record entry into the phase before doing the work, so an interrupted
@@ -151,20 +151,23 @@ finding and **blocks handoff**. The script never prints the matched value,
 and neither do you — printing it copies the secret into the transcript,
 which is the failure the scan exists to prevent.
 
-**From inside a linked worktree, name the execution store explicitly.** The
-script's default target list resolves both stores from the working-tree
-root, but `.executor/` lives at the main repository root — so a default
-scan run from a worktree skips the execution store and still exits 0.
-Read the count in the clean line: `in 1 store(s)` when both stores exist
-means the execution store went unscanned, and an unscanned store is not a
-clean one.
+**The default scan covers both stores, from a worktree too.** The script
+resolves `docs/executor/` from the working-tree root and `.executor/` from
+the main repository root (`git rev-parse --git-common-dir`), so a bare
+`exec-scan-secrets` inside a linked worktree still scans the shared
+execution store. Read the count in the clean line anyway: `in 1 store(s)`
+when both stores exist means one went unscanned, and an unscanned store is
+not a clean one.
+
+Naming the stores explicitly gives the same coverage with the paths on
+record:
 
 ```bash
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
 exec-scan-secrets docs/executor "$MAIN_ROOT/.executor"
 ```
 
-On any finding, follow `agent/skills/executor/references/safety.md`:
+On any finding, follow `../executor/references/safety.md`:
 
 | Situation | Action |
 |---|---|

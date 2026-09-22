@@ -73,9 +73,15 @@ if [ "$task" != "final" ]; then
 
   # --- 1. Coverage table: declared Files vs changed files -------------------
   # Declared paths come from the task's Files: block (Create/Modify/Test).
+  # A leading backticked span IS the path — the grammar quotes paths, so
+  # extracting it drops any trailing annotation. The only sanctioned colon
+  # inside a declared path is the trailing :N / :N-M line-range
+  # (executor-planning), stripped LAST so a colon-bearing path is never cut
+  # at its first colon the way 's/:.*$//' did.
   declared=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' \
     | grep -E '^\s*- (Create|Modify|Test):' | sed -E 's/^\s*- (Create|Modify|Test):\s*//' \
-    | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    | sed -E 's/^`([^`]*)`.*/\1/' | sed 's/`//g' \
+    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/:[0-9]+(-[0-9]+)?$//')
   changed=$(git diff --name-only "${base}..${head}")
   if [ -n "$declared" ]; then
     coverage_table="## Declared-file coverage
@@ -99,7 +105,7 @@ task's cumulative range, which the round-01 package carried.
       else
         in_diff="**NO — MISSING**"
       fi
-      coverage_table="${coverage_table}| \`$path\` | ${intent:-?} | $in_diff |\n"
+      coverage_table+="| \`$path\` | ${intent:-?} | $in_diff |"$'\n'
     done <<< "$declared"
   fi
 
@@ -151,9 +157,9 @@ the diff against the spec's own words, not the brief's restatement.
       #the full requirement node, never a fixed line window.
       rtext=$(exec_requirement_body "$spec_file" "$rnum" | sed '/^$/d')
       if [ -n "$rtext" ]; then
-        requirement_text="${requirement_text}\`${rid}\` — ${rtext}\n"
+        requirement_text+="\`${rid}\` — ${rtext}"$'\n'
       else
-        requirement_text="${requirement_text}\`${rid}\` — (not found in ${spec_file})\n"
+        requirement_text+="\`${rid}\` — (not found in ${spec_file})"$'\n'
       fi
     done <<< "$req_ids"
   fi
@@ -172,7 +178,7 @@ fi
   [ -n "$plan_hash" ] && echo "# Plan blob: $plan_hash"
   echo
   if [ -n "$coverage_table" ]; then
-    printf '%b\n' "$coverage_table"
+    printf '%s\n' "$coverage_table"
     echo
   fi
   if [ -n "$seam_contract" ]; then
@@ -180,7 +186,7 @@ fi
     echo
   fi
   if [ -n "$requirement_text" ]; then
-    printf '%b\n' "$requirement_text"
+    printf '%s\n' "$requirement_text"
     echo
   fi
   echo "## Commits"

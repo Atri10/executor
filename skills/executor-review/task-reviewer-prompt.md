@@ -188,7 +188,7 @@ Subagent (general-purpose):
 
     **Test-quality grading (Part 2):** when the diff contains tests, grade
     them against the two principles in the test-quality doctrine
-    (`skill://executor/references/test-quality.md`):
+    (`../executor/references/test-quality.md`):
 
     - Does each test name the break it catches? A test only an intentional
       design decision can fail is a **change detector** — Important
@@ -322,8 +322,6 @@ Subagent (general-purpose):
     spec_verdict: PASS | FAIL      # filled after Part 1
     quality: APPROVED | NEEDS_FIXES  # filled at the gate
     ---
-
-    <!-- Executor verdict — written by the reviewer subagent -->
 
     **Round:** `[ROUND_ID]`
     **Task:** `[TASK_ID]`

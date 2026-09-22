@@ -68,8 +68,8 @@ Run before any handoff, before committing `.executor/` if the user chooses
 to, and before marking an initiative complete:
 
 ```bash
-scripts/exec-scan-secrets              # scans both stores
-scripts/exec-scan-secrets .executor/INIT-0004
+../scripts/exec-scan-secrets                 # scans both stores
+../scripts/exec-scan-secrets .executor/INIT-0004
 ```
 
 The script flags high-signal patterns: private key headers, common token

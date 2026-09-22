@@ -16,6 +16,8 @@
 #                                     branch (--no-ff); refuses unless the
 #                                     exec-run audit passes (final verdict
 #                                     exists, every completed task judged)
+#   exec-branch PLAN_FILE audit       run that same audit without merging;
+#                                     prints the failing AUDIT lines
 #   exec-branch PLAN_FILE abandon     delete the plan branch (unmerged work
 #                                     is the human's call; refuses if the
 #                                     branch has commits not on the base
@@ -23,7 +25,7 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-[ $# -ge 2 ] || exec_die "usage: exec-branch PLAN_FILE start|status|merge|abandon [-f]"
+[ $# -ge 2 ] || exec_die "usage: exec-branch PLAN_FILE start|status|merge|audit|abandon [-f]"
 plan=$1
 action=$2
 flag=${3:-}
@@ -80,13 +82,17 @@ case "$action" in
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
       exec_die "working tree has uncommitted changes — commit or stash them before merging"
     fi
+    # The merge target must exist before anything else moves.
+    git show-ref --verify --quiet "refs/heads/$init_branch" \
+      || exec_die "no initiative branch $init_branch — nothing to merge into"
     # Gate: the plan's run must pass the full audit — registry consistent,
     # a verdict for every completed task, and the final verdict present.
     # This is the merge gate; review-before-merge is the whole point of the
-    # branch model.
-    "$0" "$plan" audit >/dev/null 2>&1 || {
+    # branch model. The audit's own diagnostics reach the user — a generic
+    # refusal without them sent people hunting for the real cause.
+    if ! "$0" "$plan" audit; then
       exec_die "merge refused: exec-run audit fails (missing verdict or final review). Run: exec-run PLAN check"
-    }
+    fi
     git checkout "$init_branch" >/dev/null
     if git merge --no-ff --no-edit "$plan_branch" >/dev/null 2>&1; then
       echo "merged $plan_branch -> $init_branch (no-ff, history preserved)"
@@ -115,15 +121,35 @@ case "$action" in
     fi
     ;;
   abandon)
+    case "$flag" in
+      ""|-f) ;;
+      *) exec_die "usage: exec-branch PLAN_FILE abandon [-f] — unknown flag '$flag'" ;;
+    esac
     git show-ref --verify --quiet "refs/heads/$plan_branch" || exec_die "no plan branch to abandon: $plan_branch"
     if [ "$flag" != "-f" ]; then
-      # Refuse when the branch carries commits not on the initiative branch.
+      # Refuse when the branch carries commits not on the initiative
+      # branch — a comparison that needs the base to exist.
+      git show-ref --verify --quiet "refs/heads/$init_branch" \
+        || exec_die "no initiative branch $init_branch — cannot tell whether $plan_branch carries unique commits; pass -f only if you mean to delete them blind"
       if [ -n "$(git log --oneline "$init_branch".."$plan_branch" 2>/dev/null)" ]; then
         exec_die "$plan_branch has commits not on $init_branch — pass -f to delete them deliberately"
       fi
     fi
-    [ "$current" = "$plan_branch" ] && git checkout "$init_branch" >/dev/null
-    git branch ${flag:+-D} -d "$plan_branch" >/dev/null 2>&1 || git branch -D "$plan_branch" >/dev/null
+    if [ "$current" = "$plan_branch" ]; then
+      git show-ref --verify --quiet "refs/heads/$init_branch" \
+        || exec_die "on $plan_branch but no initiative branch $init_branch to return to — check out a base branch first"
+      git checkout "$init_branch" >/dev/null
+    fi
+    if [ "$flag" = "-f" ]; then
+      # -f is the user's informed choice: force-delete unconditionally.
+      git branch -D "$plan_branch" >/dev/null || exec_die "git could not force-delete $plan_branch"
+    else
+      # -d is the safe delete; if it fails despite a clean unique-commit
+      # scan (a race, or an unmerged-but-listed edge), surface git's
+      # reason — never silently escalate to a force-delete.
+      git branch -d "$plan_branch" >/dev/null \
+        || exec_die "could not safely delete $plan_branch — pass -f to force it"
+    fi
     echo "abandoned $plan_branch"
     ;;
   *)

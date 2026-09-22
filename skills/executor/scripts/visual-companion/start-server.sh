@@ -6,8 +6,9 @@
 # Each session gets its own directory to avoid conflicts.
 #
 # Options:
-#   --project-dir <path>  Store session files under <path>/.executor/visual-companion/
-#                         instead of /tmp. Files persist after server stops.
+#   --project-dir <path>  Write the reasoning record (content/ and events)
+#                         directly under <path> instead of /tmp. Files persist
+#                         after server stops.
 #   --host <bind-host>    Host/interface to bind (default: 127.0.0.1).
 #                         Use 0.0.0.0 in remote/containerized environments.
 #   --url-host <host>     Hostname shown in returned URL JSON.
@@ -26,21 +27,35 @@ FORCE_BACKGROUND="false"
 BIND_HOST="127.0.0.1"
 URL_HOST=""
 IDLE_TIMEOUT_MINUTES=""
+
+# A value flag must be followed by a non-flag argument; otherwise the next
+# flag is silently swallowed as its value (or shift underflows at end of args).
+require_flag_value() {
+  if [[ $# -lt 2 || "$2" == -* ]]; then
+    echo "{\"error\": \"$1 requires a value\"}"
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-dir)
+      require_flag_value "$@"
       PROJECT_DIR="$2"
       shift 2
       ;;
     --host)
+      require_flag_value "$@"
       BIND_HOST="$2"
       shift 2
       ;;
     --url-host)
+      require_flag_value "$@"
       URL_HOST="$2"
       shift 2
       ;;
     --idle-timeout-minutes)
+      require_flag_value "$@"
       IDLE_TIMEOUT_MINUTES="$2"
       shift 2
       ;;
@@ -152,12 +167,10 @@ fi
 printf '%s\n' "$SERVER_ID" > "$SERVER_ID_FILE"
 chmod 600 "$SERVER_ID_FILE" 2>/dev/null || true
 
-# Kill any existing server
-if [[ -f "$PID_FILE" ]]; then
-  old_pid=$(cat "$PID_FILE")
-  kill "$old_pid" 2>/dev/null
-  rm -f "$PID_FILE"
-fi
+# No stale-server kill is needed here: STATE_DIR is fresh on every run
+# (SESSION_ID=$$-epoch), so PID_FILE can never already exist. Orphaned
+# servers are reaped by the owner-PID watchdog and idle timeout in
+# server.cjs (lifecycleCheck).
 
 cd "$SCRIPT_DIR" || exit 1
 

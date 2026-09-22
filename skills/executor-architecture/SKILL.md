@@ -16,9 +16,9 @@ Read [`../executor/SKILL.md`](../executor/SKILL.md) and its four references
 before writing into either store. Paths, ID grammar, frontmatter fields, and
 index formats come from there and are binding.
 
-Scripts are written below as `scripts/<name>`; they live in
-[`../executor/scripts/`](../executor/scripts/) and must run inside the git
-repository, since every store path resolves from the repo root.
+Scripts live in [`../executor/scripts/`](../executor/scripts/) and are
+written below with that prefix; they must run inside the git repository,
+since every store path resolves from the repo root.
 
 ## Outputs
 
@@ -47,8 +47,8 @@ left to reject.
 ### 1. Ground yourself, then open the phase
 
 ```bash
-scripts/exec-initiative resolve INIT-0004
-scripts/exec-initiative phase INIT-0004 architecture entered
+../executor/scripts/exec-initiative resolve INIT-0004
+../executor/scripts/exec-initiative phase INIT-0004 architecture entered
 ```
 
 Read, in this order: `charter.md` (problem, success criteria, constraints,
@@ -76,7 +76,7 @@ fixed by writing the documents the seams demand and no others.
 Allocate the ID immediately before writing, never earlier:
 
 ```bash
-scripts/exec-id INIT-0004 ARCH        # -> INIT-0004-ARCH-01
+../executor/scripts/exec-id INIT-0004 ARCH        # -> INIT-0004-ARCH-01
 ```
 
 Write to `architecture/INIT-0004-ARCH-01-<slug>.md` following
@@ -98,7 +98,7 @@ one-line note in the ARCH saying no alternative existed.
 Allocate one ID per ADR, each immediately before writing that file:
 
 ```bash
-scripts/exec-id INIT-0004 ADR         # -> INIT-0004-ADR-01
+../executor/scripts/exec-id INIT-0004 ADR         # -> INIT-0004-ADR-01
 ```
 
 Every ADR carries a falsifier and a `reversibility`. See
@@ -117,7 +117,7 @@ to agree on this name, this type, this error, or this ordering? Then it is an
 interface document, not a paragraph.
 
 ```bash
-scripts/exec-id INIT-0004 IFCE        # -> INIT-0004-IFCE-01
+../executor/scripts/exec-id INIT-0004 IFCE        # -> INIT-0004-IFCE-01
 ```
 
 Follow [interface-template.md](references/interface-template.md). Exact
@@ -166,7 +166,7 @@ Present, in this order and nothing more:
 On approval, flip document `status: draft` → `active` and close the phase:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 architecture passed "2 ADRs, 1 interface"
+../executor/scripts/exec-initiative phase INIT-0004 architecture passed "2 ADRs, 1 interface"
 ```
 
 **The gate ends your turn** — item 4 above is the last line of your message.
@@ -177,8 +177,8 @@ spec written against unapproved structure has to be rewritten, not amended.
 ### 8. Design phase
 
 ```bash
-scripts/exec-initiative phase INIT-0004 design entered
-scripts/exec-id INIT-0004 DSGN        # -> INIT-0004-DSGN-01
+../executor/scripts/exec-initiative phase INIT-0004 design entered
+../executor/scripts/exec-id INIT-0004 DSGN        # -> INIT-0004-DSGN-01
 ```
 
 One DSGN per component that needs one, following
@@ -187,13 +187,13 @@ decomposition. Then present the designs and **end your turn** — same gate
 discipline as architecture. On approval, close:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 design passed "router + admission control"
+../executor/scripts/exec-initiative phase INIT-0004 design passed "router + admission control"
 ```
 
 If no component needs one, skip explicitly — never silently:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 design skipped "single component, internals folded into ARCH-01"
+../executor/scripts/exec-initiative phase INIT-0004 design skipped "single component, internals folded into ARCH-01"
 ```
 
 ## Boundaries: the rule that does the work
@@ -285,7 +285,7 @@ description where its counterpart cannot read it.
 |---|---|---|
 | `draft` | Architecture in progress | Edit freely; nothing depends on it yet |
 | `stable` | Gate passed, plans may be written against it | Update every named consumer in the same change |
-| `frozen` | A plan is executing against it | Do **not** edit. Write a new IFCE that supersedes it, and record the switch as a ruling in the running plan: `scripts/exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>"` — this is execution time, so a ruling is correct here |
+| `frozen` | A plan is executing against it | Do **not** edit. Write a new IFCE that supersedes it, and record the switch as a ruling in the running plan: `../executor/scripts/exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>"` — this is execution time, so a ruling is correct here |
 
 Freezing at execution start is what lets an implementer trust the document
 they were handed. An interface that changes under a running plan invalidates
@@ -340,7 +340,7 @@ Mechanics, both required:
 1. Add the phase to the charter's `skipped_phases`, with the reason in the
    charter body.
 2. Record the phase-log row:
-   `scripts/exec-initiative phase INIT-0004 design skipped "<reason>"`
+   `../executor/scripts/exec-initiative phase INIT-0004 design skipped "<reason>"`
 
 Silence is the failure this prevents. A reader must be able to tell
 "considered and rejected" from "nobody looked" — that distinction is exactly
@@ -354,7 +354,7 @@ superseded reasoning is why the new decision is defensible, and a repo where
 decisions appear fully formed teaches nobody. The next person re-derives the
 rejected option and re-pays its cost.
 
-1. Allocate a new ID: `scripts/exec-id INIT-0004 ADR`.
+1. Allocate a new ID: `../executor/scripts/exec-id INIT-0004 ADR`.
 2. Write the new ADR with `supersedes: INIT-0004-ADR-03`. Its context section
    restates the original context and names what changed: new evidence, a
    changed constraint, or the old falsifier firing.

@@ -85,7 +85,9 @@ validate_phase_transition() {
 
 
 usage() {
-  sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  # Bound by the Usage comment block, not a fixed line range — a literal
+  # range silently dropped `branch`'s tail and `list` as the header grew.
+  sed -n '/^# Usage:/,/^[^#]/ { /^#/s/^# \{0,1\}//p; }' "$0" >&2
   exit 2
 }
 
@@ -183,7 +185,12 @@ cmd_new() {
   # registry row happens under one lock. Releasing on signal too, so a killed
   # run cannot wedge the next caller for ten seconds.
   registry_lock "$store"
-  trap 'registry_unlock "$store"' EXIT INT TERM
+  # EXIT covers normal return and errexit. Signals must exit, not just run
+  # the handler — a trapped INT that falls through would resume cmd_new
+  # after the lock was released. 130/143 = 128+SIGINT/SIGTERM.
+  trap 'registry_unlock "$store"' EXIT
+  trap 'registry_unlock "$store"; exit 130' INT
+  trap 'registry_unlock "$store"; exit 143' TERM
 
   idx=$(ensure_registry "$store")
   id=$(next_initiative_id "$store")
@@ -217,7 +224,7 @@ owner: TBD
 
 ## Problem
 
-<!-- What is wrong today, stated so someone outside the team recognises it. -->
+*What is wrong today, stated so someone outside the team recognises it.*
 
 ## Why now
 
@@ -227,8 +234,7 @@ owner: TBD
 
 ## Success criteria
 
-<!-- Observable and measurable. "Faster" is not a criterion; "p99 under 200ms
-     at 10k tenants" is. -->
+*Observable and measurable. "Faster" is not a criterion; "p99 under 200ms at 10k tenants" is.*
 
 ## Scope boundaries
 
@@ -281,6 +287,11 @@ cmd_phase() {
   [ -n "$id" ] && [ -n "$phase" ] && [ -n "$event" ] || usage
   case " $PHASES " in *" $phase "*) ;; *) exec_die "unknown phase: $phase (want one of: $PHASES)" ;; esac
   case "$event" in entered|passed|skipped) ;; *) exec_die "event must be entered, passed, or skipped" ;; esac
+  # The note lands verbatim in a pipe-table cell — a raw '|' or newline
+  # shifts columns and breaks the log. Same contract as title in cmd_new.
+  case "$note" in
+    *\|*|*$'\n'*) exec_die "note must not contain '|' or newlines — it is interpolated into pipe tables verbatim" ;;
+  esac
 
   local dir idx
   dir=$(exec_initiative_dir "$id")
@@ -299,7 +310,13 @@ cmd_phase() {
       $0 ~ "^\\| " phase " \\|" {
         if (event == "entered") { $3 = " " d " " }
         else if (event == "passed") { $4 = " " d " " }
-        else { $3 = " — "; $4 = " **skipped** " }
+        else {
+          # skipped is a gate decision, not a history rewrite — keep a real
+          # Entered date; write the placeholder only when none was recorded
+          e = $3; gsub(/[[:space:]]/, "", e)
+          if (e == "" || e == "—") { $3 = " — " }
+          $4 = " **skipped** "
+        }
         if (note != "") { $5 = " " note " " }
         print; next
       }
@@ -310,7 +327,9 @@ cmd_phase() {
     case "$event" in
       entered) entered=$(today) ;;
       passed)  passed=$(today) ;;
-      skipped) passed="**skipped**" ;;
+      # Same row shape the in-place branch emits for a phase with no
+      # recorded Entered date: — placeholder plus the skipped gate marker.
+      skipped) entered="—"; passed="**skipped**" ;;
     esac
     printf '| %s | %s | %s | %s |\n' "$phase" "$entered" "$passed" "$note" >> "$idx"
   fi
@@ -370,9 +389,27 @@ cmd_branch() {
     [ -n "$base" ] || exec_die "detached HEAD and no BASE given — name the branch to fork from"
     git rev-parse --verify --quiet "refs/heads/$base" >/dev/null       || exec_die "base branch not found: $base"
     git branch "$branch" "$base"
-    # Record provenance: fork point and base, in the initiative index.
-    printf '\n**Branch:** `%s` (forked from `%s` at %s)\n' \
-      "$branch" "$base" "$(git rev-parse --short "$base")" >> "$idx"
+    # Record provenance beside the status header, not at EOF: the phase log
+    # is the last section of INDEX.md and an EOF append pushes the next
+    # phase row below this line, outside the table. An existing **Branch:**
+    # line is updated in place — repeated calls never duplicate it.
+    local line anchor
+    line="**Branch:** \`$branch\` (forked from \`$base\` at $(git rev-parse --short "$base"))"
+    if   grep -q '^\*\*Branch:\*\*' "$idx"; then anchor='^\*\*Branch:\*\*'
+    elif grep -q '^\*\*Status:\*\*' "$idx"; then anchor='^\*\*Status:\*\*'
+    elif grep -q '^## Dependencies' "$idx"; then anchor='^## Dependencies'
+    else anchor='^# '
+    fi
+    awk -v line="$line" -v anchor="$anchor" '
+      /^\*\*Branch:\*\*/ && done { next }
+      $0 ~ anchor && !done {
+        if ($0 ~ /^\*\*Branch:\*\*/) print line
+        else { print; print line }
+        done = 1; next
+      }
+      { print }
+      END { if (!done) print line }
+    ' "$idx" > "$idx.tmp" && mv "$idx.tmp" "$idx"
     echo "$branch"
   else
     #an existing branch name is not provenance. If the caller

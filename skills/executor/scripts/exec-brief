@@ -6,6 +6,11 @@
 # plus the plan path. A subagent that reads only this file still knows exactly
 # what it is working on and can trace its lineage without opening the plan.
 #
+# A task heading without an ID in a plan that HAS an id: is a die (the run
+# ledger keys on task IDs, so an ID-less task cannot be executed). Only a
+# legacy plan — no id: anywhere — gets a synthesized ID, in the same
+# '<plan>-T<nn>' grammar exec-context uses.
+#
 # Usage: exec-brief PLAN_FILE TASK_NUMBER [OUTFILE]
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
@@ -15,6 +20,12 @@ set -euo pipefail
 plan=$1
 n=$2
 [ -f "$plan" ] || exec_die "no such plan file: $plan"
+
+# n interpolates into the task-extraction awk regex — a non-numeric value
+# is a regex injection ('1|2' matches other tasks), not just a bad lookup.
+case "$n" in
+  ''|*[!0-9]*) exec_die "task number must be numeric (like '3'), got: $n" ;;
+esac
 
 plan_id=$(exec_frontmatter "$plan" id)
 spec_id=$(exec_frontmatter "$plan" spec)
@@ -26,7 +37,7 @@ if [ -z "$task_id" ]; then
 Expected: '### Task $n: <name> — \`${plan_id}-T$(exec_pad2 "$n")\`'
 A plan without task IDs cannot be executed by executor-execution."
   fi
-  task_id="task-$(exec_pad2 "$n")"   # legacy plan, no IDs anywhere
+  task_id="${plan_id:-plan}-T$(exec_pad2 "$n")"   # legacy plan, no IDs anywhere — exec-context's grammar
 fi
 
 if [ $# -eq 3 ]; then
@@ -42,6 +53,8 @@ body=$(exec_task_body "$plan" "$n")
 
 stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
+# A caller-chosen OUTFILE may name a directory that does not exist yet.
+mkdir -p "$(dirname "$out")"
 {
   echo "---"
   echo "kind: brief"
@@ -56,7 +69,7 @@ init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
   echo "updated_at: $stamp"
   echo "---"
   echo
-  echo "<!-- Executor brief — generated, do not edit by hand -->"
+  echo "*Executor brief — generated, do not edit by hand.*"
   echo
   echo "This brief is your requirements. Exact values in it are verbatim —"
   echo "numbers, strings, signatures, and test cases are copied, not paraphrased."
