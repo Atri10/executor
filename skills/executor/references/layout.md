@@ -32,6 +32,15 @@ timestamped rather than ID-numbered because most produce no document of
 their own; one that does records the session path in that document's
 frontmatter.
 
+**A declined brainstorm is recorded in the initiative `INDEX.md` — nowhere
+else.** When ideation is considered at discovery entry and not needed, the
+skip is a line in `INIT-NNNN-<slug>/INDEX.md` containing the word
+"brainstorm" (the store check matches it case-insensitively), e.g.
+`*Brainstorming considered at discovery entry: not needed — <reason>.*`
+An empty `brainstorm/sessions/` with no such line is a contract violation,
+not a neutral state — `exec-store-check` reports it, because nobody can
+later tell a deliberate skip from one that was never considered.
+
 A session directory holds only the **record**: `content/` (the screens shown)
 and `events` (the choices clicked). The visual companion's operational state —
 `server-info`, the log, the pid, and the persisted session key — is written to
@@ -95,6 +104,8 @@ readable after that worktree is gone.
     │   │   │   ├── INIT-0004-P01-T03-R01-a1b2c3d..d4e5f6a.diff
     │   │   │   ├── INIT-0004-P01-T03-R02-d4e5f6a..b7c8d9e.diff
     │   │   │   └── INIT-0004-P01-final-229e5e7..a91e502.diff
+    │   │   ├── fix-packages/
+    │   │   │   └── INIT-0004-P01-T03-R02-fix-package.md
     │   │   └── verdicts/
     │   │       ├── INIT-0004-P01-T03-R01-verdict.md
     │   │       ├── INIT-0004-P01-T03-R02-verdict.md

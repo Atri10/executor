@@ -314,6 +314,26 @@ A note argument, when given, replaces the row's **Notes** cell. The row is
 created if the phase has none yet; otherwise it is edited in place. Prints
 `INIT-0004: discovery entered`.
 
+**`passed` is artifact-gated.** A pass recorded against nothing is refused
+— before writing the row the script checks the initiative folder for at
+least one non-empty file matching the phase's ID-prefixed glob:
+
+| Phase | `passed` requires, under the initiative folder |
+|---|---|
+| `intake` | `charter.md` holding at least one content line beyond frontmatter and headings — the seeded skeleton qualifies; a missing, empty, or headings-only charter does not |
+| `discovery` | `discovery/<id>-RSCH-nn-*.md` or `discovery/<id>-OPTS-nn-*.md` |
+| `architecture` | `architecture/<id>-ARCH-nn-*.md` |
+| `specification` | all three: `specs/<id>-SPEC-nn-*.md`, `risks/<id>-RISK-nn-*.md`, `verification/<id>-VRFY-nn-*.md` |
+| `planning` | `plans/<id>-Pnn-*.md` |
+| `design` | nothing — it may be waived; record that as `skipped`, with the reason |
+| `execution`, `review`, `verification` | nothing at this layer — their artifacts are run-axis, audited by `exec-run` |
+| `handoff` | nothing — the merge and index updates are the artifact |
+
+The check is existence-level — a non-empty file with the right name —
+never content-quality; `exec-store-check` owns content, at handoff time.
+`entered` and `skipped` carry no artifact check. A phase that genuinely
+produced nothing is a `skipped` row, not a bare `passed`.
+
 **Ordering gotcha (verified).** Every event — including `skipped` — sets the
 header and registry Phase to the phase named in the command. Recording a
 skip *after* entering the next phase rewinds both to the skipped phase.
@@ -326,11 +346,12 @@ end of `INDEX.md`. Keep the phase log the **last** section of the initiative
 INDEX — anything you add to that file goes above it, or the next appended
 row lands outside the table.
 
-**A skipped phase always carries a reason note.** The row with `**skipped**`
-and no reason is indistinguishable from an oversight, which is exactly the
-distinction the phase log exists to make. Add the phase to the charter's
-`skipped_phases:` list and its reason to the charter's Skipped phases
-section in the same change.
+**A skipped phase always carries a reason note — enforced: `skipped` with
+an empty or missing note is refused before anything is written.** The row
+with `**skipped**` and no reason is indistinguishable from an oversight,
+which is exactly the distinction the phase log exists to make. Add the
+phase to the charter's `skipped_phases:` list and its reason to the
+charter's Skipped phases section in the same change.
 
 **Rework does not rewind the phase.** Review findings and verification gaps
 send work back to execution; the phase stays where the initiative genuinely

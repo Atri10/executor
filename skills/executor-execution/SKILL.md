@@ -149,11 +149,11 @@ Scan the plan once for conflicts, **writing down what you checked as you
 check it**, into `preflight-scan.md` (already seeded with the table header):
 
 ```markdown
-| Tasks | Shared surface | Produced vs consumed | Finding | Ruling |
-|---|---|---|---|---|
-| T02 ↔ T05 | `src/router/place.ts` | T02 exports `placeCell(tenant, cell)`, T05 calls `placeCell(cell, tenant)` | argument order contradicts | ruled: T02's order is the spec's (INIT-0004-IFCE-01) — T05's dispatch carries the correction |
-| T03 (self) | own text | creates `scoring.ts`, later step edits `score.ts` | filename disagrees with itself | ruled: `scoring.ts`, the name the interface doc uses |
-| T04 (self) | own text | tests assert on the code it specifies | consistent | — |
+| Tasks | Shared surface | Produced vs consumed | Finding | Severity | Ruling |
+|---|---|---|---|---|---|
+| T02 ↔ T05 | `src/router/place.ts` | T02 exports `placeCell(tenant, cell)`, T05 calls `placeCell(cell, tenant)` | argument order contradicts | conflict | ruled: T02's order is the spec's (INIT-0004-IFCE-01) — T05's dispatch carries the correction |
+| T03 (self) | own text | creates `scoring.ts`, later step edits `score.ts` | filename disagrees with itself | conflict | ruled: `scoring.ts`, the name the interface doc uses |
+| T04 (self) | own text | tests assert on the code it specifies | consistent | clean | — |
 ```
 
 The scan's output is a **table, not a verdict**:
@@ -240,7 +240,7 @@ and increase speed.
 | Role / shape | Tier |
 |---|---|
 | Mechanical implementation — isolated function, complete spec, 1-2 files | cheap |
-| Plan text contains the complete code to write (transcription plus testing) | cheapest |
+| Plan text embeds complete implementations | a defect signal, not a discount — the plan is over-specified; route by task complexity, never by code-presence |
 | Single-file mechanical fix | cheapest |
 | Integration and judgment — multi-file coordination, pattern matching, debugging | standard |
 | Architecture and design judgment, broad codebase understanding | most capable |
@@ -528,16 +528,33 @@ item you confirmed as a real gap.
 Everything else enters the loop. A fix round is one fix dispatch plus one
 scoped re-review. **Five rounds maximum per task.**
 
+**A dispute is a ruling trigger, not a fix round.** When the implementer
+and the reviewer disagree about what the contract requires — or an agent
+declares the work belongs to another task or plan — stop dispatching and
+settle the interpretation with `exec-ruling` before any further round; the
+ruling, not the next round, is what unblocks the loop. A recorded ruling is
+final for the run: it goes into the fix dispatch verbatim, agents obey it,
+and it is never re-litigated inside the loop.
+
 **Rounds 1-3 — resume the original implementer.** Send it the open findings
-verbatim. Its context is intact: it knows the task, the code, and its own
-choices. `dispatches.md` holds the agent identity. If your harness cannot
-message a live subagent, dispatch a fresh one carrying the brief path, the
-report-file path, and the findings — the report file is the persistent
-memory either way.
+verbatim plus the brief and context file paths — a fix agent works from the
+contract, not the reviewer's paraphrase of it. Its context is intact: it
+knows the task, the code, and its own choices. `dispatches.md` holds the
+agent identity. Assemble the package mechanically —
+
+```bash
+../executor/scripts/exec-fix-package "$PLAN" INIT-0004-P01-T03
+```
+
+— it pulls the latest verdict's findings, the report, the brief, and the
+context into `reviews/fix-packages/`; hand the agent that file. If your
+harness can message a live subagent, send the package contents; otherwise
+dispatch a fresh one carrying the fix-package path — the report file is the
+persistent memory either way.
 
 **Rounds 4-5 — dispatch a fresh implementer one tier up** (per Model
-Selection), with the brief path, the report-file path, the open findings,
-and this framing:
+Selection), with the brief path, the context-file path, the report-file
+path, the open findings verbatim, and this framing:
 
 > A prior implementer attempted this task [N] times; you own it now. Read
 > the report file for what was tried.
@@ -600,6 +617,13 @@ and the cross-task context the reviewer lacks:
 | Real, but nothing downstream builds on it | Park it with a ruling saying it is real and deferred. |
 | Real and load-bearing — a later task builds on it, or it reveals a plan defect | Rule on the **smallest change that unblocks the dependent work**, record it, and carry it into the next task's dispatch. Parking a structural failure silently lets every dependent task build on it. |
 
+**A cap disposition defers only polish and scope.** Deferring work to
+another task or plan is legal for polish and scope findings only. A
+correctness finding — a spec gap, wrong behavior, a contract violation —
+is never dispositioned as polish: its addendum names the finding's severity
+class and states why deferral is safe, and the finding is flagged for the
+final reviewer, who re-judges it rather than inheriting the disposition.
+
 Stop only when the defect leaves every path forward a guess.
 
 Every parked finding is an `exec-ruling` call plus a ledger line:
@@ -652,7 +676,10 @@ with:
   `reviews/verdicts/INIT-0004-P01-final-verdict.md`,
 - the spec ID and its global constraints,
 - the ledger's deferred-minor and parked lines, so it can triage which must
-  be fixed before merge.
+  be fixed before merge,
+- every round-cap disposition and controller addendum that closed a
+  finding, so a FAIL-in-body verdict closed by an addendum is re-judged
+  rather than inherited.
 
 If it returns findings, dispatch **ONE** fix subagent with the complete
 findings list — **not one fixer per finding.** Per-finding fixers each

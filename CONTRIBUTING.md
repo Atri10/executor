@@ -94,9 +94,9 @@ bash skills/executor/scripts/exec-scan-secrets .
 bash scripts/test-issue9-fixes.sh
 ```
 
-`test-issue9-fixes.sh` is the regression suite: twenty-one fixture cases that
-rebuild disposable repositories and assert each enforced contract. Add a
-case whenever a fix teaches a script to refuse something it used to
+`test-issue9-fixes.sh` is the regression suite: thirty-seven fixture cases
+that rebuild disposable repositories and assert each enforced contract. Add
+a case whenever a fix teaches a script to refuse something it used to
 accept.
 
 The injection linter is heuristic and errs toward false positives — a
