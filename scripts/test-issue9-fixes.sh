@@ -522,7 +522,7 @@ fi
 printf '%s\n' "$OPTS" | sed 's/STATUSHERE/active/; s/RECOMMENDS/INIT-0001-RSCH-01/; s/DECISIONSEC/## Decision\n\nPicked A on 2026-09-12./' > "$SDIR/discovery/INIT-0001-OPTS-01-probe.md"
 bash "$S/exec-store-check" > /dev/null 2>&1 || bad "optsd8: active options with decision rejected"
 printf '%s\n' "$OPTS" | sed 's/STATUSHERE/draft/; s/RECOMMENDS/null/; s/DECISIONSEC//' > "$SDIR/discovery/INIT-0001-OPTS-01-probe.md"
-sed -i '' 's/| INIT-0001-OPTS-01 | options | t | active |/| INIT-0001-OPTS-01 | options | t | draft |/' "$SDIR/INDEX.md"
+sed -i.bak 's/| INIT-0001-OPTS-01 | options | t | active |/| INIT-0001-OPTS-01 | options | t | draft |/' "$SDIR/INDEX.md" && rm -f "$SDIR/INDEX.md.bak"
 bash "$S/exec-store-check" > /dev/null 2>&1 || bad "optsd8: draft options held to the active contract"
 ok "D8 options: active needs recommends + Decision; draft exempt"
 
