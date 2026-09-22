@@ -4,6 +4,115 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+## [Unreleased] — 2026-09-22
+
+### Added
+- 2026-09-22 — **`exec-fix-package` assembles the fix dispatch.** One
+  command produces the complete package a fix implementer is handed:
+  the open findings verbatim from the task's latest verdict, the
+  implementer's own report, and the brief and context files the work
+  is judged against — written to `reviews/fix-packages/` under the
+  plan workspace. Missing verdict, brief, or context refuses; a
+  missing report warns and continues.
+- 2026-09-22 — **Document contracts are checked, not documented.**
+  `exec-store-check` D8 now verifies what each kind's contract
+  actually claims: an architecture document carries a top-level
+  mermaid diagram (a mermaid line inside another fence is quoted
+  example text, not a diagram); a spec carries numbered `### R<nn>`
+  requirement headings, a `verification:` pointer that resolves to a
+  same-initiative `kind: verification` document, and a
+  `global_constraints:` count matching its `C<nn>` rows; an active
+  options document has `recommends:` set and a filled `## Decision`
+  section (drafts are exempt); a verification document's
+  `criteria_count:` matches its distinct `V<nn>` criteria across
+  table rows and `### V<nn>` manual blocks. Thinking-only kinds
+  (charter, research, options, risk, spec, verification) reject
+  implementation-language code fences — contract-bearing kinds and
+  structural fences (mermaid, json, yaml, diff, untagged) are exempt.
+- 2026-09-22 — **Brainstorming is enforced, not scaffolded.** Check
+  B1: once the discovery gate passes, the initiative must carry
+  either a session directory under `brainstorm/sessions/` or a
+  recorded skip note (INDEX.md or a discovery document). The empty
+  scaffold with no record — the state every real initiative was in —
+  now fails.
+- 2026-09-22 — **Phase `passed` is artifact-gated.** `exec-initiative
+  phase … passed` refuses when the phase's deliverable is absent:
+  intake needs a substantive charter, discovery a research or options
+  document, architecture an ARCH document, specification SPEC + RISK
+  + VRFY together, planning a plan. `skipped` now requires a reason
+  note — a bare `**skipped**` row is indistinguishable from an
+  oversight.
+- 2026-09-22 — **`exec-plan-lint` enforces the sketch contract.**
+  Required frontmatter keys (`id`, `spec`, `interfaces`, `tasks`,
+  `execution_mode`) fail when absent — a missing key no longer
+  silently passes every value check. Implementation-language fenced
+  blocks cap at 40 lines, and a task body embedding more than 60
+  implementation lines at more than 60% of its length is rejected as
+  over-specified — plans sketch; implementations belong to interface
+  and design docs.
+- 2026-09-22 — **Dispatch outcomes sync and fix rounds cap.** Every
+  registry mutation in `exec-run` reconciles `dispatches.md`: rows
+  for tasks whose latest ledger state is terminal close as
+  `complete`/`parked`, an `in-fix` boundary closes all but the
+  newest live row, and run completion closes plan-level rows —
+  explicit outcomes are never overwritten, missing rows produce a
+  NOTE. Fix dispatches refuse past the documented five-round maximum
+  (counted by highest round number, not line count) unless a ruling
+  or disposition record exists.
+- 2026-09-22 — **Regression suite covers the new contracts.** Sixteen
+  new cases (37 total) exercise absent-key refusal, sketch/volume
+  caps, every D8 rule, B1, I5, artifact gates, dispatch sync, the
+  fix-round cap and its ruling escape, fix-package assembly,
+  annotated-path extraction, and the wider requirement grammars.
+
+### Fixed
+- 2026-09-22 — **`exec-context` resolves annotated Modify paths.** A
+  `Modify:` line carrying an annotation — `` `file.py` (add Helper) ``,
+  `file.py:88-104` — was looked up verbatim and every existing file
+  reported "does not exist yet". Backticked paths are extracted
+  before annotation stripping, `(...)` suffixes and documented
+  trailing line ranges are removed, and BSD `sed` portability is
+  fixed (`[[:space:]]` in place of `\s`).
+- 2026-09-22 — **Requirement extraction matches real spec grammars.**
+  `exec_requirement_body` covers `### R01 — t`, `### R01: t`, bare
+  `### R01`, `### R01. t`, and paragraph-form `R01. <text>` /
+  `R01: <text>` items — verified against a live spec whose
+  requirements were paragraphs, not headings. `R011` no longer
+  matches a lookup for `R01`.
+- 2026-09-22 — **Execution progress requires branch provenance.**
+  `exec-store-check` I5 fails an initiative whose INDEX records an
+  entered/passed execution, review, verification, or handoff phase
+  but carries no `**Branch:**` line — the fork point must be
+  recoverable.
+- 2026-09-22 — **The fix loop hands over the contract, not a
+  paraphrase.** Fix dispatches previously carried only the reviewer's
+  verdict and the implementer's report — the fixer iterated on a
+  retelling of the requirements. `executor-execution` now routes fix
+  work through `exec-fix-package`, which always includes the brief
+  and context verbatim.
+
+### Changed
+- 2026-09-22 — **Plans contract; they do not implement.** The
+  planning skill's task-body contract is rewritten around the
+  contract/sketch boundary: files, signatures, invariants, exact
+  values, and acceptance criteria are verbatim authority; embedded
+  code is an advisory sketch that loses to the contract on any
+  disagreement, and the implementer reports divergences rather than
+  transcribing defects. `exec-brief` states this split in every
+  brief's preamble; the implementer prompt repeats it. The execution
+  skill's model-selection table no longer prices "complete code in
+  the plan" as cheapest — embedded implementations are a defect
+  signal and model choice routes by task complexity.
+- 2026-09-22 — **Disputes escalate; dispositions stay honest.** A
+  reviewer-vs-implementer contract or scope disagreement is a ruling
+  trigger, not another fix round. Cap dispositions can defer polish
+  but cannot launder correctness findings — the final reviewer
+  re-examines them with the disposition visible.
+- 2026-09-22 — **Layout documents the fix-package artifact.**
+  `references/layout.md` shows `reviews/fix-packages/` in the
+  workspace tree and `references/frontmatter.md` adds the
+  `fix-package` kind to the execution-artifact vocabulary.
+
 ## [Unreleased] — 2026-09-12
 
 ### Fixed

@@ -6,6 +6,9 @@
 # plus the plan path. A subagent that reads only this file still knows exactly
 # what it is working on and can trace its lineage without opening the plan.
 #
+# The preamble separates contract from sketch: signatures, exact values, file
+# lists, and test expectations are verbatim; implementation code is advisory.
+#
 # A task heading without an ID in a plan that HAS an id: is a die (the run
 # ledger keys on task IDs, so an ID-less task cannot be executed). Only a
 # legacy plan — no id: anywhere — gets a synthesized ID, in the same
@@ -71,8 +74,12 @@ mkdir -p "$(dirname "$out")"
   echo
   echo "*Executor brief — generated, do not edit by hand.*"
   echo
-  echo "This brief is your requirements. Exact values in it are verbatim —"
-  echo "numbers, strings, signatures, and test cases are copied, not paraphrased."
+  echo "This brief is your requirements. Signatures, exact values, file"
+  echo "lists, and test expectations are verbatim contract — copied, not"
+  echo "paraphrased. Implementation code shown is a reference sketch, not"
+  echo "authority: where a sketch and the contract disagree, the contract"
+  echo "wins — implement the contract and record the divergence in your"
+  echo "report."
   echo
   echo "---"
   echo
