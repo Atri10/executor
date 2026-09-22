@@ -82,12 +82,12 @@ record path so a restart reuses the same port and key and the tab the user
 already has open reconnects on its own.
 
 ```bash
-INIT_DIR=$(agent/skills/executor/scripts/exec-initiative resolve INIT-0004)
+INIT_DIR=$(../executor/scripts/exec-initiative resolve INIT-0004)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 SESSION="$INIT_DIR/brainstorm/sessions/$STAMP-layout-options"
 mkdir -p "$SESSION"
 
-agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
+../executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
 
 # Returns: {"type":"server-started","port":52341,
 #           "url":"http://localhost:52341/?key=…",
@@ -133,7 +133,7 @@ background and did not capture stdout, read that file for the URL and port.
 **Claude Code:**
 ```bash
 # Default mode works — the script backgrounds the server itself.
-agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
+../executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
 ```
 
 On other runtimes, the default mode works — the script backgrounds the
@@ -147,14 +147,14 @@ server survives across turns, then read `$STATE_DIR/server-info` next turn.
 ```bash
 # Codex reaps background processes. The script auto-detects CODEX_CI and
 # switches to foreground mode. Run it normally — no extra flags needed.
-agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
+../executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open
 ```
 
 **Gemini CLI:**
 ```bash
 # Use --foreground and set is_background: true on your shell tool call
 # so the process survives across turns.
-agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open --foreground
+../executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open --foreground
 ```
 
 **Copilot CLI:**
@@ -163,7 +163,7 @@ agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$S
 # server survives across turns. Keep --foreground so the harness, not the
 # script, owns backgrounding. The launcher is a .sh, so invoke it via bash
 # (on Windows, call Git Bash's bash.exe from the PowerShell tool).
-bash agent/skills/executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open --foreground
+bash ../executor/scripts/visual-companion/start-server.sh --project-dir "$SESSION" --open --foreground
 ```
 
 **Other environments:** the server must keep running in the background across
@@ -174,7 +174,7 @@ If the URL is unreachable from the user's browser (common in remote or
 containerised setups), bind a non-loopback host:
 
 ```bash
-agent/skills/executor/scripts/visual-companion/start-server.sh \
+../executor/scripts/visual-companion/start-server.sh \
   --project-dir "$SESSION" \
   --host 0.0.0.0 \
   --url-host localhost
@@ -406,7 +406,7 @@ to do if something sensitive has already landed.
 ## Closing the Session
 
 ```bash
-agent/skills/executor/scripts/visual-companion/stop-server.sh "$state_dir"
+../executor/scripts/visual-companion/stop-server.sh "$state_dir"
 ```
 
 `stop-server.sh` takes `state_dir` — the runtime directory, which is outside
@@ -417,5 +417,5 @@ produced, so the mockups are reachable from the document that used them.
 
 ## Reference
 
-- Frame template (CSS reference): `agent/skills/executor/scripts/visual-companion/frame-template.html`
-- Helper script (client-side): `agent/skills/executor/scripts/visual-companion/helper.js`
+- Frame template (CSS reference): `../executor/scripts/visual-companion/frame-template.html`
+- Helper script (client-side): `../executor/scripts/visual-companion/helper.js`

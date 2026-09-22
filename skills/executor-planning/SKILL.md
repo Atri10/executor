@@ -25,10 +25,10 @@ unavailable to the person implementing it.
 
 | Read | Why |
 |---|---|
-| `skill://executor` | ID grammar, citation rule, phase gates, rulings policy |
-| `executor/references/frontmatter.md` | plan frontmatter is contract, not style |
-| `executor/references/layout.md` | plans live in `plans/`, nothing else |
-| `executor/references/indexes.md` | the two index updates planning owns |
+| `../executor/SKILL.md` | ID grammar, citation rule, phase gates, rulings policy |
+| `../executor/references/frontmatter.md` | plan frontmatter is contract, not style |
+| `../executor/references/layout.md` | plans live in `plans/`, nothing else |
+| `../executor/references/indexes.md` | the two index updates planning owns |
 | The spec `INIT-NNNN-SPEC-nn` | the plan argues from it; you copy from it |
 | Its `INIT-NNNN-IFCE-nn` | every signature you write comes from here |
 | The ADRs the spec lists in `decisions:` | a plan that reopens a decided question is a defect |
@@ -62,18 +62,19 @@ check mechanical instead of impressionistic.
 
 Plans are numbered per-initiative from `01`: `INIT-0004-P01`,
 `INIT-0004-P02`. Allocate by **listing `plans/` immediately before writing**
-and taking the next free number.
+and taking the next free number — or let `exec-id` do both:
 
 ```bash
-scripts/exec-initiative resolve INIT-0004        # → the initiative folder
-ls "$(scripts/exec-initiative resolve INIT-0004)/plans/"
+../executor/scripts/exec-initiative resolve INIT-0004        # → the initiative folder
+ls "$(../executor/scripts/exec-initiative resolve INIT-0004)/plans/"
+../executor/scripts/exec-id INIT-0004 P                      # → INIT-0004-P01
 ```
 
-**Do not use `exec-id INIT-0004 P` for plan IDs.** It prints
-`INIT-0004-P-01` (a hyphen the grammar does not have) and its scan pattern
-misses existing `INIT-0004-P01` files, so it returns `-01` forever. Use it
-for `ADR`, `IFCE`, `SPEC`, and the other two-segment kinds, where it is
-correct.
+`exec-id` handles the plan kind correctly: `P` is the one kind whose grammar
+has no separator, so it prints `INIT-0004-P01`, never `INIT-0004-P-01`. Its
+scan covers file contents as well as basenames, so an existing
+`INIT-0004-P01` reserves its number even when the file sits in the wrong
+directory.
 
 On a collision — another agent took your number while you were writing —
 take the next one, write your file, and note the race in the initiative's
@@ -527,7 +528,7 @@ execution workspace:
 
 ```bash
 for n in $(seq 1 7); do
-  scripts/exec-brief docs/executor/INIT-0004-.../plans/INIT-0004-P01-....md \
+  ../executor/scripts/exec-brief docs/executor/INIT-0004-.../plans/INIT-0004-P01-....md \
     "$n" /tmp/brief-check.md >/dev/null || echo "TASK $n FAILS"
   grep -m1 '^\*\*Task:\*\*' /tmp/brief-check.md
 done
@@ -542,7 +543,7 @@ heading ordinal and the ID disagree.
 task's last step. If it contains a plan-level section, move that section
 above the first task heading.
 
-**10. Mechanical lint.** Run `scripts/exec-plan-lint PLAN_FILE` before the
+**10. Mechanical lint.** Run `../executor/scripts/exec-plan-lint PLAN_FILE` before the
 gate; exit 0 or fix. It catches what reading re-derives every time: literal
 store paths written into tasks (artifact locations are resolved by
 `exec-workspace`/`exec-evidence`, never named in a plan — issue #7's
@@ -584,7 +585,7 @@ broken in one direction.
 **3. Record the phase transition:**
 
 ```bash
-scripts/exec-initiative phase INIT-0004 planning entered "P01 drafted, 7 tasks"
+../executor/scripts/exec-initiative phase INIT-0004 planning entered "P01 drafted, 7 tasks"
 ```
 
 **4. Commit atomically** — plan, initiative INDEX, spec cross-link, one
@@ -626,7 +627,7 @@ and recommend subagent mode again once — then execute whichever they chose.
 `inline`), flip `status` to `active`, bump `updated_at`, and pass the gate:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 planning passed "subagent mode"
+../executor/scripts/exec-initiative phase INIT-0004 planning passed "subagent mode"
 ```
 
 Then hand to `executor-execution`. **Once execution starts it runs to

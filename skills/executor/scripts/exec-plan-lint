@@ -137,16 +137,33 @@ trap cleanup EXIT
 # split must see the same delimiters or a CRLF plan silently loses its
 # body to the forbidden-path scan.
 sed 's/\r$//' "$plan" > "$fm_tmp"
-awk -v bs="$body_start" 'NR <= bs' "$fm_tmp" > "$body_tmp"
 awk -v bs="$body_start" 'NR >  bs' "$fm_tmp" > "$body_tmp"
+# Emit "lineno:text" for body lines containing a literal, skipping fenced
+# code — a ```markdown example naming a store path is documentation, not a
+# mutation target (same fence model the task-heading scan uses).
+body_lines_with() {
+  awk -v needle="$1" '{
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (match(stripped, /^(`{3,}|~{3,})/)) {
+      len = RLENGTH; ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+      next
+    }
+    if (!infence && index($0, needle)) print NR ":" $0
+  }' "$body_tmp"
+}
 while IFS=: read -r lineno text; do
   [ -n "$text" ] || continue
   case "$text" in
     *.executor/*)
-      fail "line $lineno names a literal .executor/ path — the workspace and its artifacts resolve via exec-workspace/exec-evidence; plans reference scripts, not paths"
+      fail "line $((lineno + body_start)) names a literal .executor/ path — the workspace and its artifacts resolve via exec-workspace/exec-evidence; plans reference scripts, not paths"
       ;;
   esac
-done < <(grep -n '\.executor/' "$body_tmp" || true)
+done < <(body_lines_with '.executor/')
 # docs/executor/<...>: only a MUTATION target (Create/Modify/Test:) is a
 # violation. A read-only citation ("consult docs/executor/INDEX.md",
 # "do not modify") is legitimate — the contract governs where artifacts
@@ -155,10 +172,10 @@ while IFS=: read -r lineno text; do
   [ -n "$text" ] || continue
   case "$text" in
     *[Cc]reate:*docs/executor/*|*[Mm]odify:*docs/executor/*|*[Tt]est:*docs/executor/*)
-      fail "line $lineno names a literal docs/executor/ path as a mutation target — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
+      fail "line $((lineno + body_start)) names a literal docs/executor/ path as a mutation target — artifact locations are resolved by scripts (exec-workspace, exec-evidence), never written into a plan"
       ;;
   esac
-done < <(grep -n 'docs/executor/' "$body_tmp" || true)
+done < <(body_lines_with 'docs/executor/')
 if [ "$violations" -gt 0 ]; then
   echo "$plan: $violations violation(s) — fix before the planning gate" >&2
   exit 1

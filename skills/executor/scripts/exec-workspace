@@ -35,23 +35,18 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Executor ledger
 
-<!-- A ledger whose plan: line names a different plan is not yours — leave
-     it and start your own. One line per state change goes under
-     "## State changes" at the bottom; the table below is the scan index. -->
+*A ledger whose plan: line names a different plan is not yours — leave it and start your own. One line per state change goes under "## State changes" at the bottom; the table below is the scan index.*
 
 ## Task status
 
-<!-- State: pending | dispatched | in-fix | complete | parked. One row per
-     task, filled as it moves. The resume scan reads this table first: a
-     task with no row has never been dispatched. -->
+*State: pending | dispatched | in-fix | complete | parked. One row per task, filled as it moves. The resume scan reads this table first: a task with no row has never been dispatched.*
 
 | Task | State | Commits | Review | Notes |
 |---|---|---|---|---|
 
 ## State changes
 
-<!-- Append-only, one line per state change, newest last. Example:
-     INIT-0004-P01-T03: dispatched (model cheap, agent impl-t03-a, base a1b2c3d) -->
+*Append-only, one line per state change, newest last. Example: INIT-0004-P01-T03: dispatched (model cheap, agent impl-t03-a, base a1b2c3d).*
 EOF
 else
   #reuse is only safe when the ledger describes THIS plan.
@@ -79,9 +74,7 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Rulings — $plan_id
 
-<!-- Append-only. Every decision taken on the human's behalf, written the
-     moment it is made and mirrored into .local/decisions/. Entries are
-     appended at the end of this file by exec-ruling. -->
+*Append-only. Every decision taken on the human's behalf, written the moment it is made and mirrored into .local/decisions/. Entries are appended at the end of this file by exec-ruling.*
 EOF
 
 [ -f "$dir/preflight-scan.md" ] || cat > "$dir/preflight-scan.md" <<EOF
@@ -95,25 +88,18 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Preflight conflict scan — $plan_id
 
-<!-- One row per task pair sharing a file or interface, one row per task for
-     self-consistency, and a ruling beside every finding. Written before
-     Task 1 dispatches; read whenever a task surprises you. -->
+*One row per task pair sharing a file or interface, one row per task for self-consistency, and a ruling beside every finding. Written before Task 1 dispatches; read whenever a task surprises you.*
 
 ## Scan
 
-<!-- Severity: conflict | self-inconsistent | clean. Every pair sharing a
-     file or symbol gets a row; every task gets a self-check row. A finding
-     with no ruling is unresolved — do not dispatch until every finding is
-     ruled. -->
+*Severity: conflict | self-inconsistent | clean. Every pair sharing a file or symbol gets a row; every task gets a self-check row. A finding with no ruling is unresolved — do not dispatch until every finding is ruled.*
 
 | Tasks | Shared surface | Produced vs consumed | Finding | Severity | Ruling |
 |---|---|---|---|---|---|
 
 ## Method
 
-<!-- What was checked: the dependency map rows, the file map, the interface
-     signatures, the test expectations. State the inputs you walked so a
-     reader can see the scan's scope. -->
+*What was checked: the dependency map rows, the file map, the interface signatures, the test expectations. State the inputs you walked so a reader can see the scan's scope.*
 EOF
 
 [ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
@@ -127,13 +113,8 @@ updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Dispatch log — $plan_id
 
-<!-- Context: the brief and context file paths each agent received, so
-     'bad context or bad model?' has a one-line answer. Rows append BELOW
-     the header, never above it. -->
-<!-- Agent identities follow the grammar <ROLE>-<Pnn>-<Tnn>[-R<nn>]:
-     IMPL for implementers, REVIEW for reviewers (round-suffixed,
-     REVIEW-P01-final for the whole-branch review), VERIFY for evidence
-     runs. A resumed agent keeps its identity. See references/layout.md. -->
+*Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
+*Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
 
 | Task | Role | Model | Agent | Started | Outcome | Context |
 |---|---|---|---|---|---|---|

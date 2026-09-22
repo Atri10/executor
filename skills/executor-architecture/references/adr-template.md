@@ -4,12 +4,15 @@ One per decision that had a live alternative. Path:
 `docs/executor/INIT-NNNN-<slug>/architecture/INIT-NNNN-ADR-nn-<slug>.md`
 
 Allocate the ID immediately before writing:
-`scripts/exec-id INIT-NNNN ADR`
+`../../executor/scripts/exec-id INIT-NNNN ADR`
 
 An ADR records a decision taken **with the human in the loop**, during
 architecture or design. It is not a ruling: rulings are execution-time
 decisions taken without the human while a plan runs, recorded by
 `exec-ruling` into that plan's `rulings.md`.
+
+Copy the structure below. Guidance sits in italic lines — replace each one
+with content.
 
 ## Frontmatter
 
@@ -43,9 +46,7 @@ are choosing, in one line — if it reads as a benefit, it is not the cost.
 
 ## Context
 
-<!-- What forced a decision, in terms a reader outside the team recognises.
-     Include the constraint or measurement that narrows the field, with its
-     provenance — measured, cited, or inferred. Two paragraphs at most. -->
+*What forced a decision, in terms a reader outside the team recognises. Include the constraint or measurement that narrows the field, with its provenance — measured, cited, or inferred. Two paragraphs at most.*
 
 Placement must answer in under 200 ms at p99 with 10k tenants (charter
 success criteria). Measured on the load harness (`INIT-0004-RSCH-02`), a
@@ -57,9 +58,7 @@ one region and writes one binding. No query in the design spans cells.
 
 ## Options weighed
 
-<!-- Every option that was genuinely viable, each with its cost stated. An
-     option with no cost was not evaluated. Three rows minimum for a one-way
-     door; one alternative is enough for a two-way door. -->
+*Every option that was genuinely viable, each with its cost stated. An option with no cost was not evaluated. Three rows minimum for a one-way door; one alternative is enough for a two-way door.*
 
 | Option | What it buys | What it costs |
 |---|---|---|
@@ -67,14 +66,13 @@ one region and writes one binding. No query in the design spans cells.
 | Shared Postgres cluster | One backup story, familiar ops, cross-cell queries possible | 40–60 ms per placement measured; isolation becomes a query predicate the code must never get wrong |
 | Embedded key-value store (LMDB) | Fastest reads measured; single file | No SQL for ad-hoc operator inspection; a scoring change becomes a code change instead of a query change |
 
-<!-- If discovery already compared these, cite the OPTS document by its ID
-     within this initiative rather than repeating the comparison. -->
+*If discovery already compared these, cite the OPTS document by its ID within this initiative rather than repeating the comparison.*
 
 Fuller comparison: `INIT-0004-OPTS-01`.
 
 ## Decision
 
-<!-- The choice, stated as a rule someone can apply, not as a preference. -->
+*The choice, stated as a rule someone can apply, not as a preference.*
 
 Cell state lives in one SQLite database per cell, opened by
 `sqlite-cell-store`, which is the only component permitted to hold a database
@@ -83,8 +81,7 @@ handle. Policy reaches storage exclusively through the `CellStore` port
 
 ## Consequences accepted
 
-<!-- Including the ones you dislike. An ADR that lists only consequences you
-     are happy about is an argument, not a record. -->
+*Including the ones you dislike. An ADR that lists only consequences you are happy about is an argument, not a record.*
 
 - No cross-cell transaction is available. Any future operation spanning cells
   needs a saga or an explicit two-phase design.
@@ -96,9 +93,7 @@ handle. Policy reaches storage exclusively through the `CellStore` port
 
 ## What would make this decision wrong
 
-<!-- MANDATORY. Observable, checkable by someone who was not in the room, and
-     paired with the trigger that sends a reader back here. An ADR with no
-     falsifier is an opinion with a template. -->
+*MANDATORY. Observable, checkable by someone who was not in the room, and paired with the trigger that sends a reader back here. An ADR with no falsifier is an opinion with a template.*
 
 This decision is wrong if any of the following becomes true:
 
@@ -110,22 +105,18 @@ This decision is wrong if any of the following becomes true:
 
 ## Reversibility
 
-<!-- Match the scrutiny to the door. State what reversal actually costs. -->
+*Match the scrutiny to the door. State what reversal actually costs.*
 
 **One-way.** Reversal means migrating stored data out of N SQLite files into a
 cluster, with a dual-write period, and rewriting the isolation guarantee from
 physical to logical. Estimated at weeks, not days — which is why three
 options were measured rather than argued.
 
-<!-- For a two-way door, this section is one line: "Two-way. Reversal is a
-     new adapter behind the same port, roughly a day." Decide it fast, and
-     revisit it when the falsifier fires. -->
+*For a two-way door, this section is one line: "Two-way. Reversal is a new adapter behind the same port, roughly a day." Decide it fast, and revisit it when the falsifier fires.*
 
 ## Supersession
 
-<!-- Only present when this ADR replaces another. Restate the original
-     context and name what changed: new evidence, a changed constraint, or
-     the old falsifier firing. Never edit the superseded document's body. -->
+*Only present when this ADR replaces another. Restate the original context and name what changed: new evidence, a changed constraint, or the old falsifier firing. Never edit the superseded document's body.*
 
 Supersedes `INIT-0004-ADR-01`, which chose a shared cluster before the load
 harness existed. Its falsifier ("wrong if measured per-placement network cost

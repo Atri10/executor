@@ -25,6 +25,9 @@
 #     D4. timestamps ISO-8601 UTC; updated_at >= created_at
 #     D5. kind-specific required fields present (spec counts, ADR fields...)
 #     D6. plan task headings carry IDs; count matches tasks:
+#     D7. no HTML comments — a comment between a table header and its rows
+#         splits the table, and an unfilled comment is invisible leftover
+#         guidance (layout.md "Markdown rendering rules")
 #   Cross-links
 #     X1. plan spec: resolves to a SPEC in the same initiative
 #     X2. VRFY spec: resolves to a SPEC in the same initiative
@@ -217,6 +220,9 @@ for idir in "$store"/INIT-*/; do
     [ -n "$ftitle" ] || fail "D1: $rel frontmatter has no title:"
     [ -n "$fcreated" ] || fail "D1: $rel frontmatter has no created_at:"
     [ -n "$fupdated" ] || fail "D1: $rel frontmatter has no updated_at:"
+    for k in supersedes superseded_by; do
+      exec_frontmatter_has "$f" "$k" || fail "D1: $rel frontmatter has no $k: field"
+    done
     case "$fstatus" in
       draft|active|superseded|withdrawn|abandoned|"") ;;
       *) fail "D1: $rel status '$fstatus' not in draft|active|superseded|withdrawn|abandoned" ;;
@@ -263,9 +269,29 @@ for idir in "$store"/INIT-*/; do
           exec_frontmatter_has "$f" "$k" || fail "D5: $rel (interface) missing $k: field in frontmatter"
         done
         ;;
-      research|options)
+      charter)
+        for k in phase skipped_phases depends_on supersedes_initiative superseded_by_initiative related owner; do
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (charter) missing $k: field in frontmatter"
+        done
+        ;;
+      architecture)
+        for k in components interfaces decisions; do
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (architecture) missing $k: field in frontmatter"
+        done
+        ;;
+      design)
+        for k in component implements interfaces; do
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (design) missing $k: field in frontmatter"
+        done
+        ;;
+      research)
         for k in question sources confidence; do
-          exec_frontmatter_has "$f" "$k" || fail "D5: $rel ($fkind) missing $k: field in frontmatter"
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (research) missing $k: field in frontmatter"
+        done
+        ;;
+      options)
+        for k in question sources confidence recommends; do
+          exec_frontmatter_has "$f" "$k" || fail "D5: $rel (options) missing $k: field in frontmatter"
         done
         ;;
       risk)
@@ -284,6 +310,30 @@ for idir in "$store"/INIT-*/; do
         done
         ;;
     esac
+
+    # D7: no HTML comments. Comments inside html/xml/svg code fences are
+    # the sampled language, not markdown comments.
+    awk -v file="$rel" '
+      {
+        line = $0
+        indent = 0
+        while (substr(line, indent + 1, 1) == " ") indent++
+        stripped = substr(line, indent + 1)
+        if (match(stripped, /^(`{3,}|~{3,})/)) {
+          mlen = RLENGTH; ch = substr(stripped, 1, 1)
+          info = substr(stripped, mlen + 1)
+          gsub(/^[ \t]+|[ \t]+$/, "", info)
+          if (!infence) { infence = 1; flen = mlen; fch = ch; markup = (tolower(info) ~ /^(html|xml|svg)/) }
+          else if (ch == fch && mlen >= flen) { infence = 0; markup = 0 }
+          next
+        }
+        if (line ~ /<!--/ && !(infence && markup)) {
+          printf "D7: %s:%d: HTML comment — generated markdown carries no comments; write guidance as visible text\n", file, NR > "/dev/stderr"
+          bad = 1
+        }
+      }
+      END { exit bad }
+    ' "$f" || fail "D7: $rel contains HTML comments (see above)"
 
     # D6: plan task headings carry IDs and match declared count
     if [ "$fkind" = plan ]; then
@@ -322,7 +372,6 @@ for idir in "$store"/INIT-*/; do
         # X3: evidence citations resolve. Cited names accumulate
         # initiative-wide so the orphan scan below sees every VRFY's
         # citations, not just this document's.
-        evdir="$idir/verification/evidence"
         while IFS= read -r ev; do
           [ -n "$ev" ] || continue
           printf '%s\n' "$ev" >> "$cited_tmp"
@@ -340,7 +389,7 @@ for idir in "$store"/INIT-*/; do
   if [ -d "$idir/verification/evidence" ]; then
     while IFS= read -r ef; do
       ebase=$(basename "$ef")
-      case "$ebase" in state.txt|README.md|index.md) continue ;; esac
+      case "$ebase" in state.txt|state-R*.txt|README.md|index.md) continue ;; esac
       grep -qxF "$ebase" "$cited_tmp" || note "orphan evidence: $init_id/$ebase is on disk but cited by no VRFY document"
     done < <(find "$idir/verification/evidence" -type f \( -name '*.txt' -o -name '*.log' \) | sort)
   fi

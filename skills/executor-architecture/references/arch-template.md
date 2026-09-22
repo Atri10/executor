@@ -4,11 +4,12 @@ One per initiative. Path:
 `docs/executor/INIT-NNNN-<slug>/architecture/INIT-NNNN-ARCH-nn-<slug>.md`
 
 Allocate the ID immediately before writing:
-`scripts/exec-id INIT-NNNN ARCH`
+`../../executor/scripts/exec-id INIT-NNNN ARCH`
 
-Copy the structure below. Guidance sits in HTML comments — delete them. Every
-section is required; a section with nothing to say says so in one line
-("Single process, no deployment shape to describe") rather than being cut.
+Copy the structure below. Guidance sits in italic lines — replace each one
+with content. Every section is required; a section with nothing to say says
+so in one line ("Single process, no deployment shape to describe") rather
+than being cut.
 
 ## Frontmatter
 
@@ -41,9 +42,7 @@ initiative's ID, no exceptions.
 
 ## 1. Context and forces
 
-<!-- What this structure exists to satisfy, traced to the charter. Not a
-     restatement of the problem — the forces that constrain the shape.
-     Name each force and where it comes from. -->
+*What this structure exists to satisfy, traced to the charter. Not a restatement of the problem — the forces that constrain the shape. Name each force and where it comes from.*
 
 | Force | Source | Consequence for structure |
 |---|---|---|
@@ -51,17 +50,14 @@ initiative's ID, no exceptions.
 | Tenant data must not co-mingle | charter constraint | Isolation is a boundary, not a query filter |
 | Team of two, one quarter | charter constraint | No component gets its own deployment |
 
-<!-- Also state the forces you are deliberately NOT optimising for. An
-     architecture that claims to satisfy everything has been checked against
-     nothing. -->
+*Also state the forces you are deliberately NOT optimising for. An architecture that claims to satisfy everything has been checked against nothing.*
 
 **Not optimised for:** multi-region writes; more than 50k tenants; hot-swap
 of the storage engine at runtime.
 
 ## 2. Component inventory
 
-<!-- One line per component. If a responsibility needs "and", it is two
-     components or the line is imprecise. -->
+*One line per component. If a responsibility needs "and", it is two components or the line is imprecise.*
 
 | Component | Responsibility (one line) | Layer |
 |---|---|---|
@@ -75,9 +71,7 @@ of the storage engine at runtime.
 
 ## 3. Boundaries
 
-<!-- The load-bearing section. Dependencies point inward toward policy;
-     frameworks, databases, transports, and vendors stay replaceable details
-     at the edge. -->
+*The load-bearing section. Dependencies point inward toward policy; frameworks, databases, transports, and vendors stay replaceable details at the edge.*
 
 | Component | May depend on | Must not depend on | Enforced by |
 |---|---|---|---|
@@ -94,9 +88,7 @@ policy — otherwise a vendor upgrade becomes a policy change.
 than through a port. Cost to undo: one injected parameter and three test
 updates. Accepted because no test needs to control time yet.
 
-<!-- One worked diagram. Boundary subgraphs, and every arrow crossing into
-     policy is an implements-arrow. If your system cannot be drawn this way,
-     name the exception above and its cost. -->
+*One worked diagram. Boundary subgraphs, and every arrow crossing into policy is an implements-arrow. If your system cannot be drawn this way, name the exception above and its cost.*
 
 ```mermaid
 flowchart LR
@@ -133,9 +125,7 @@ rule.
 
 ## 4. Data flow
 
-<!-- The main path first, then each significant variant. Say what data is at
-     each hop and where it changes shape, because shape changes are where
-     seams live. -->
+*The main path first, then each significant variant. Say what data is at each hop and where it changes shape, because shape changes are where seams live.*
 
 1. `http-edge` receives `POST /tenants/:id/cell`, validates syntax only, and
    builds a `PlacementRequest` (tenant id, region, size class).
@@ -154,9 +144,7 @@ policy.
 
 ## 5. Failure modes
 
-<!-- What breaks, how it is noticed, how far it spreads, and whether the
-     response is designed or merely accepted. An accepted failure is fine;
-     an unnoticed one is not. -->
+*What breaks, how it is noticed, how far it spreads, and whether the response is designed or merely accepted. An accepted failure is fine; an unnoticed one is not.*
 
 | Failure | Detected by | Blast radius | Response | Designed or accepted |
 |---|---|---|---|---|
@@ -167,9 +155,7 @@ policy.
 
 ## 6. Deployment shape
 
-<!-- Processes, what runs where, what crosses a process or network boundary
-     and at what cost, and how configuration and secrets arrive. Secrets by
-     reference only. -->
+*Processes, what runs where, what crosses a process or network boundary and at what cost, and how configuration and secrets arrive. Secrets by reference only.*
 
 - One process per region. All components in-process; no internal network
   hops on the placement path — that is what buys the p99 budget.
@@ -180,9 +166,7 @@ policy.
 
 ## 7. What this document does not decide
 
-<!-- Explicit non-decisions, so the spec does not assume they were settled
-     and the next reader does not go looking for a rationale that was never
-     written. -->
+*Explicit non-decisions, so the spec does not assume they were settled and the next reader does not go looking for a rationale that was never written.*
 
 - Cell sizing policy — deferred to `INIT-0004-SPEC-01`.
 - Eviction ordering — no decision yet; the `CellStore` port leaves room for

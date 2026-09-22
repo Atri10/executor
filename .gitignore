@@ -3,5 +3,9 @@
 # see skills/executor/references/safety.md before doing so.
 .executor/*
 
+# The tool's thinking store. This repo is the tool, not a consumer of it:
+# docs/executor/ only ever fills with residue from local test runs.
+docs/executor/
+
 # macOS
 .DS_Store

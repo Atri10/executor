@@ -21,6 +21,12 @@ plan=$1
 n=$2
 [ -f "$plan" ] || exec_die "no such plan file: $plan"
 
+# n interpolates into the task-extraction awk regex — a non-numeric value
+# is a regex injection ('1|2' matches other tasks), not just a bad lookup.
+case "$n" in
+  ''|*[!0-9]*) exec_die "task number must be numeric (like '3'), got: $n" ;;
+esac
+
 plan_id=$(exec_frontmatter "$plan" id)
 spec_id=$(exec_frontmatter "$plan" spec)
 task_id=$(exec_task_id "$plan" "$n")
@@ -68,7 +74,11 @@ fi
 # For each Modify path, extract the current symbol skeleton from HEAD so the
 # implementer can start without exploring the whole codebase.
 surface=""
-modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^\s*- Modify:' || true; } | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/:.*$//' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+# Declared path extraction: a leading backticked span IS the path (the
+# grammar quotes paths), and the only sanctioned colon is the trailing
+# :N / :N-M line-range — stripped last so a colon-bearing path is never
+# cut at its first colon the way 's/:.*$//' did.
+modify_paths=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | { grep '^\s*- Modify:' || true; } | sed -E 's/^\s*- Modify:\s*//' | sed -E 's/^`([^`]*)`.*/\1/' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/:[0-9]+(-[0-9]+)?$//')
 if [ -n "$modify_paths" ]; then
   surface="## Existing surface of the files you will modify
 
@@ -131,7 +141,7 @@ if [ -n "$rulings_file" ]; then
   # next heading — so the Why and Cost lines never detach from the
   # decision. No extension whitelist: any backticked path in
   # the Files block counts, including docs and configs.
-  files=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep -oE '`[^`]+`' | sed 's/`//g' | sed 's/:.*$//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
+  files=$(printf '%s\n' "$task_body" | sed -n '/^\*\*Files:\*\*/,/^\*\*Interfaces:\*\*/p' | grep -oE '`[^`]+`' | sed 's/`//g' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/:[0-9]+(-[0-9]+)?$//' || true)
   files_tmp=$(mktemp)
   printf '%s\n' "$files" > "$files_tmp"
   matches=$(awk -v tid="$task_id" '
@@ -174,6 +184,8 @@ fi
 # --- Assemble --------------------------------------------------------------
 stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
+# A caller-chosen OUTFILE may name a directory that does not exist yet.
+mkdir -p "$(dirname "$out")"
 {
   echo "---"
   echo "kind: context"
@@ -188,7 +200,7 @@ init=$(exec_initiative_of "${plan_id:-}" 2>/dev/null || echo "")
   echo "updated_at: $stamp"
   echo "---"
   echo
-  echo "<!-- Executor context — generated, do not edit by hand -->"
+  echo "*Executor context — generated, do not edit by hand.*"
   echo
   echo "This file carries what the brief cannot: the seam contracts, the"
   echo "existing surface, the binding constraints, and the decided rulings."

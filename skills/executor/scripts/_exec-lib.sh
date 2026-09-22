@@ -186,32 +186,41 @@ exec_task_body() {
       }
     }
     !infence && $0 ~ ("^### Task[ \t]+" n "([^0-9]|$)") { intask = 1; next }
-    !infence && intask && /^### Task[ \t]+[0-9]+([^0-9]|$)/ { exit }
+    # A level-2 or level-3 heading ends the task body — a plan-level
+    # section after the last task is not part of that task.
+    !infence && intask && /^#{2,3} / { exit }
     intask { print }
   ' "$plan"
 }
 
 # Extract one numbered requirement's full text from a spec document.
 # Requirement heading form: '### R01 — <title>'. Body runs to the next
-# '### ' heading (any level-3 heading ends it, per the spec contract).
+# level-2 or level-3 heading (a '## ' section after the requirements is
+# not part of the last requirement).
 exec_requirement_body() {
   local spec=$1 rid=$2
   awk -v rid="$rid" '
-    /^### / && index($0, "### " rid " ") == 1 { inreq = 1; next }
-    inreq && /^### / { exit }
+    /^#{2,3} / {
+      if (inreq) exit
+      h = $0; sub(/^#+[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
+      if (index(h, rid " ") == 1) inreq = 1
+      next
+    }
     inreq { print }
   ' "$spec"
 }
 
 # Extract a full '## Section' body from a document, to the next '## '
 # heading. Used for Interfaces and Global Constraints so long sections
-# are never silently truncated.
+# are never silently truncated. Heading match is exact: '## Interfaces'
+# requested must not match '## Interfaces and seams'.
 exec_section_body() {
   local doc=$1 section=$2
   awk -v sec="$section" '
     /^## / {
       if (insec) exit
-      if (index($0, "## " sec) == 1) { insec = 1; next }
+      h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
+      if (h == sec) { insec = 1; next }
     }
     insec { print }
   ' "$doc"
@@ -219,12 +228,15 @@ exec_section_body() {
 
 # Semantic run audit shared by exec-run check/complete and exec-branch
 # audit. This is the canonical gate (/017): it parses verdict
-# CONTENT (spec_verdict must be PASS and the verdict's head must match
-# the current reviewed head when known), reduces the ledger to the
+# CONTENT (the latest verdict per task and for the branch must be clean:
+# spec_verdict PASS or null — re-review verdicts carry null — with
+# quality APPROVED), reduces the ledger to the
 # latest state per unique task, and requires the exact plan task set.
 # Prints diagnostics to stderr; returns nonzero on any violation.
 exec_run_audit() {
-  local plan=$1 dir=$2 total=$3 reg=$4
+  local plan=$1 dir=$2
+  # Callers set plan_id; die loudly rather than auditing against an empty ID.
+  local plan_id=${plan_id:?exec_run_audit: caller must set plan_id}
   local violations=0
 
   # --- Ledger reduction: latest state per unique task ID ----------------
@@ -243,9 +255,21 @@ exec_run_audit() {
   ' "$dir/progress.md" 2>/dev/null || true)
 
   # --- Expected task set from the plan ----------------------------------
+  # Fence-aware: a '### Task N' inside a code fence is an example, not a
+  # task — the same convention exec-plan-lint enforces.
   local expected
-  expected=$(awk '/^### Task [0-9]+/ {
-    if (match($0, /INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}/)) {
+  expected=$(awk '{
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (match(stripped, /^(`{3,}|~{3,})/)) {
+      len = RLENGTH; ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+    }
+    if (!infence && $0 ~ /^### Task [0-9]+/ &&
+        match($0, /INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}/)) {
       print substr($0, RSTART, RLENGTH)
     }
   }' "$plan" 2>/dev/null | sort -u)
@@ -264,7 +288,9 @@ exec_run_audit() {
   while IFS= read -r tid; do
     [ -n "$tid" ] || continue
     state=$(printf '%s\n' "$task_states" | awk -F'\t' -v t="$tid" '$1 == t { print $2 }')
-    if [ "$state" != "complete" ]; then
+    # Ledger grammar allows an annotation after the state word:
+    # "complete (commits a1b2c3d..b7c8d9e, review clean)". Compare the word.
+    if [ "${state%%[ (]*}" != "complete" ]; then
       echo "AUDIT: $tid is not complete (latest ledger state: ${state:-absent})" >&2
       violations=$((violations + 1))
     else
@@ -276,10 +302,8 @@ exec_run_audit() {
         echo "AUDIT: $tid is complete but no verdict file exists in reviews/verdicts/ — the task is unjudged" >&2
         violations=$((violations + 1))
       else
-        local sv
-        sv=$(awk '/^spec_verdict:/{print $2; exit}' "$vfile")
-        if [ "$sv" != "PASS" ]; then
-          echo "AUDIT: $tid verdict ($(basename "$vfile")) says spec_verdict: ${sv:-missing} — a FAIL/missing verdict is not a pass" >&2
+        if ! exec_verdict_clean "$vfile"; then
+          echo "AUDIT: $tid verdict ($(basename "$vfile")) is not clean — needs spec_verdict: PASS or null with quality: APPROVED" >&2
           violations=$((violations + 1))
         fi
       fi
@@ -289,9 +313,8 @@ exec_run_audit() {
   # Final verdict: file must exist AND content must pass.
   local final="$dir/reviews/verdicts/${plan_id}-final-verdict.md"
   if [ -f "$final" ]; then
-    fsv=$(awk '/^spec_verdict:/{print $2; exit}' "$final")
-    if [ "$fsv" != "PASS" ]; then
-      echo "AUDIT: final verdict says spec_verdict: ${fsv:-missing} — a FAIL/missing verdict is not a pass" >&2
+    if ! exec_verdict_clean "$final"; then
+      echo "AUDIT: final verdict is not clean — needs spec_verdict: PASS or null with quality: APPROVED" >&2
       violations=$((violations + 1))
     fi
   else
@@ -303,15 +326,24 @@ exec_run_audit() {
   # if a final fix-wave re-review failed, the run is not clean.
   local latest_final_r
   latest_final_r=$(ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md 2>/dev/null | sort | tail -1)
-  if [ -n "$latest_final_r" ]; then
-    rfsv=$(awk '/^spec_verdict:/{print $2; exit}' "$latest_final_r")
-    if [ "$rfsv" != "PASS" ]; then
-      echo "AUDIT: latest final re-review ($(basename "$latest_final_r")) says spec_verdict: ${rfsv:-missing} — it supersedes the earlier clean verdict" >&2
-      violations=$((violations + 1))
-    fi
+  if [ -n "$latest_final_r" ] && ! exec_verdict_clean "$latest_final_r"; then
+    echo "AUDIT: latest final re-review ($(basename "$latest_final_r")) is not clean — it supersedes the earlier clean verdict" >&2
+    violations=$((violations + 1))
   fi
 
   return $((violations > 0))
+}
+
+# A verdict file is clean iff spec_verdict is PASS (first-pass verdicts) or
+# null (re-review verdicts carry null — the spec was judged in R01) AND the
+# reviewer's gate field says quality: APPROVED. Both fields are read from
+# frontmatter only — a 'spec_verdict: PASS' line in the verdict body is
+# prose, not a verdict.
+exec_verdict_clean() {
+  local sv q
+  sv=$(exec_frontmatter "$1" spec_verdict)
+  q=$(exec_frontmatter "$1" quality)
+  { [ "$sv" = "PASS" ] || [ "$sv" = "null" ]; } && [ "$q" = "APPROVED" ]
 }
 
 # Generic store lock: one writer at a time for any shared

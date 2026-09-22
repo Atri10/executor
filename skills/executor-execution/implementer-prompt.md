@@ -146,7 +146,7 @@ Subagent (general-purpose):
       helpers. Keep the tests green. Add no behavior.
 
     Before writing any test, read the test-quality doctrine:
-    `skill://executor/references/test-quality.md`. It defines the two
+    `../executor/references/test-quality.md`. It defines the two
     gates your tests must pass — every test names the break it catches,
     and every test exercises the real thing.
 

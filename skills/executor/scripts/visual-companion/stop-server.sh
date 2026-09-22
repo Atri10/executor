@@ -23,8 +23,14 @@ if [[ -f "${SESSION_DIR}/server.pid" ]]; then
 elif [[ -f "${SESSION_DIR}/state/server.pid" ]]; then
   STATE_DIR="${SESSION_DIR}/state"
 else
-  STATE_DIR="${SESSION_DIR}/state"
+  # No pid file in either layout — default to the canonical flat layout so
+  # the derived paths below still point at the right directory.
+  STATE_DIR="${SESSION_DIR}"
 fi
+
+# Same filenames start-server.sh writes directly under its STATE_DIR.
+PID_FILE="${STATE_DIR}/server.pid"
+SERVER_ID_FILE="${STATE_DIR}/server-instance-id"
 
 mark_stopped() {
   local reason="$1"
@@ -94,7 +100,7 @@ if [[ -f "$PID_FILE" ]]; then
   # Try to stop gracefully, fallback to force if still alive
   kill "$pid" 2>/dev/null || true
 
-  # Wait for graceful shutdown (up to ~2s)
+  # Wait for the process to exit on its own (up to ~2s)
   for _ in {1..20}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       break
@@ -123,9 +129,17 @@ if [[ -f "$PID_FILE" ]]; then
   # an absolute /tmp location. A relative or hostile $SESSION_DIR is left
   # alone and reported — rm -rf never runs on an unvalidated path.
   case "$SESSION_DIR" in
-    /tmp/*)
+    /tmp/?*)
       case "$SESSION_DIR" in
-        */..*|*../*|*/.) rm -f "$SESSION_DIR" 2>/dev/null || true ;;
+        */..*|*../*|*/.)
+          # Traversal-shaped path: never rm -rf it. Remove it only if it is
+          # a plain file; directories are skipped and reported instead.
+          if [[ -f "$SESSION_DIR" ]]; then
+            rm -f "$SESSION_DIR"
+          else
+            printf '{"warning": "refusing to remove traversal-like session dir: %s"}\n' "$SESSION_DIR" >&2
+          fi
+          ;;
         *) rm -rf "$SESSION_DIR" ;;
       esac
       ;;
