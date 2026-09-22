@@ -124,6 +124,7 @@ jobs:
           # Empty dispatch table: valid for inline runs, must not fail check.
           printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
           printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
+          bash "$S/exec-run" "$P" complete > /dev/null
           bash "$S/exec-run" "$P" check
       - name: Regression suite (scripts/test-issue9-fixes.sh)
         run: bash scripts/test-issue9-fixes.sh
