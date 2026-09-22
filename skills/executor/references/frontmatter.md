@@ -145,7 +145,7 @@ Common shape (all execution artifacts):
 
 ```yaml
 ---
-kind: brief                        # brief|context|ledger|rulings|preflight|dispatches|report|verdict|evidence
+kind: brief                        # brief|context|ledger|rulings|preflight|dispatches|report|verdict|fix-package|evidence
 id: INIT-0004-P01-T03              # the task ID; ledger/rulings/preflight/dispatches use the plan ID instead
 initiative: INIT-0004
 plan: INIT-0004-P01
@@ -170,6 +170,7 @@ Per-kind fields:
 | `dispatches` | `exec-workspace` | — | `dispatches.md` |
 | `report` | the implementer | `task: INIT-0004-P01-T03`, `rounds: 2` | one file per task, appended per fix round |
 | `verdict` | the reviewer | `task`, `round: INIT-0004-P01-T03-R02`, `spec_verdict: PASS`, `quality: APPROVED` | one file per review round |
+| `fix-package` | `exec-fix-package` | `task`, `round: INIT-0004-P01-T03-R02`, `verdict:` provenance path | verdict findings + report + brief + context assembled for the fix dispatch |
 | `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion; written to the initiative's tracked `verification/evidence/PNN/` |
 
 `report` and `verdict` files are written by subagents, not scripts — the

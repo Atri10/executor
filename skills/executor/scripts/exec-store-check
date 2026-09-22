@@ -18,6 +18,11 @@
 #     I2. every Documents row's Path resolves to a file
 #     I3. row Status matches the document's frontmatter status
 #     I4. phase log has no time travel (Gate passed not before Entered)
+#     I5. an initiative that has entered execution carries a **Branch:**
+#         line — exec-initiative branch writes the fork point at fork time
+#   Brainstorm
+#     B1. discovery gate passed ⇒ a session under brainstorm/sessions/
+#         or a recorded skip note (INDEX.md or a discovery document)
 #   Documents
 #     D1. frontmatter present; id/initiative/kind/title/status/timestamps set
 #     D2. id matches the filename's ID segment
@@ -28,6 +33,14 @@
 #     D7. no HTML comments — a comment between a table header and its rows
 #         splits the table, and an unfilled comment is invisible leftover
 #         guidance (layout.md "Markdown rendering rules")
+#     D8. per-kind body contracts: ARCH carries a mermaid diagram; SPEC
+#         carries ### R<nn> headings, a verification pointer resolving to
+#         a VRFY in this initiative, and a global_constraints count
+#         matching its C<nn> rows; an active OPTS has recommends set and
+#         a filled ## Decision; VRFY criteria_count matches its V<nn>
+#         criteria; and thinking-only kinds (charter, research, options,
+#         risk, spec, verification) embed no implementation-language
+#         code fences
 #   Cross-links
 #     X1. plan spec: resolves to a SPEC in the same initiative
 #     X2. VRFY spec: resolves to a SPEC in the same initiative
@@ -201,9 +214,47 @@ for idir in "$store"/INIT-*/; do
         fail "I4: $init_id phase log row '$phase' passed its gate ($gate) before the phase was entered ($entered) — time travel"
       fi
     done < <(grep -E '^\| *(intake|discovery|architecture|design|specification|planning|execution|review|verification|handoff) *\|' "$idx")
+
+    # I5: once execution begins the initiative branch exists, and its
+    # fork provenance lives on the INDEX **Branch:** line —
+    # exec-initiative branch writes it at fork time, never afterwards.
+    # An initiative that has not reached execution legitimately has none.
+    if ! grep -q '^\*\*Branch:\*\*' "$idx"; then
+      needs_branch=0
+      while IFS= read -r row; do
+        row=${row#\|}; row=${row%\|}
+        IFS='|' read -r _ bentered bgate _ <<< "$row"
+        bentered=$(printf '%s' "$bentered" | xargs)
+        bgate=$(printf '%s' "$bgate" | xargs)
+        case "$bentered $bgate" in
+          *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*) needs_branch=1 ;;
+        esac
+      done < <(grep -E '^\| *(execution|review|verification|handoff) *\|' "$idx")
+      [ "$needs_branch" -eq 0 ] || fail "I5: $init_id INDEX.md records execution-phase progress but carries no **Branch:** line — exec-initiative branch writes the fork point there"
+    fi
+
+    # B1: a passed discovery gate means ideation was either run — a
+    # session directory under brainstorm/sessions/ — or declined with a
+    # recorded note. An empty sessions dir with no note in INDEX.md or a
+    # discovery document means the decision was never recorded, and a
+    # later reader cannot tell deliberate skip from never-considered.
+    while IFS= read -r row; do
+      row=${row#\|}; row=${row%\|}
+      IFS='|' read -r _ _ bgate _ <<< "$row"
+      bgate=$(printf '%s' "$bgate" | xargs)
+      case "$bgate" in
+        ????-??-??) ;;
+        *) continue ;;
+      esac
+      if ! find "$idir/brainstorm/sessions" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q . \
+         && ! grep -qi 'brainstorm' "$idx" \
+         && ! grep -li 'brainstorm' "$idir"/discovery/*.md 2>/dev/null | grep -q .; then
+        fail "B1: $init_id discovery passed but no brainstorm session and no recorded skip — discovery contract requires one or the other"
+      fi
+    done < <(grep -E '^\| *discovery *\|' "$idx")
   fi
 
-  # ---- D1–D6: every document ------------------------------------------------
+  # ---- D1–D8: every document ------------------------------------------------
   while IFS= read -r f; do
     rel=${f#"$idir"}
     base=${rel#/}; seg=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}-(CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY)-[0-9]+|INIT-[0-9]{4}-P[0-9]{2}') || seg=""
@@ -334,6 +385,166 @@ for idir in "$store"/INIT-*/; do
       }
       END { exit bad }
     ' "$f" || fail "D7: $rel contains HTML comments (see above)"
+
+    # D8: per-kind body contracts, checked where the contract is countable
+    # or referenceable. Plan task-count and INDEX status agreement are
+    # already covered by D6 and I3.
+    case "$fkind" in
+      architecture)
+        # The arch contract requires one worked diagram — a ```mermaid
+        # fence at body level. A ```mermaid line inside another fence is
+        # quoted example text, not a diagram.
+        awk '
+          {
+            line = $0
+            indent = 0
+            while (substr(line, indent + 1, 1) == " ") indent++
+            stripped = substr(line, indent + 1)
+            if (match(stripped, /^(`{3,}|~{3,})/)) {
+              mlen = RLENGTH; ch = substr(stripped, 1, 1)
+              if (!infence) {
+                info = substr(stripped, mlen + 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", info)
+                tag = tolower(info)
+                sub(/[ \t].*$/, "", tag); gsub(/[{}]/, "", tag); sub(/^\./, "", tag)
+                if (tag == "mermaid") found = 1
+                infence = 1; flen = mlen; fch = ch
+              }
+              else if (ch == fch && mlen >= flen) { infence = 0 }
+            }
+          }
+          END { exit !found }
+        ' "$f" || fail "D8: $rel architecture document carries no mermaid diagram — the arch contract requires one worked diagram"
+        ;;
+      spec)
+        # Requirements are numbered ### R<nn>; the verification pointer
+        # is written when the spec is and must resolve to a VRFY document
+        # in this initiative (the X2 resolution, run in reverse); a
+        # declared global_constraints count must match the C<nn> rows.
+        counts=$(awk '
+          {
+            line = $0
+            indent = 0
+            while (substr(line, indent + 1, 1) == " ") indent++
+            stripped = substr(line, indent + 1)
+            if (match(stripped, /^(`{3,}|~{3,})/)) {
+              mlen = RLENGTH; ch = substr(stripped, 1, 1)
+              if (!infence) { infence = 1; flen = mlen; fch = ch }
+              else if (ch == fch && mlen >= flen) { infence = 0 }
+              next
+            }
+            if (infence) next
+            if (stripped ~ /^###[ \t]+R[0-9]+([^0-9A-Za-z]|$)/) nreq++
+            if (stripped ~ /^\|[ \t]*C[0-9]+[ \t]*\|/) {
+              match(stripped, /C[0-9]+/)
+              cons[substr(stripped, RSTART, RLENGTH)] = 1
+            }
+          }
+          END { print nreq + 0, length(cons) }
+        ' "$f")
+        nreq=${counts%% *}; ncons=${counts##* }
+        [ "$nreq" -gt 0 ] || fail "D8: $rel (spec) carries no ### R<nn> requirement heading — the spec contract numbers every requirement"
+        sver=$(fm_field "$f" verification)
+        case "$sver" in
+          ""|null|"[]")
+            fail "D8: $rel (spec) verification: is unset — the spec contract names its VRFY document at writing time" ;;
+          "$init_id"-*)
+            vf=$(find "$idir" -name "${sver}-*.md" -print -quit)
+            if [ -z "$vf" ]; then
+              fail "D8: $rel verification '$sver' resolves to no document in $init_id"
+            elif [ "$(fm_field "$vf" kind)" != "verification" ]; then
+              fail "D8: $rel verification '$sver' names $(basename "$vf"), which is not kind: verification"
+            fi ;;
+          *) fail "D8: $rel verification '$sver' is a cross-initiative citation — forbidden outside charter fields" ;;
+        esac
+        declared=$(fm_field "$f" global_constraints)
+        if [ -n "$declared" ] && [ "$declared" != "null" ]; then
+          [ "$declared" = "$ncons" ] || \
+            fail "D8: $rel global_constraints: $declared but the body carries $ncons C<nn> constraint rows"
+        fi
+        ;;
+      options)
+        # An active OPTS means the human picked: recommends names the
+        # document carrying the choice and ## Decision records it.
+        if [ "$fstatus" = active ]; then
+          rec=$(fm_field "$f" recommends)
+          case "$rec" in
+            ""|null|"[]")
+              fail "D8: $rel (options) is active but recommends: is unset — the human's pick was never recorded" ;;
+          esac
+          [ -n "$(exec_section_body "$f" Decision | tr -d '[:space:]')" ] \
+            || fail "D8: $rel (options) is active but its ## Decision section is absent or empty — the pick and its date live there"
+        fi
+        ;;
+      verification)
+        declared=$(fm_field "$f" criteria_count)
+        if [ -n "$declared" ] && [ "$declared" != "null" ]; then
+          # Criteria are | V<nn> | table rows plus ### V<nn> manual
+          # blocks — count the distinct IDs, matching the contract.
+          ncrit=$(awk '
+            {
+              line = $0
+              indent = 0
+              while (substr(line, indent + 1, 1) == " ") indent++
+              stripped = substr(line, indent + 1)
+              if (match(stripped, /^(`{3,}|~{3,})/)) {
+                mlen = RLENGTH; ch = substr(stripped, 1, 1)
+                if (!infence) { infence = 1; flen = mlen; fch = ch }
+                else if (ch == fch && mlen >= flen) { infence = 0 }
+                next
+              }
+              if (infence) next
+              if (stripped ~ /^\|[ \t]*V[0-9]+[ \t]*\|/) {
+                match(stripped, /V[0-9]+/)
+                vs[substr(stripped, RSTART, RLENGTH)] = 1
+              }
+              if (match(stripped, /^###[ \t]+V[0-9]+([^0-9A-Za-z]|$)/)) {
+                match(stripped, /V[0-9]+/)
+                vs[substr(stripped, RSTART, RLENGTH)] = 1
+              }
+            }
+            END { print length(vs) }
+          ' "$f")
+          [ "$declared" = "$ncrit" ] || \
+            fail "D8: $rel criteria_count: $declared but the body carries $ncrit V<nn> criteria"
+        fi
+        ;;
+    esac
+
+    # D8 (doc-code boundary): thinking-only kinds carry prose, tables,
+    # and contract/pseudocode — an implementation-language fence is code
+    # that escaped into the record. Contract-bearing kinds (interface,
+    # design, architecture, plan) legitimately carry code and are exempt,
+    # as are structural fences (mermaid, json, yaml, diff, ...) and
+    # untagged blocks.
+    case "$fkind" in
+      charter|research|options|risk|spec|verification)
+        while IFS= read -r lang; do
+          [ -n "$lang" ] || continue
+          fail "D8: $rel non-code document kind '$fkind' embeds $lang code — thinking docs carry prose, tables, and contract/pseudocode only"
+        done < <(awk '
+          {
+            line = $0
+            indent = 0
+            while (substr(line, indent + 1, 1) == " ") indent++
+            stripped = substr(line, indent + 1)
+            if (match(stripped, /^(`{3,}|~{3,})/)) {
+              mlen = RLENGTH; ch = substr(stripped, 1, 1)
+              if (!infence) {
+                info = substr(stripped, mlen + 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", info)
+                tag = tolower(info)
+                sub(/[ \t].*$/, "", tag); gsub(/[{}]/, "", tag); sub(/^\./, "", tag)
+                if (tag ~ /^(python|java|kotlin|kts|go|rust|ruby|php|swift|scala|c|cc|cpp|cs|ts|tsx|js|jsx|mjs|cjs)$/) seen[tag] = 1
+                infence = 1; flen = mlen; fch = ch
+              }
+              else if (ch == fch && mlen >= flen) { infence = 0 }
+            }
+          }
+          END { for (t in seen) print t }
+        ' "$f")
+        ;;
+    esac
 
     # D6: plan task headings carry IDs and match declared count
     if [ "$fkind" = plan ]; then

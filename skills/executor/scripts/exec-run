@@ -80,12 +80,115 @@ update_row() {
     END { exit (found ? 0 : 1) }
   ' "$reg" > "$tmp"; then
     mv "$tmp" "$reg"
+    # Dispatch-log hygiene rides the same locked transition: every
+    # registry mutation is also the moment a terminal ledger state gets
+    # its dispatches.md Outcome cell closed. Never fatal — a missing or
+    # rowless dispatches table is a NOTE, not a failed transition.
+    sync_dispatch_outcomes "$status"
     store_unlock "$store"
   else
     rm -f "$tmp"
     store_unlock "$store"
     exec_die "no registry row for $plan_id in $reg — run exec-workspace on the plan file first; it seeds the row exec-run mutates"
   fi
+}
+
+# Close the dispatch loop: the controller appends one dispatches.md row
+# per dispatch with Outcome 'running', and nothing ever rewrote it —
+# real ledgers (vocab INIT-0004) show every row stuck at 'running'. When
+# a task's latest ledger state is terminal (complete / parked), every
+# 'running' row it owns is dead and gets the terminal word — including
+# round-suffixed rows ('| INIT-…-T01-R01 |'), normalized onto the task.
+# At a fix boundary (in-fix / fix round) the round's dispatch is over
+# but the NEXT round's row may already be appended, so all 'running'
+# rows except the task's last close as 'done' — never closing the row
+# that may be live. When the run itself completes, plan-level rows
+# ('| INIT-…-P01 | final fix wave |') close too. Rows carrying a real
+# outcome are left alone; a terminal task with no row is a NOTE, never
+# a created row. dispatches.md is per-plan like progress.md, but this
+# runs under update_row's store lock so the registry row and the outcome
+# cells land as one bookkeeping act. $1 = the Status word being written.
+sync_dispatch_outcomes() {
+  local dfile="$dir/dispatches.md" tmp row_status=$1
+  [ -f "$dfile" ] || return 0
+  [ -f "$dir/progress.md" ] || return 0
+  tmp=$(mktemp "$dir/.dispatches.XXXXXX") || return 0
+  if awk -v pid="$plan_id" -v prog="$dir/progress.md" -v status="$row_status" '
+    BEGIN {
+      # Latest ledger state per task — same reduction the run audit
+      # uses: last state-change line wins, the state is the leading
+      # word ("complete (commits…)" annotations count as complete).
+      while ((getline line < prog) > 0) {
+        if (line ~ ("^" pid "-T[0-9][0-9]: ")) {
+          t = line; sub(/:.*/, "", t)
+          s = line; sub(/^[^:]*:[ \t]*/, "", s)
+          last[t] = s
+        }
+      }
+      close(prog)
+      for (t in last) {
+        w = last[t]; sub(/[ (].*$/, "", w)
+        if (w == "complete" || w == "parked") term[t] = w
+        else if (w == "in-fix" || w == "fix") term[t] = "done"
+      }
+      # A completed run is terminal for the plan-level rows too — the
+      # final reviewer and final-fix dispatches keyed by the bare plan
+      # ID or <pid>-final are as dead as any task row.
+      if (status == "complete") term[pid] = "complete"
+      ocol = 0
+    }
+    {
+      rows[NR] = $0
+      if (!ocol && $0 ~ /^\|[ \t]*Task[ \t]*\|/) {
+        # Locate the Outcome column by name (older seeds called it
+        # Status) so a differently-shaped table is never rewritten in
+        # the wrong cell.
+        split($0, h, "|")
+        for (i = 2; i <= length(h); i++) {
+          c = h[i]; gsub(/^[ \t]+|[ \t]+$/, "", c)
+          if (c == "Outcome" || c == "Status") { ocol = i; break }
+        }
+      }
+      if ($0 ~ ("^\\|[ \t]*" pid "(-T[0-9][0-9](-R[0-9]+)?|-final)?[ \t]*\\|")) {
+        split($0, f, "|")
+        t = f[2]; gsub(/[ \t]/, "", t)
+        # Round-suffixed task cells (T01-R01) and the final-review cell
+        # both roll up to their task / plan key.
+        sub(/-R[0-9]+$/, "", t)
+        if (t == (pid "-final")) t = pid
+        hasrow[t] = 1
+        lastrow[t] = NR
+        if (t in term) trows[t] = trows[t] " " NR
+      }
+    }
+    END {
+      for (t in term) {
+        if (!(t in hasrow)) {
+          printf "%s\n", "NOTE: " t " is " term[t] " in the ledger but has no dispatches.md row — outcome left unrecorded" > "/dev/stderr"
+          continue
+        }
+        if (!ocol) break
+        n = split(trows[t], idx, " ")
+        for (k = 1; k <= n; k++) {
+          r = idx[k] + 0
+          split(rows[r], f, "|")
+          oc = f[ocol]; gsub(/^[ \t]+|[ \t]+$/, "", oc)
+          if (oc != "running") continue
+          if (term[t] == "done" && r == lastrow[t]) continue
+          f[ocol] = " " term[t] " "
+          rebuilt = f[1]
+          for (i = 2; i <= length(f); i++) rebuilt = rebuilt "|" f[i]
+          rows[r] = rebuilt
+        }
+      }
+      for (i = 1; i <= NR; i++) print rows[i]
+    }
+  ' "$dfile" > "$tmp"; then
+    mv "$tmp" "$dfile"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
 }
 
 # Mark one task's dispatch in the ledger: the Task-status row the resume
@@ -118,6 +221,36 @@ mark_dispatch() {
     ' "$dir/progress.md" > "$tmp" && mv "$tmp" "$dir/progress.md"
   fi
   printf '%s: dispatched\n' "$tid" >> "$dir/progress.md"
+}
+
+# Fix-round cap: executor-execution documents five rounds maximum per
+# task. The ledger logs a round as 'Tnn: fix round N/5' (the /5 suffix
+# is optional in the wild, and one round can span several lines — a
+# dispatch line plus a close line — so the round NUMBER, not the line
+# count, is the measure). A ledger already at N=5 means the loop cannot
+# converge; another fix dispatch is refused unless an adjudication
+# already exists for the task — a rulings.md record ('## Tnn — …') or a
+# disposition line in the progress notes (parked / ruling / disposition
+# / adjudication / CLOSED). Enforced here, on the dispatch-marking
+# ledger-write path, because it is the only door a fix dispatch comes
+# through.
+enforce_fix_cap() {
+  local tid=$1 maxn
+  [ -f "$dir/progress.md" ] || return 0
+  maxn=$(awk -v tid="$tid" '
+    $0 ~ ("^" tid ": fix round[ \t]+[0-9]+") {
+      n = $0; sub(/^.*fix round[ \t]+/, "", n); sub(/[^0-9].*$/, "", n)
+      if (n + 0 > m) m = n + 0
+    }
+    END { print m + 0 }
+  ' "$dir/progress.md")
+  [ "${maxn:-0}" -ge 5 ] || return 0
+  grep -qE "^## ${tid}([[:space:]]|$)" "$dir/rulings.md" 2>/dev/null && return 0
+  if { grep -E "^${tid}: " "$dir/progress.md" 2>/dev/null || true; } \
+     | grep -qiE 'parked|ruling|disposition|adjudicat|closed'; then
+    return 0
+  fi
+  exec_die "$tid: fix-round cap (5) reached — escalate for a ruling/disposition instead of another round"
 }
 
 case "$action" in
@@ -164,6 +297,10 @@ case "$action" in
     # word — "complete (commits…)" annotations count, matching the audit.
     latest_state=$( { grep -E "^${task_id}: " "$dir/progress.md" 2>/dev/null || true; } | tail -1 | sed -E 's/^[^:]*:[[:space:]]*//')
     [ "${latest_state%%[ (]*}" = "complete" ] && exec_die "$task_id is already complete in the ledger — record an in-fix line before re-dispatching it"
+    # A dispatch for a task already at the fix-round cap is round 6+ —
+    # the documented maximum was reached, so only a recorded
+    # adjudication/disposition lets it through.
+    enforce_fix_cap "$task_id"
     update_row "running" "$done_count/$total" ""
     mark_dispatch "$task_id"
     echo "$plan_id: dispatched $task_id ($done_count/$total)"

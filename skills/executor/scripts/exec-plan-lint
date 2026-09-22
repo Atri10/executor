@@ -14,7 +14,19 @@
 #   2. Task-heading integrity. Every '### Task N:' heading must carry its
 #      task ID backtick token (INIT-NNNN-Pnn-Tnn) — exec-brief refuses
 #      without it.
-#   3. Frontmatter presence: id and spec must be non-empty.
+#   3. Frontmatter contract: the required keys (id, spec, interfaces,
+#      tasks, execution_mode) must be PRESENT — an absent key is not an
+#      empty value; INIT-0004-P03 shipped with no interfaces:/tasks: keys
+#      at all and linted clean under value-only checks. Values keep their
+#      rules: id/spec non-empty, execution_mode declares the dispatch
+#      model, tasks: matches the real heading count.
+#   4. Sketch cap. Plans sketch; they do not implement. A fenced block
+#      tagged with an implementation language may hold at most 40 lines —
+#      past that it is a pasted implementation. Within a task body,
+#      implementation-language code over 60% of the body's lines and over
+#      60 lines total is over-specification. Contract/fixture fences (sql,
+#      json, toml, yaml, text, bash, sh, diff, mermaid) and untagged
+#      fences are exempt.
 #
 # Usage: exec-plan-lint PLAN_FILE
 # Exit: 0 clean, 1 violations, 2 usage error
@@ -29,6 +41,18 @@ violations=0
 fail() { echo "VIOLATION: $*" >&2; violations=$((violations + 1)); }
 
 # --- Frontmatter ------------------------------------------------------------
+# Presence before value: a key that is absent passes every value check
+# below — nothing reads it, so nothing rejects it. exec_frontmatter_has
+# scopes the test to the frontmatter block, so a 'tasks:' inside a body
+# code fence is an example, not a field. The required set is the plan
+# contract's execution-critical keys; the wider document fields
+# (initiative, kind, timestamps, supersedes, superseded_by, workspace) are
+# enforced by exec-store-check D1/D5 once the plan lands in the store.
+for req_key in id spec interfaces tasks execution_mode; do
+  exec_frontmatter_has "$plan" "$req_key" \
+    || fail "no '$req_key:' key in frontmatter — the plan contract requires the key even when its value is empty"
+done
+
 plan_id=$(exec_frontmatter "$plan" id)
 spec_id=$(exec_frontmatter "$plan" spec)
 [ -n "$plan_id" ] || fail "no id: in frontmatter — a plan without an ID cannot be tracked"
@@ -38,9 +62,9 @@ spec_id=$(exec_frontmatter "$plan" spec)
 # execution_mode, P03 with execution_mode: null — all under lint that only
 # checked id/spec. Required plan fields are each enforced now.
 exec_mode=$(exec_frontmatter "$plan" execution_mode)
-[ -n "$exec_mode" ] || fail "no execution_mode: in frontmatter — the dispatch model (subagent|inline) must be declared, not implied"
 case "$exec_mode" in
   subagent|inline) ;;
+  "") fail "no execution_mode: in frontmatter — the dispatch model (subagent|inline) must be declared, not implied" ;;
   *) fail "execution_mode: '$exec_mode' is neither subagent nor inline" ;;
 esac
 interfaces_inline=$(awk '
@@ -176,6 +200,86 @@ while IFS=: read -r lineno text; do
       ;;
   esac
 done < <(body_lines_with 'docs/executor/')
+
+# --- 4. Sketch cap -----------------------------------------------------------
+# Plans sketch; implementations live in interface and design docs. Two
+# limits, fence-aware over the body (post-frontmatter, CRLF-normalized —
+# same model as the task-heading and store-path scans):
+#   * a fenced block tagged with an implementation language may hold at
+#     most 40 body lines — past that it is a pasted implementation;
+#   * within one '### Task N:' body, implementation-language fenced lines
+#     over 60% of the body's line count AND over 60 lines total is
+#     over-specification (test code counts too — the cap targets embedded
+#     implementation volume overall).
+# Contract/fixture fences never count: sql json toml yaml yml text bash sh
+# shell diff mermaid — and untagged fences.
+while IFS=$'\t' read -r cap_kind cap1 cap2 cap3 cap4; do
+  [ -n "$cap_kind" ] || continue
+  case "$cap_kind" in
+    B)
+      fail "line $cap1: implementation block of $cap2 lines exceeds the 40-line sketch cap — keep signatures/invariants/tests verbatim; move full implementations to an interface or design doc"
+      ;;
+    T)
+      fail "line $cap1: Task $cap2 embeds $cap3 implementation-code lines across a $cap4-line body (>60% and >60) — a plan sketches the work; the implementation belongs in an interface or design doc"
+      ;;
+  esac
+done < <(awk -v bs="$body_start" '
+  BEGIN {
+    split("python java kotlin kts go rust ruby php swift scala c cc cpp cs ts tsx js jsx mjs cjs", langs, " ")
+    for (i in langs) impl[langs[i]] = 1
+  }
+  function flush_task() {
+    if (intask && timpl > 60 && timpl > 0.6 * tlines)
+      printf "T\t%d\t%d\t%d\t%d\n", tstart + bs, tnum, timpl, tlines
+  }
+  {
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (match(stripped, /^(`{3,}|~{3,})/)) {
+      mlen = RLENGTH; ch = substr(stripped, 1, 1)
+      if (!infence) {
+        infence = 1; flen = mlen; fch = ch
+        # First word of the info string, lowercased, is the language tag.
+        tag = substr(stripped, mlen + 1)
+        gsub(/^[ \t]+|[ \t]+$/, "", tag)
+        sub(/[ \t].*$/, "", tag)
+        bimpl = (tolower(tag) in impl)
+        bstart = NR; blines = 0
+      } else if (ch == fch && mlen >= flen) {
+        infence = 0
+        if (bimpl && blines > 40)
+          printf "B\t%d\t%d\n", bstart + bs, blines
+      }
+      if (intask) tlines++
+      next
+    }
+    if (infence) {
+      blines++
+      if (intask) { tlines++; if (bimpl) timpl++ }
+      next
+    }
+    # Unfenced headings bound task bodies, same model as exec_task_body:
+    # a level-2 or level-3 heading ends the task it follows.
+    if ($0 ~ /^### Task [0-9]+:/) {
+      flush_task()
+      intask = 1; tstart = NR
+      tnum = $0; sub(/^### Task /, "", tnum); sub(/:.*/, "", tnum)
+      tlines = 0; timpl = 0
+      next
+    }
+    if ($0 ~ /^#{2,3} /) { flush_task(); intask = 0; next }
+    if (intask) tlines++
+  }
+  END {
+    # An unclosed fence still reports — its lines are embedded code either way.
+    if (infence && bimpl && blines > 40)
+      printf "B\t%d\t%d\n", bstart + bs, blines
+    flush_task()
+  }
+' "$body_tmp")
+
 if [ "$violations" -gt 0 ]; then
   echo "$plan: $violations violation(s) — fix before the planning gate" >&2
   exit 1
