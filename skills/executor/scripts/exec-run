@@ -5,14 +5,14 @@
 #
 # Usage:
 #   exec-run PLAN_FILE start            # Status: running, Tasks: 0/N
-#   exec-run PLAN_FILE task N           # Tasks: N/M (counts complete lines)
+#   exec-run PLAN_FILE task TASK_ID     # mark TASK_ID dispatched; Tasks: N/M
 #   exec-run PLAN_FILE complete         # Status: complete, Finished: today
 #   exec-run PLAN_FILE check            # verify row matches ledger; exit 1 on drift
 #   exec-run PLAN_FILE pause|blocked    # partial-handoff states
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-[ $# -ge 2 ] && [ $# -le 3 ] || exec_die "usage: exec-run PLAN_FILE start|task|complete|check|pause|blocked [N]"
+[ $# -ge 2 ] && [ $# -le 3 ] || exec_die "usage: exec-run PLAN_FILE start|task|complete|check|pause|blocked [TASK_ID]"
 
 plan=$1
 action=$2
@@ -26,8 +26,26 @@ reg="$store/INDEX.md"
 [ -f "$reg" ] || exec_die "no run registry at $reg — run exec-workspace first"
 
 
-# Count task headings in the plan.
-total=$(grep -c '^### Task ' "$plan" 2>/dev/null || true)
+# Count task headings in the plan. Fence-aware: '### Task' lines inside
+# ``` or ~~~ code blocks are fenced examples, not dispatches (same
+# tracker as exec-plan-lint and _exec-lib's exec_task_id).
+total=$(awk '
+  {
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (stripped ~ /^(`{3,}|~{3,})/) {
+      match(stripped, /^(`{3,}|~{3,})/)
+      len = RLENGTH
+      ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+    }
+    if (!infence && $0 ~ /^### Task /) n++
+  }
+  END { print n + 0 }
+' "$plan")
 total=${total:-0}
 
 # Count complete lines in the ledger: '^<TASK_ID>: complete'
@@ -46,27 +64,109 @@ update_row() {
   store_lock "$store"
   local tmp
   tmp=$(store_tmp "$store")
-  awk -v id="$plan_id" -v status="$status" -v tasks="$tasks" -v finished="$finished" '
+  # exec-workspace is the only seeder of registry rows — exec-run mutates,
+  # never creates. A missing row means the workspace step never ran (or
+  # the row was lost); dying beats pretending the transition was recorded.
+  if awk -v id="$plan_id" -v status="$status" -v tasks="$tasks" -v finished="$finished" '
     BEGIN { FS = OFS = "|" }
     $0 ~ "^\\| " id " \\|" {
       $4 = " " status " "
       if (tasks != "") $5 = " " tasks " "
       if (finished != "") $7 = " " finished " "
+      found = 1
       print; next
     }
     { print }
-  ' "$reg" > "$tmp" && mv "$tmp" "$reg"
-  store_unlock "$store"
+    END { exit (found ? 0 : 1) }
+  ' "$reg" > "$tmp"; then
+    mv "$tmp" "$reg"
+    store_unlock "$store"
+  else
+    rm -f "$tmp"
+    store_unlock "$store"
+    exec_die "no registry row for $plan_id in $reg — run exec-workspace on the plan file first; it seeds the row exec-run mutates"
+  fi
+}
+
+# Mark one task's dispatch in the ledger: the Task-status row the resume
+# scan reads first (a task with no row has never been dispatched), plus
+# the append-only State changes line. progress.md is per-plan, so this
+# takes no store lock — the lock guards the shared INDEX.
+mark_dispatch() {
+  local tid=$1 tmp
+  tmp=$(mktemp "$dir/.progress.XXXXXX")
+  if grep -qE "^\| *${tid} *\|" "$dir/progress.md" 2>/dev/null; then
+    # Row exists: retarget its State cell (FS=| makes State $3).
+    awk -v tid="$tid" '
+      BEGIN { FS = OFS = "|" }
+      $0 ~ ("^\\| *" tid " *\\|") { $3 = " dispatched " }
+      { print }
+    ' "$dir/progress.md" > "$tmp" && mv "$tmp" "$dir/progress.md"
+  else
+    # No row yet: insert under the Task-status header; a ledger without
+    # the table gets the row appended rather than lost.
+    awk -v row="| $tid | dispatched | — | — | — |" '
+      !inserted && /^\| Task \|/ {
+        print
+        if ((getline line) > 0) print line
+        print row
+        inserted = 1
+        next
+      }
+      { print }
+      END { if (!inserted) print row }
+    ' "$dir/progress.md" > "$tmp" && mv "$tmp" "$dir/progress.md"
+  fi
+  printf '%s: dispatched\n' "$tid" >> "$dir/progress.md"
 }
 
 case "$action" in
   start)
+    # A completed run is a finished contract — restarting it would let a
+    # resumed controller re-dispatch work the audit already blessed.
+    row_status=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$4); print $4 }' "$reg")
+    [ "$row_status" = "complete" ] && exec_die "$plan_id is already complete — a finished run does not rewind; supersede the plan or correct the registry row by hand"
     update_row "running" "0/$total" ""
     echo "$plan_id: running (0/$total)"
     ;;
   task)
+    task_id=${3:-}
+    [ -n "$task_id" ] || exec_die "usage: exec-run PLAN_FILE task ${plan_id}-Tnn — the dispatch marker names the task it records"
+    # The ID must belong to THIS plan — a marker for another plan's task
+    # is a ledger lie the audit would flag anyway.
+    case "$task_id" in
+      "$plan_id"-T[0-9][0-9]) ;;
+      *) exec_die "task ID '$task_id' is not ${plan_id}-Tnn — cannot mark a task this plan does not own" ;;
+    esac
+    # A real '### Task N:' heading (outside code fences) must carry the
+    # ID — a fenced example or a typo'd ID must not mint a dispatch record.
+    if ! awk -v tid="$task_id" '
+      {
+        line = $0
+        indent = 0
+        while (substr(line, indent + 1, 1) == " ") indent++
+        stripped = substr(line, indent + 1)
+        if (stripped ~ /^(`{3,}|~{3,})/) {
+          match(stripped, /^(`{3,}|~{3,})/)
+          len = RLENGTH
+          ch = substr(stripped, 1, 1)
+          if (!infence) { infence = 1; flen = len; fch = ch }
+          else if (ch == fch && len >= flen) { infence = 0 }
+        }
+      }
+      !infence && $0 ~ /^### Task [0-9]+:/ && index($0, tid) { found = 1; exit }
+      END { exit (found ? 0 : 1) }
+    ' "$plan"; then
+      exec_die "no '### Task N:' heading declares $task_id in $plan — refusing to mark a phantom dispatch"
+    fi
+    # Re-dispatching a complete task rewrites history; the fix flow goes
+    # through an explicit in-fix line first. The state is the leading
+    # word — "complete (commits…)" annotations count, matching the audit.
+    latest_state=$( { grep -E "^${task_id}: " "$dir/progress.md" 2>/dev/null || true; } | tail -1 | sed -E 's/^[^:]*:[[:space:]]*//')
+    [ "${latest_state%%[ (]*}" = "complete" ] && exec_die "$task_id is already complete in the ledger — record an in-fix line before re-dispatching it"
     update_row "running" "$done_count/$total" ""
-    echo "$plan_id: running ($done_count/$total)"
+    mark_dispatch "$task_id"
+    echo "$plan_id: dispatched $task_id ($done_count/$total)"
     ;;
   complete)
     #validate BEFORE mutating the registry. A completion that
@@ -91,7 +191,7 @@ case "$action" in
     row_tasks=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$5); print $5 }' "$reg")
     drift=0
     if [ -z "$row_status" ]; then
-      echo "DRIFT: no registry row for $plan_id — run exec-workspace (or re-run exec-run PLAN start) to recreate it" >&2
+      echo "DRIFT: no registry row for $plan_id — run exec-workspace on the plan file to recreate the row" >&2
       exit 1
     fi
     if [ "$row_status" = "complete" ] && [ "$done_count" -lt "$total" ]; then
@@ -101,6 +201,12 @@ case "$action" in
     if [ "$row_status" = "running" ] && [ "$done_count" -ge "$total" ] && [ "$total" -gt 0 ]; then
       echo "DRIFT: row says running but all $total tasks are complete — run exec-run PLAN complete" >&2
       drift=1
+    fi
+    # Registry Tasks cell vs ledger truth. A stale cell is a NOTE, not
+    # drift: pause/blocked leave it untouched by design, and the count is
+    # a cache the ledger can always recompute.
+    if [ "$row_tasks" != "$done_count/$total" ]; then
+      echo "NOTE: registry Tasks cell reads '${row_tasks:-empty}' but the ledger shows $done_count/$total complete — re-run exec-run PLAN task/complete to refresh it" >&2
     fi
 
     # Canonical semantic audit: verdict CONTENT and the exact

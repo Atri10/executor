@@ -27,8 +27,8 @@ Read the contract before writing anything:
 [indexes](../executor/references/indexes.md) ·
 [safety](../executor/references/safety.md).
 
-Scripts live in `agent/skills/executor/scripts/`; paths below are written
-`scripts/...` as the contract writes them.
+Scripts live in `../executor/scripts/`; invocations below are written with
+that prefix.
 
 <HARD-GATE>
 Do NOT write code, scaffold a project, install a dependency, create a
@@ -163,7 +163,7 @@ downstream decision weights "we measured 40ms" differently from "the docs say
 ### Writing it
 
 ```bash
-scripts/exec-id INIT-0004 RSCH          # → INIT-0004-RSCH-02
+../executor/scripts/exec-id INIT-0004 RSCH          # → INIT-0004-RSCH-02
 date -u +%Y-%m-%dT%H:%M:%SZ             # real timestamp, never invented
 ```
 
@@ -230,7 +230,7 @@ the human's pick happens against this document.
 ### Writing it
 
 ```bash
-scripts/exec-id INIT-0004 OPTS          # → INIT-0004-OPTS-01
+../executor/scripts/exec-id INIT-0004 OPTS          # → INIT-0004-OPTS-01
 ```
 
 Path: `docs/executor/INIT-0004-<slug>/discovery/INIT-0004-OPTS-01-<topic-slug>.md`
@@ -293,7 +293,7 @@ original evidence** — never cite the foreign ID.
 | Decision made during… | Recorded as |
 |---|---|
 | Discovery, architecture, specification | An **ADR** (`INIT-NNNN-ADR-nn`), written by `executor-architecture`, human in the loop |
-| A plan already running | A **ruling** via `scripts/exec-ruling`, controller decides alone |
+| A plan already running | A **ruling** via `../executor/scripts/exec-ruling`, controller decides alone |
 
 Inside discovery, a decision small enough not to need an ADR is recorded in
 the `OPTS` or `RSCH` body where it applies. A decision big enough to need one
@@ -371,7 +371,7 @@ When the human picks:
 4. Pass the gate:
 
    ```bash
-   scripts/exec-initiative phase INIT-0004 discovery passed "approach B chosen"
+   ../executor/scripts/exec-initiative phase INIT-0004 discovery passed "approach B chosen"
    ```
 
    This updates the phase log row, the initiative header, and the registry
@@ -389,7 +389,7 @@ Legitimate when there is exactly one defensible approach and no unsupported
 claim — a small initiative often qualifies. Skipping is a **stated decision**:
 
 ```bash
-scripts/exec-initiative phase INIT-0004 discovery skipped "single viable approach; see charter"
+../executor/scripts/exec-initiative phase INIT-0004 discovery skipped "single viable approach; see charter"
 ```
 
 and the charter's `skipped_phases` gains `discovery` with the reason in its

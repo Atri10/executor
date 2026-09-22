@@ -167,19 +167,25 @@ untracked rule, and it lives in the **tracked thinking store**:
 `docs/executor/<initiative>/verification/evidence/PNN/` (one directory per
 plan: `P01`, `P02`, ...). Written by `exec-evidence`:
 
-- **`state.txt`** — the state under test, stamped once per plan directory:
-  branch, HEAD commit, tree dirtiness, timestamp. First writer wins; the
-  round is one state.
-- **`<VRFY-id>-V<nn>-<method>.txt`** — one file per criterion: the command
-  and its full observed output. Flat names, no per-round subdirectories.
+- **`state-R<nn>.txt`** — the state under test for that round: branch,
+  HEAD commit, tree dirtiness, timestamp. Stamped once per round per plan
+  directory; a later round gets its own state file and never overwrites
+  an earlier round's.
+- **`<VRFY-id>-V<nn>-R<nn>-<method>.txt`** — one file per criterion per
+  round: the command and its full observed output. Flat names, no
+  per-round subdirectories; the round lives in the filename. A re-capture
+  of the same criterion, method, and round writes a `-attempt2`,
+  `-attempt3`, ... sibling — earlier proofs are never overwritten.
 
 The VRFY outcomes table's **Evidence** column names these files, so a
 reader can go from verdict → table → raw output. Evidence is tracked
 because it is the *proof* a claim was proven — it commits on the branch
 that produced it and survives worktree teardown (it lives in the thinking
 store anchored to the working tree, and the main-root execution store never
-holds it). A re-run of a criterion overwrites the file — the newest run is
-the truth; the VRFY outcomes table records the round it cites.
+holds it). Re-runs never overwrite: a new round writes a new `-R<nn>-`
+file, and a repeat inside one round writes a new `-attemptN` sibling. The
+newest capture is the truth; the VRFY outcomes table records the round it
+cites.
 
 **Every other artifact a run produces lives under `.executor/`.** Briefs,
 context files, reports, diffs, verdicts, ledger, rulings, preflight,
@@ -209,17 +215,17 @@ Never hand-build a path. Use the scripts:
 
 | Need | Script |
 |---|---|
-| Initiative folder from an ID | `scripts/exec-initiative resolve INIT-0004` |
-| Next free ID of a type | `scripts/exec-id INIT-0004 ADR` |
-| Plan's execution workspace | `scripts/exec-workspace PLAN_FILE` |
-| Task brief file | `scripts/exec-brief PLAN_FILE N` |
-| Task context file | `scripts/exec-context PLAN_FILE N` |
-| Run lifecycle in the registry | `scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
-| Plan gate lint | `scripts/exec-plan-lint PLAN_FILE` |
-| Plan-branch lifecycle | `scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
-| Evidence file for a criterion | `scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin; writes the initiative's tracked `verification/evidence/PNN/`) |
-| Review diff for a task or the branch | `scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
-| Secret scan before handoff | `scripts/exec-scan-secrets [PATH]` |
+| Initiative folder from an ID | `../scripts/exec-initiative resolve INIT-0004` |
+| Next free ID of a type | `../scripts/exec-id INIT-0004 ADR` |
+| Plan's execution workspace | `../scripts/exec-workspace PLAN_FILE` |
+| Task brief file | `../scripts/exec-brief PLAN_FILE N` |
+| Task context file | `../scripts/exec-context PLAN_FILE N` |
+| Run lifecycle in the registry | `../scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
+| Plan gate lint | `../scripts/exec-plan-lint PLAN_FILE` |
+| Plan-branch lifecycle | `../scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
+| Evidence file for a criterion | `../scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin; writes the initiative's tracked `verification/evidence/PNN/`) |
+| Review diff for a task or the branch | `../scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
+| Secret scan before handoff | `../scripts/exec-scan-secrets [PATH]` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is
@@ -230,14 +236,15 @@ pre-Executor: the workspace falls back to the file's basename.
 Every seeded and generated markdown file must render correctly in any
 common renderer. Three rules keep that true:
 
-1. **HTML comments never sit between a table's header and its rows, or
-   between two rows.** A comment after the separator row splits the table
-   in most renderers once rows are appended. Comments go above the table
-   they describe; appended rows go below the last row.
+1. **Generated markdown contains no HTML comments.** A comment between a
+   table's header and its rows, or between two rows, splits the table in
+   most renderers once rows are appended — and an unfilled comment is
+   invisible evidence of an unfinished document. Guidance is written as
+   visible italic lines; an unfilled one is a defect a reader can see.
 2. **Appends never land inside a table.** Log-style lines (ledger state
    changes, dispatch entries) append either as table rows directly under
    the last row, or as list lines in their own section — never after a
-   trailing comment or a blank section end.
+   trailing note or a blank section end.
 3. **Generated files open with YAML frontmatter** (see the frontmatter
    contract's execution-artifact section), so an agent reading one file
    cold can identify it without opening anything else.

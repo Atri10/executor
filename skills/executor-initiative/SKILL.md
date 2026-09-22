@@ -10,7 +10,7 @@ rule, the phase table, rulings policy. This skill is the only thing that
 allocates initiative numbers, writes charters, and moves phase rows.
 
 Scripts referenced below live in the contract skill. Invoke them as
-`skill://executor/scripts/<name>` (the contract writes them relatively as
+`../executor/scripts/<name>` (the contract writes them relatively as
 `scripts/<name>`); paths in their output are repo-absolute.
 
 Two duties, in order:
@@ -88,7 +88,7 @@ Allocate only after the classification says architectural (or the human
 explicitly asks for an initiative).
 
 ```bash
-skill://executor/scripts/exec-initiative new "Cloud tenant cells"
+../executor/scripts/exec-initiative new "Cloud tenant cells"
 # → INIT-0004<TAB>/repo/docs/executor/INIT-0004-cloud-tenant-cells
 ```
 
@@ -108,23 +108,28 @@ invent one when you edit these files afterwards — run
 
 ### The race rule (verified behaviour, respect it)
 
-`new` computes the next number by listing existing folders. **It is not
-concurrency-safe:** two simultaneous calls both produce the same `INIT-NNNN`
-with different slugs, and the registry can lose one of the two rows to a
-write race. `resolve` then returns whichever duplicate folder `find` hits
-first — silently, arbitrarily. So:
+`new` computes the next number by listing existing folders, and the whole
+read-allocate-create-append runs inside a registry mutex
+(`docs/executor/.registry.lock`): two simultaneous `new` calls serialise —
+the second waits, sees the first's folder, and takes the next number.
+**`phase` and `status` transitions are not yet lock-covered** — they rewrite
+`INDEX.md` and the registry row without the mutex, so two concurrent
+transitions can still lose an update to a write race. So:
 
-1. **Never run two `new` calls at once**, and never background one.
+1. **Never run two `phase` or `status` calls at once**, and never
+   background one. `new` itself is safe to call concurrently.
 2. **Immediately after `new`, verify:** exactly one folder matches the
    printed ID, and exactly one registry row names it. Verify by listing
-   `docs/executor/` and reading `docs/executor/INDEX.md`.
+   `docs/executor/` and reading `docs/executor/INDEX.md`. The lock prevents
+   duplicate allocation; this check catches the remaining failure — a run
+   killed mid-scaffold can leave a folder that was never registered.
 3. **On a duplicate number, never overwrite and never delete.** The folder
    that has a registry row keeps the number — the registry is the record of
    what was allocated. The folder without a row renumbers: rename it to the
    next free `INIT-NNNN-<slug>`, then rewrite the ID in the four places it
    appears — charter `id:` and `initiative:`, the INDEX header line, the
-   INDEX Documents row, and the registry row — and record the race in the
-   renumbered initiative's `INDEX.md` directly under its header line:
+   INDEX Documents row, and the registry row — and record the collision in
+   the renumbered initiative's `INDEX.md` directly under its header line:
 
    ```markdown
    **Allocation note:** raced with INIT-0004 on 2026-09-01 — renumbered from
@@ -223,7 +228,7 @@ a decision taken later during discovery or architecture is an ADR
 When the human approves, in one change:
 
 ```bash
-skill://executor/scripts/exec-initiative phase INIT-0004 intake passed "charter approved"
+../executor/scripts/exec-initiative phase INIT-0004 intake passed "charter approved"
 ```
 
 then set the charter's `status: active` and `updated_at`, and change the

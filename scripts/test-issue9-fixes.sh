@@ -112,8 +112,8 @@ IDIR="$d/docs/executor/INIT-0001-audit"
 { printf '%s\n' "$FM"; printf '%s\n' "$TASK"; printf '### Task 2: Other — `INIT-0001-P01-T02`\n\n**Files:**\n- Modify: `b.ts`\n'; } > "$d/plan.md"
 bash "$S/exec-workspace" plan.md > /dev/null 2>&1
 W="$d/.executor/INIT-0001/P01"
-printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
-printf -- '---\nkind: verdict\nspec_verdict: FAIL\n---\nGATE: FAIL\n' > "$W/reviews/verdicts/INIT-0001-P01-T02-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: FAIL\nquality: NEEDS_FIXES\n---\nGATE: FAIL\n' > "$W/reviews/verdicts/INIT-0001-P01-T02-R01-verdict.md"
 printf 'INIT-0001-P01-T01: complete\nINIT-0001-P01-T02: complete\n' >> "$W/progress.md"
 if bash "$S/exec-run" plan.md check >/dev/null 2>&1; then
   bad "audit: FAIL verdict accepted"
@@ -143,8 +143,8 @@ bash "$S/exec-workspace" plan.md > /dev/null 2>&1
 W="$d/.executor/INIT-0001/P01"
 bash "$S/exec-run" plan.md start > /dev/null 2>&1
 printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
-printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
-printf -- '---\nkind: verdict\nspec_verdict: PASS\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
 printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
 printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
 bash "$S/exec-run" plan.md complete > /dev/null 2>&1
@@ -218,6 +218,119 @@ if bash "$S/exec-initiative" new 'Queue: retry | policy' >/dev/null 2>&1; then
   bad "title: pipe accepted"
 fi
 ok "pipe titles refused"
+
+# 15. Re-review verdicts (spec_verdict: null) do not poison the audit.
+# The re-review template mandates spec_verdict: null; the audit must read
+# the gate field (quality) for rounds past R01. Regression: before the fix
+# any task surviving a fix round could never pass `exec-run check`.
+d=$(fixture rereview)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+bash "$S/exec-workspace" plan.md > /dev/null 2>&1
+W="$d/.executor/INIT-0001/P01"
+bash "$S/exec-run" plan.md start > /dev/null 2>&1
+printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: null\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R02-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: null\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-R02-verdict.md"
+printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
+bash "$S/exec-run" plan.md complete > /dev/null 2>&1
+bash "$S/exec-run" plan.md check > /dev/null 2>&1 || bad "rereview: clean fix-round run rejected"
+ok "re-review verdicts (spec_verdict: null) pass the audit"
+
+# 16. A NEEDS_FIXES latest verdict fails the audit even when spec_verdict
+# is null — the gate field is the truth for re-review verdicts.
+d=$(fixture rereview-dirty)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+bash "$S/exec-workspace" plan.md > /dev/null 2>&1
+W="$d/.executor/INIT-0001/P01"
+bash "$S/exec-run" plan.md start > /dev/null 2>&1
+printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: null\nquality: NEEDS_FIXES\n---\nGATE: FAIL\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R02-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
+if bash "$S/exec-run" plan.md check >/dev/null 2>&1; then
+  bad "rereview-dirty: NEEDS_FIXES re-review accepted"
+fi
+ok "NEEDS_FIXES re-review verdict fails the audit"
+
+# 17. Seeded markdown carries no HTML comments anywhere.
+d=$(fixture seeds)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+bash "$S/exec-workspace" plan.md > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+W="$d/.executor/INIT-0001/P01"
+for f in "$IDIR/charter.md" "$IDIR/INDEX.md" "$W/progress.md" "$W/rulings.md" "$W/preflight-scan.md" "$W/dispatches.md"; do
+  if grep -q '<!--' "$f"; then
+    bad "seeds: $(basename "$f") contains an HTML comment"
+  fi
+done
+ok "seeded markdown carries no HTML comments"
+
+# 18. Store check D7 flags comments in tracked docs; clean stores pass.
+d=$(fixture stored7)
+cd "$d"
+bash "$S/exec-initiative" new Store > /dev/null 2>&1
+SDIR="$d/docs/executor/INIT-0001-store"
+bash "$S/exec-store-check" >/dev/null 2>&1 || bad "stored7: fresh seeded initiative failed store check"
+printf -- '\n<!-- leftover guidance -->\n' >> "$SDIR/charter.md"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "stored7: HTML comment in charter passed store check"
+fi
+ok "store check rejects HTML comments in tracked docs"
+
+# 19. Annotated 'complete' ledger lines satisfy the audit. The documented
+# grammar is `T01: complete (commits a1b2..b7c8, review clean)` — the audit
+# must read the state word, not the whole line. Regression: before the fix
+# a conforming annotated ledger could never pass `exec-run check`.
+d=$(fixture annotated)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+bash "$S/exec-workspace" plan.md > /dev/null 2>&1
+W="$d/.executor/INIT-0001/P01"
+bash "$S/exec-run" plan.md start > /dev/null 2>&1
+printf 'INIT-0001-P01-T01: complete (commits a1b2c3d..b7c8d9e, review clean)\n' >> "$W/progress.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+printf -- '| INIT-0001-P01-T01 | complete | a1b2c3d..b7c8d9e | clean | — |\n' >> "$W/progress.md"
+bash "$S/exec-run" plan.md complete > /dev/null 2>&1
+bash "$S/exec-run" plan.md check > /dev/null 2>&1 || bad "annotated: documented ledger grammar rejected"
+ok "annotated 'complete (…)' ledger lines pass the audit"
+
+# 20. A fenced '### Task' example does not inflate the audit's expected set.
+d=$(fixture fencedtask)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+{ printf '%s\n' "$FM"; printf '%s\n' "$TASK"; printf '```markdown\n### Task 9: Example — `INIT-0001-P01-T09`\n```\n'; } > "$d/plan.md"
+bash "$S/exec-workspace" plan.md > /dev/null 2>&1
+W="$d/.executor/INIT-0001/P01"
+bash "$S/exec-run" plan.md start > /dev/null 2>&1
+printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
+printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
+bash "$S/exec-run" plan.md complete > /dev/null 2>&1
+bash "$S/exec-run" plan.md check > /dev/null 2>&1 || bad "fencedtask: fenced example counted as an expected task"
+ok "fenced task examples do not inflate the expected set"
+
+# 21. A fenced example naming a store path is not a mutation target, but a
+# real one still fails with the correct (file-absolute) line number.
+d=$(fixture fencedpath)
+cd "$d"
+printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n\n```markdown\n- Create: docs/executor/INIT-0002/x.md\n```\n' > "$d/plan.md"
+bash "$S/exec-plan-lint" "$d/plan.md" > /dev/null 2>&1 || bad "fencedpath: fenced store-path example failed lint"
+printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Create: docs/executor/INIT-0002/x.md\n' > "$d/plan.md"
+out=$(bash "$S/exec-plan-lint" "$d/plan.md" 2>&1) && bad "fencedpath: real store-path mutation passed lint"
+case "$out" in *"line 12 "*) ;; *) bad "fencedpath: violation reported wrong line ($out)";; esac
+ok "fenced store paths exempt; real ones fail at the right line"
 
 echo
 echo "$pass passed, $fail failed"
