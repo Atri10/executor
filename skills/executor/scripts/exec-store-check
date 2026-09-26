@@ -23,6 +23,8 @@
 #   Brainstorm
 #     B1. discovery gate passed ⇒ a session under brainstorm/sessions/
 #         or a recorded skip note (INDEX.md or a discovery document)
+#     B2. every session dir carries session.md with kind: brainstorm,
+#         question/decided fields, and a non-empty ## Options section
 #   Documents
 #     D1. frontmatter present; id/initiative/kind/title/status/timestamps set
 #     D2. id matches the filename's ID segment
@@ -45,6 +47,9 @@
 #     X1. plan spec: resolves to a SPEC in the same initiative
 #     X2. VRFY spec: resolves to a SPEC in the same initiative
 #     X3. every evidence file cited by a VRFY exists; orphan evidence listed
+#   Plan regression
+#     P1. execution entered ⇒ plan-regression phase passed or skipped;
+#         passed ⇒ .executor/<INIT>/plan-regression/summary.md exists
 #
 # Usage: exec-store-check [DOCS_STORE_DIR]   (default: resolved via _exec-lib)
 # Exit: 0 clean, 1 findings, 2 usage/setup error
@@ -199,7 +204,7 @@ for idir in "$store"/INIT-*/; do
       IFS='|' read -r phase entered gate _ <<< "$row"
       phase=$(printf '%s' "$phase" | xargs)
       case "$phase" in
-        intake|discovery|architecture|design|specification|planning|execution|review|verification|handoff) ;;
+        intake|discovery|architecture|design|specification|planning|plan-regression|execution|review|verification|handoff) ;;
         *) continue ;;
       esac
       entered=$(printf '%s' "$entered" | xargs)
@@ -213,7 +218,7 @@ for idir in "$store"/INIT-*/; do
       if [ "$g" -lt "$e" ]; then
         fail "I4: $init_id phase log row '$phase' passed its gate ($gate) before the phase was entered ($entered) — time travel"
       fi
-    done < <(grep -E '^\| *(intake|discovery|architecture|design|specification|planning|execution|review|verification|handoff) *\|' "$idx")
+    done < <(grep -E '^\| *(intake|discovery|architecture|design|specification|planning|plan-regression|execution|review|verification|handoff) *\|' "$idx")
 
     # I5: once execution begins the initiative branch exists, and its
     # fork provenance lives on the INDEX **Branch:** line —
@@ -252,6 +257,67 @@ for idir in "$store"/INIT-*/; do
         fail "B1: $init_id discovery passed but no brainstorm session and no recorded skip — discovery contract requires one or the other"
       fi
     done < <(grep -E '^\| *discovery *\|' "$idx")
+
+    # B2: every session directory carries a session.md whose frontmatter
+    # identifies it (kind: brainstorm, question, decided) and whose body
+    # records the divergent pass (## Options). A session dir with no
+    # record, or a record with no alternatives, is ideation that left no
+    # evidence — the exact failure B1 exists to prevent, one level deeper.
+    # Sessions are excluded from the D-scan (their IDs are not in the
+    # document namespace), so this is their only structural check.
+    while IFS= read -r sdir; do
+      [ -n "$sdir" ] || continue
+      sfile="$sdir/session.md"
+      if [ ! -f "$sfile" ]; then
+        fail "B2: ${sdir#"$idir"/} has no session.md — a session directory without its record is an empty claim"
+        continue
+      fi
+      [ "$(fm_field "$sfile" kind)" = "brainstorm" ] \
+        || fail "B2: ${sfile#"$idir"/} kind is '$(fm_field "$sfile" kind)' — brainstorm sessions carry kind: brainstorm"
+      for k in question decided; do
+        exec_frontmatter_has "$sfile" "$k" \
+          || fail "B2: ${sfile#"$idir"/} missing $k: field — the question and the pick are the session's identity"
+      done
+      [ -n "$(exec_section_body "$sfile" Options | tr -d '[:space:]')" ] \
+        || fail "B2: ${sfile#"$idir"/} carries no ## Options section — a session with no recorded alternatives is a decision, not ideation"
+    done < <(find "$idir/brainstorm/sessions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+
+    # P1: a passed plan-regression gate (or an initiative already past it —
+    # execution entered) means the plan-set audit ran and cleared. The
+    # artifacts live in the EXECUTION store at .executor/<INIT>/plan-
+    # regression/ — checked from here because the thinking store's phase
+    # log is the authority on whether the gate was reached, and the run
+    # store is the only place the audit output may live. Skipped needs no
+    # artifacts; entered-but-unpassed is what exec-run start refuses on.
+    run_store=$(exec_run_store 2>/dev/null || true)
+    if [ -n "$run_store" ]; then
+      prg_gate="" exec_entered=""
+      while IFS= read -r row; do
+        row=${row#\|}; row=${row%\|}
+        IFS='|' read -r ph pe pg _ <<< "$row"
+        ph=$(printf '%s' "$ph" | xargs)
+        pe=$(printf '%s' "$pe" | xargs)
+        pg=$(printf '%s' "$pg" | xargs)
+        case "$ph" in
+          plan-regression) prg_gate=$pg ;;
+          execution) exec_entered=$pe ;;
+        esac
+      done < <(grep -E '^\| *(plan-regression|execution) *\|' "$idx" || true)
+      case "$prg_gate" in
+        ????-??-??|"**skipped**") prg_ok=1 ;;
+        *) prg_ok=0 ;;
+      esac
+      case "$exec_entered" in ????-??-??) exec_started=1 ;; *) exec_started=0 ;; esac
+      if [ "$exec_started" -eq 1 ] && [ "$prg_ok" -eq 0 ]; then
+        fail "P1: $init_id entered execution without a passed or skipped plan-regression phase — run executor-plan-regression or record an explicit skip"
+      fi
+      if [ "$prg_ok" -eq 1 ] && [ "$prg_gate" != "**skipped**" ]; then
+        prg_dir="$run_store/$init_id/plan-regression"
+        if [ ! -f "$prg_dir/summary.md" ]; then
+          fail "P1: $init_id plan-regression gate passed but $prg_dir/summary.md is missing — the clearance record does not exist"
+        fi
+      fi
+    fi
   fi
 
   # ---- D1–D8: every document ------------------------------------------------

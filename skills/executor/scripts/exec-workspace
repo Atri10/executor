@@ -5,8 +5,10 @@
 # never orphans its artifacts. A plan predating the Executor has no id: and
 # falls back to .executor/legacy/<basename>/, preserving old behaviour.
 #
-# Also seeds the ledger, rulings, preflight, and dispatch files so every run
-# has the same shape and no skill has to invent one.
+# Seeding lives in _exec-lib's exec_seed_workspace — every script that writes
+# into a workspace calls it, so no entry point can produce an unseeded
+# workspace. This script additionally writes the run-registry row (the only
+# seeder of those rows) and the initiative-level rulings log.
 #
 # Usage: exec-workspace PLAN_FILE
 set -euo pipefail
@@ -18,114 +20,36 @@ plan=$1
 dir=$(exec_workspace_dir "$plan")
 
 plan_id=$(exec_frontmatter "$plan" id)
-spec_id=$(exec_frontmatter "$plan" spec)
-[ -n "$plan_id" ] || plan_id="(no id: — legacy plan)"
-[ -n "$spec_id" ] || spec_id="(none)"
 
 if [ ! -f "$dir/progress.md" ]; then
-  cat > "$dir/progress.md" <<EOF
----
-kind: ledger
-plan: $plan_id
-plan_file: $plan
-spec: $spec_id
-created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
----
-
-# Executor ledger
-
-*A ledger whose plan: line names a different plan is not yours — leave it and start your own. One line per state change goes under "## State changes" at the bottom; the table below is the scan index.*
-
-## Task status
-
-*State: pending | dispatched | in-fix | complete | parked. One row per task, filled as it moves. The resume scan reads this table first: a task with no row has never been dispatched.*
-
-| Task | State | Commits | Review | Notes |
-|---|---|---|---|---|
-
-## State changes
-
-*Append-only, one line per state change, newest last. Example: INIT-0004-P01-T03: dispatched (model cheap, agent impl-t03-a, base a1b2c3d).*
-EOF
+  exec_seed_workspace "$dir" "$plan"
 else
   #reuse is only safe when the ledger describes THIS plan.
   # Rename support is deliberate (ID-addressed), but a different plan
   # file or a different spec must not silently inherit the old run's
   # ledger and verdicts.
+  spec_id=$(exec_frontmatter "$plan" spec)
+  [ -n "$spec_id" ] || spec_id="(none)"
   ledger_plan=$(awk '/^plan:/{print $2; exit}' "$dir/progress.md")
   ledger_spec=$(awk '/^spec:/{print $2; exit}' "$dir/progress.md")
-  if [ -n "$ledger_plan" ] && [ "$ledger_plan" != "$plan_id" ]; then
+  if [ -n "$plan_id" ] && [ -n "$ledger_plan" ] && [ "$ledger_plan" != "$plan_id" ]; then
     exec_die "workspace $dir holds a ledger for $ledger_plan but $plan names $plan_id — refuse to mix runs; resolve the stale workspace explicitly"
   fi
   if [ -n "$ledger_spec" ] && [ "$ledger_spec" != "$spec_id" ] && [ "$ledger_spec" != "(none)" ]; then
     exec_die "workspace $dir was seeded against spec $ledger_spec but this plan names $spec_id — the contract changed; start a new workspace or record the revision deliberately"
   fi
+  # A pre-existing workspace may still be missing seeded files (created
+  # before the seed-everywhere contract, or hand-made); fill gaps now.
+  exec_seed_workspace "$dir" "$plan"
 fi
 
-[ -f "$dir/rulings.md" ] || cat > "$dir/rulings.md" <<EOF
----
-kind: rulings
-plan: $plan_id
-plan_file: $plan
-created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
----
-
-# Rulings — $plan_id
-
-*Append-only. Every decision taken on the human's behalf, written the moment it is made and mirrored into .local/decisions/. Entries are appended at the end of this file by exec-ruling.*
-EOF
-
-[ -f "$dir/preflight-scan.md" ] || cat > "$dir/preflight-scan.md" <<EOF
----
-kind: preflight
-plan: $plan_id
-plan_file: $plan
-created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
----
-
-# Preflight conflict scan — $plan_id
-
-*One row per task pair sharing a file or interface, one row per task for self-consistency, and a ruling beside every finding. Written before Task 1 dispatches; read whenever a task surprises you.*
-
-## Scan
-
-*Severity: conflict | self-inconsistent | clean. Every pair sharing a file or symbol gets a row; every task gets a self-check row. A finding with no ruling is unresolved — do not dispatch until every finding is ruled.*
-
-| Tasks | Shared surface | Produced vs consumed | Finding | Severity | Ruling |
-|---|---|---|---|---|---|
-
-## Method
-
-*What was checked: the dependency map rows, the file map, the interface signatures, the test expectations. State the inputs you walked so a reader can see the scan's scope.*
-
-Check every task pair sharing a file, every interface contract the plan cites, and every task against itself:
-
-- Signature resolution — every consumed reference resolves to a produced signature: same name, same shape, same argument order.
-- Interface-contract consistency — two contracts defining the same field or type declare the same shape; dict[str, list[str]] beside a record shape for one name is a conflict, not a dialect.
-- Prose-vs-code consistency — implementation code embedded in a task body does not contradict that task's own Requirements/Produces line.
-- Unspecified contract points — a field used across a seam whose element type or shape no cited contract defines gets a Finding row naming the field and the seam.
-EOF
-
-[ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
----
-kind: dispatches
-plan: $plan_id
-plan_file: $plan
-created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
----
-
-# Dispatch log — $plan_id
-
-*Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
-*Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
-
-| Task | Role | Model | Agent | Started | Outcome | Context |
-|---|---|---|---|---|---|---|
-EOF
+# Initiative-level home for cross-plan artifacts (plan-regression reports,
+# initiative rulings) — exists whenever any plan workspace does.
+if [ -n "$plan_id" ]; then
+  exec_initiative_run_dir "$plan_id" >/dev/null 2>&1 || true
+  init_id=$(exec_initiative_of "$plan_id" 2>/dev/null || true)
+  [ -n "$init_id" ] && exec_seed_initiative_rulings "$init_id" >/dev/null
+fi
 
 # Run registry row, created on first resolution of this plan.
 store=$(exec_run_store)

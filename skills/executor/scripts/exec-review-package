@@ -30,6 +30,7 @@ git rev-parse --verify --quiet "$head" >/dev/null || exec_die "bad HEAD: $head"
 
 plan_id=$(exec_frontmatter "$plan" id)
 dir=$(exec_workspace_dir "$plan")
+exec_seed_workspace "$dir" "$plan"
 b7=$(git rev-parse --short "$base")
 h7=$(git rev-parse --short "$head")
 

@@ -306,23 +306,26 @@ Brainstorming is the recorded exploration of a design question — options,
 counterarguments, evidence — not a document format. A session exists when
 there was reasoning worth keeping, in whatever mode it happened.
 
+**The mechanics live in `executor-brainstorm`** — session structure, the
+three-moves divergent pass, recording format, and the visual companion's
+offer rules. Discovery's job is narrower: decide at entry whether this
+initiative needs ideation at all.
+
 ### When a session exists
 
 At discovery entry, decide explicitly whether the initiative needs
 ideation beyond what the charter states. If it does — the problem has
 genuinely open design questions, competing approaches, or unknowns the
-charter does not resolve — run a brainstorm session and record it:
+charter does not resolve — invoke `executor-brainstorm`, which runs the
+session and files it under:
 
 ```text
 docs/executor/INIT-0004-<slug>/brainstorm/sessions/<UTC-timestamp>-<topic>/
 ```
 
-A text session is a first-class session. It records: the question,
-goals and constraints, the options considered, counterarguments and
-evidence for each, the direction chosen (or open questions remaining),
-and links to the RSCH/OPTS/ADR/DSGN documents the reasoning produced.
-A session that produced no decision records that honestly — its value
-is the rejected options and why.
+A text session is a first-class session. The session record (`session.md`,
+`kind: brainstorm`) carries the question, constraints, options and
+counterarguments, the adversarial pass, and the outcome or open questions.
 
 ### When no session exists
 
@@ -342,10 +345,11 @@ whether ideation was skipped deliberately or never considered.
 
 The visual companion renders mockups and screens INSIDE a session when
 a question is genuinely clearer shown than told. It is offered
-just-in-time, never upfront, and only with explicit consent. Read
-[visual-companion.md](visual-companion.md) before starting the server.
-Visual artifacts live in the tracked store (see below); the session
-record itself may be text-only.
+just-in-time, never upfront, and only with explicit consent — the offer
+contract and server mechanics live in
+[visual-companion.md](visual-companion.md); `executor-brainstorm` calls
+into it. Visual artifacts live in the tracked store; the session record
+itself may be text-only.
 
 **Synthetic data only** in every mockup and screen — session state can capture
 whatever was on screen, and this directory is tracked from the moment it is
