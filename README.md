@@ -1,10 +1,10 @@
 # The Executor
 
 An initiative-scoped workflow system for coding agents: it takes a major
-idea from intake through architecture, spec, plan, execution, review, and
-verification — with a strict per-initiative ID namespace, separated thinking
-and execution stores, a script-enforced contract at every state transition,
-and evidence-backed completion.
+idea from intake through architecture, spec, plan, plan regression,
+execution, review, and verification — with a strict per-initiative ID
+namespace, separated thinking and execution stores, a script-enforced
+contract at every state transition, and evidence-backed completion.
 
 **Nothing floats.** Every document, task, review, verdict, and ruling
 carries an ID that names the initiative it belongs to. A body of work gets
@@ -34,7 +34,7 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v0.3.0 git@github.com:Atri10/executor.git
+git clone --branch v0.4.0 git@github.com:Atri10/executor.git
 ```
 
 ### One-paste install for any LLM agent
@@ -47,7 +47,7 @@ the install:
 Install The Executor skill library for me:
 
 1. Clone https://github.com/Atri10/executor.git into a temp directory
-   (use --branch v0.3.0 for the latest release, or default branch for main).
+   (use --branch v0.4.0 for the latest release, or default branch for main).
 2. Find my agent's skills directory. Candidates, in order — use the first
    that exists, or ask me if none do:
    - ~/.omp/agent/skills/            (omp)
@@ -58,7 +58,7 @@ Install The Executor skill library for me:
 3. Copy every directory from the clone's skills/ folder into that skills
    directory (each is one skill: skills/executor, skills/executor-spec, ...).
 4. Verify: run bash <skills-dir>/executor/scripts/exec-run with no arguments
-   — it must print a usage line and exit non-zero. Then confirm the ten
+   — it must print a usage line and exit non-zero. Then confirm the twelve
    SKILL.md files exist under the skills directory.
 5. Tell me which directory you installed into, and how to invoke the
    router in my harness (usually /skill:executor or just asking for
@@ -133,6 +133,35 @@ run, parse/render check, exercised UI), and an explicit NOT-RUN/UNAVAILABLE
 record where nothing feasible exists. Reviewers verify evidence, and a
 reviewer who cannot name the failure a demanded test would catch does
 not get to demand it.
+
+### Plans are audited as a set, not one at a time
+
+Per-plan review reads one file. The defects that actually ship live
+*between* files: an `Assumes` section promising a signature the
+predecessor plan never produces, a spec requirement no plan's `Covers:`
+claims, two plans provisioning the same queue with different shapes.
+
+`executor-plan-regression` runs between planning and execution and reads
+the whole set against the spec, the interface contracts, and each other —
+coverage, Assumes/Produces closure, ordering, constraint propagation,
+file-map collisions, vocabulary. Findings are repaired in the plan files
+themselves, then re-audited; the clearance summary lives at
+`.executor/<INIT>/plan-regression/summary.md`. Execution cannot start
+until every plan is `clean` or the human has explicitly `waived` a
+finding — enforced by the phase-order machine, by `exec-run start`, and
+by `exec-store-check`.
+
+### Decisions: rule, ask, or stop
+
+Inside a phase the workflow does not wait on a human — but it does not
+silently decide everything either. Mechanical or reversible calls are
+ruled and logged (`exec-ruling`, mirrored into `.local/decisions/`).
+Decision-class calls — contract conflicts, scope cuts, irreversible
+choices, product judgment — are asked on the spot through the harness's
+question affordance, blocking only the affected lane, with the question
+recorded beside the ruling (`--answered`). Only four things stop a run:
+an irreversible operation, a security-sensitive action, a side effect
+outside the worktree, or a defect where every path forward is a guess.
 
 ### Script-enforced state, everywhere
 
