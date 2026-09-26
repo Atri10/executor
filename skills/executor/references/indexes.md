@@ -66,6 +66,7 @@ belongs to this initiative.
 | design | — | **skipped** | single component, folded into spec |
 | specification | 2026-09-01 | 2026-09-01 | reviewed |
 | planning | 2026-09-01 | 2026-09-01 | 1 plan, 7 tasks |
+| plan-regression | 2026-09-01 | 2026-09-01 | 2 plans audited clean |
 | execution | 2026-09-01 | — | in progress |
 ```
 
@@ -111,6 +112,14 @@ months ago.
 
 Updated by `executor-execution` at run start, at each task completion (the
 `Tasks` column), and at run end.
+
+The `.executor/<INIT>/` directory beside the `Pnn/` workspaces is the
+initiative-level run area: `plan-regression/` artifacts and the
+initiative-wide `rulings.md` live there (see layout.md). They do not get
+INDEX rows — a row answers "what ran," and regression audits are gate
+input, not runs. The row's own staleness (a `running` plan whose ledger
+shows all tasks complete, a `0/?` count after dispatches) is drift that
+`exec-run PLAN check` reports; update it through `exec-run`, never by hand.
 
 ## Maintenance rules
 

@@ -120,10 +120,12 @@ artifact:
 /skill:executor-architecture
 /skill:executor-spec
 /skill:executor-planning
+/skill:executor-plan-regression
 /skill:executor-execution
 /skill:executor-review
 /skill:executor-verification
 /skill:executor-handoff
+/skill:executor-brainstorm
 ```
 
 An explicit `/skill:<name>` call loads the skill immediately in runtimes
@@ -267,7 +269,8 @@ output, and a gate that must pass before the next phase starts.
 | Architecture | `executor-architecture` | Architecture, ADRs, interfaces | Human approves the structure |
 | Design | `executor-architecture` | Component designs | Human approves, or waives for simple initiatives |
 | Specification | `executor-spec` | Spec, risks, verification strategy | Human reviews the written spec |
-| Planning | `executor-planning` | One or more plans with tasks | Human picks an execution mode |
+| Planning | `executor-planning` | One or more plans with tasks | Plan set drafted |
+| Plan regression | `executor-plan-regression` | Plan-set audit reports, repairs, gate summary | Every plan clean or human-waived; human then picks an execution mode |
 | Execution | `executor-execution` | Commits, reports, ledger | Every task reviewed and complete |
 | Review | `executor-review` | Verdicts, findings, rulings | Final whole-branch review clean |
 | Verification | `executor-verification` | Evidence of working software | Every claim backed by observed output |
@@ -296,9 +299,10 @@ invalidates everything downstream of it: a spec written against unapproved
 architecture gets rewritten, a plan built on an unapproved spec argues from
 nothing.
 
-Executing a plan is different: once the human approves the plan and picks an
-execution mode, `executor-execution` runs to completion without check-ins.
-Approval happens at phase boundaries, not inside them.
+Executing a plan is different: once the human approves the plan set — after
+plan regression has cleared it — and picks an execution mode,
+`executor-execution` runs to completion without check-ins. Approval happens
+at phase boundaries, not inside them.
 
 **Recovery when a gate was crossed without approval:** name it plainly to
 the human ("I crossed the discovery gate without your pick — here is what I
@@ -313,7 +317,9 @@ flowchart TB
     AR --> DE["Design, components"]
     DE --> SP["Specification, spec, risks, verification"]
     SP --> PL["Planning, plans, tasks"]
-    PL --> EX["Execution, dispatch loop"]
+    PL --> RG["Plan regression, plan-set audit"]
+    RG --> EX["Execution, dispatch loop"]
+    RG -->|"findings"| PL
     EX --> RV["Review, verdicts, rulings"]
     RV --> VF["Verification, evidence"]
     VF --> HO["Handoff, merge, archive"]
@@ -330,6 +336,7 @@ flowchart TB
 | Decide structure, record a decision, define interfaces | `executor-architecture` |
 | Write the requirements contract | `executor-spec` |
 | Turn a spec into tasks | `executor-planning` |
+| Audit the plan set before executing it | `executor-plan-regression` |
 | Run the plan with subagents | `executor-execution` |
 | Review a task, a fix round, or a branch | `executor-review` |
 | Prove the work actually works | `executor-verification` |
@@ -342,21 +349,37 @@ Read the contract references before writing anything into either store:
 - [references/indexes.md](references/indexes.md) — index formats and maintenance
 - [references/safety.md](references/safety.md) — secret hygiene, required because `.executor/` may be committed
 
-## Rulings, Not Stalls
+## Decisions: rule, ask, or stop
 
-Inside a phase, a running Executor does not wait on a human. Ambiguities,
-conflicts, plan defects, a cap you would have asked to exceed — decide them,
-record the decision as a ruling, keep going.
+Inside a phase, a running Executor does not wait on a human — but it does
+not silently decide everything either. Every decision class has exactly one
+handling; picking the wrong tier is how rulings go unlogged and questions
+go unasked.
 
-A ruling is written the moment it is made, to the initiative's rulings log
-and to `.local/decisions/`. It names what you decided, why, and what it
-costs if wrong. A wrong ruling costs rework the human can see and undo. A
-session parked on a question costs their whole day.
+| Decision class | Handling |
+|---|---|
+| Mechanical, contract-derived, or reversible | Decide, `exec-ruling`, keep going. The ruling is written the moment it is made — the plan's log for plan-scoped calls, `.executor/<INIT>/rulings.md` (`exec-ruling "$PLAN" initiative …`) when it binds other plans. |
+| Decision-class | **Ask on the spot, block only the affected lane.** Use your harness's interactive ask affordance (structured question tool if one exists, else a message that ends your turn). The question, its answer, and the resulting ruling all land in the rulings log via `exec-ruling "$PLAN" <scope> "<decision>" "<why>" "<cost>" --answered "<question>"`. Other tasks keep moving. |
+| The four stops | End the phase/run for human intervention. |
 
-**Four things stop you, and only these:** an irreversible or destructive
-operation; a security-sensitive action; a side effect outside this worktree
-that norms say you ask about first (a merge, a push to a shared branch, a
+**Decision-class means the answer is not yours to derive:** a conflict
+between two contracts that each have authority (IFCE vs SPEC, plan vs
+spec); a scope cut — dropping a requirement, shrinking a plan, deferring
+non-polish work; an irreversible choice the contracts leave open; product
+or UX judgment the spec does not settle. Everything else — including
+"which of two legal shapes to build" — is a ruling, not a question. When
+unsure whether a decision is a ruling or a question, ask once; a question
+that turns out to be a ruling costs one message, a ruling that should
+have been a question costs a rework loop.
+
+**The four stops** (unchanged): an irreversible or destructive operation;
+a security-sensitive action; a side effect outside this worktree that
+norms say you ask about first (a merge, a push to a shared branch, a
 publish); a defect so deep that every path forward is a guess.
+
+Between phases, every gate is a human-approval stop — the gates and the
+decision-class lane are the only places the workflow waits on the human,
+and both write their answers into the record.
 
 ## Secret Hygiene
 

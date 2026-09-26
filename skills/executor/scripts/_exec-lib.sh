@@ -133,6 +133,216 @@ exec_workspace_dir() {
   echo "$dir"
 }
 
+# Reduce a plan ledger to the latest state per task: one "tid<TAB>state"
+# line per task, input order retained implicitly by last-write-wins.
+#
+# Two line shapes are real in the wild and both are parsed:
+#   canonical:  INIT-0004-P01-T03: complete (commits a1b2c3d..d4e5f6a)
+#   narrative:  - 2026-09-25T09:56Z — T03 complete (b8af4bc) — APPROVED
+#               - T03 APPROVED (dd605c3f, spec 4.7)
+# The narrative shape is drift — writers MUST emit the canonical form — but
+# a parser that cannot read it audits nothing, which is how verdict and
+# task-table checks silently no-oped in live runs. 'approved' normalizes to
+# 'complete': a task whose review passed is complete for audit purposes.
+# The state returned is the first word after the task marker, lowercased;
+# trailing annotations stay available in the raw line, never in the state.
+exec_ledger_states() {
+  local progress=$1 pid=$2
+  [ -f "$progress" ] || return 0
+  awk -v pid="$pid" '
+    {
+      line = $0
+      # Canonical: "^<pid>-T<nn>: <state>", optionally bullet-prefixed —
+      # the only form scripts write. Anchored to line start (after an
+      # optional bullet) on purpose: seed guidance text and prose that
+      # merely mention an ID ("Example: X-T03: dispatched") must not parse
+      # as a real event — that false positive was a live defect.
+      if (match(line, "^[ \t]*(-[ \t]+)?" pid "-T[0-9][0-9]:[ \t]")) {
+        seg = substr(line, RSTART, RLENGTH)
+        tid = seg; sub(/^[ \t]*-[ \t]+/, "", tid); sub(/:.*/, "", tid)
+        st = substr(line, RSTART + RLENGTH); sub(/[ (].*$/, "", st)
+        last[tid] = tolower(st)
+        next
+      }
+      # Narrative drift: a bullet line carrying a bare T<nn> token followed
+      # by a state word. The bullet requirement is what keeps italic
+      # guidance text ("…shape: X-T03: complete…") from self-matching.
+      if (line ~ /^[ \t]*- / && match(line, /(^|[^A-Za-z0-9-])T[0-9][0-9][ \t]+(dispatched|in-fix|complete|parked|approved|fix|ruling|blocked|minor)/)) {
+        seg = substr(line, RSTART, RLENGTH)
+        t = seg; sub(/^[^A-Za-z0-9-]*/, "", t); sub(/[ \t].*/, "", t)
+        st = seg; sub(/.*[ \t]/, "", st); st = tolower(st)
+        if (st == "approved") st = "complete"
+        last[pid "-" toupper(t)] = st
+      }
+    }
+    END { for (t in last) print t "\t" last[t] }
+  ' "$progress"
+}
+
+# Count ledger lines that record a task state but are NOT the strict
+# canonical "^<pid>-T<nn>: " form — the drift the dual parser tolerates.
+# check reports these as NOTEs: readable but one grammar change away from
+# invisible. A bulleted full-ID line parses (the ID is unambiguous) but is
+# still drift; a narrative bullet is drift too.
+exec_ledger_drift_count() {
+  local progress=$1 pid=$2
+  [ -f "$progress" ] || { echo 0; return 0; }
+  awk -v pid="$pid" '
+    $0 ~ ("^" pid "-T[0-9][0-9]: ") { next }
+    $0 ~ ("^[ \t]*-[ \t]+" pid "-T[0-9][0-9]:") { n++; next }
+    /^[ \t]*- / && match($0, /(^|[^A-Za-z0-9-])T[0-9][0-9][ \t]+(dispatched|in-fix|complete|parked|approved|fix|ruling|blocked|minor)/) { n++ }
+    END { print n + 0 }
+  ' "$progress"
+}
+
+# Seed a plan workspace's four ledger files (idempotent — existing files
+# are never rewritten). Every script that writes into a workspace calls
+# this first, so no entry point can produce the bare-dir drift seen in
+# live runs (a P02 workspace with no rulings/preflight/frontmatter because
+# the controller resolved paths by hand instead of running exec-workspace).
+#   exec_seed_workspace DIR PLAN_FILE
+exec_seed_workspace() {
+  local dir=$1 plan=$2
+  local plan_id spec_id stamp
+  plan_id=$(exec_frontmatter "$plan" id)
+  spec_id=$(exec_frontmatter "$plan" spec)
+  [ -n "$plan_id" ] || plan_id="(no id: — legacy plan)"
+  [ -n "$spec_id" ] || spec_id="(none)"
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  if [ ! -f "$dir/progress.md" ]; then
+    cat > "$dir/progress.md" <<EOF
+---
+kind: ledger
+plan: $plan_id
+plan_file: $plan
+spec: $spec_id
+created_at: $stamp
+updated_at: $stamp
+---
+
+# Executor ledger
+
+*A ledger whose plan: line names a different plan is not yours — leave it and start your own. One line per state change goes under "## State changes" at the bottom; the table below is the scan index. Bump updated_at on every append — a stale updated_at is a NOTE in exec-run check.*
+
+## Task status
+
+*State: pending | dispatched | in-fix | complete | parked | blocked. One row per task, filled as it moves. The resume scan reads this table first: a task with no row has never been dispatched.*
+
+| Task | State | Commits | Review | Notes |
+|---|---|---|---|---|
+
+## State changes
+
+*Append-only, one line per state change, newest last. Canonical shape is one ID-prefixed line per event — the task's full ID, a colon, then the state word (dispatched / in-fix / complete / parked) with optional annotations. Narrative bullet lines are tolerated by the parser but flagged as drift by exec-run check — write the canonical form. Never quote an example task ID in this file — the ledger parser will read it as a real event.*
+EOF
+  fi
+
+  [ -f "$dir/rulings.md" ] || cat > "$dir/rulings.md" <<EOF
+---
+kind: rulings
+plan: $plan_id
+plan_file: $plan
+created_at: $stamp
+updated_at: $stamp
+---
+
+# Rulings — $plan_id
+
+*Append-only. Every decision taken on the human's behalf, written the moment it is made and mirrored into .local/decisions/ — including questions answered by the human mid-run (logged by exec-ruling with the question attached). Entries are appended at the end of this file by exec-ruling.*
+EOF
+
+  [ -f "$dir/preflight-scan.md" ] || cat > "$dir/preflight-scan.md" <<EOF
+---
+kind: preflight
+plan: $plan_id
+plan_file: $plan
+created_at: $stamp
+updated_at: $stamp
+---
+
+# Preflight conflict scan — $plan_id
+
+*One row per task pair sharing a file or interface, one row per task for self-consistency, and a ruling beside every finding. Written before Task 1 dispatches; read whenever a task surprises you.*
+
+## Scan
+
+*Severity: conflict | self-inconsistent | clean. Every pair sharing a file or symbol gets a row; every task gets a self-check row. A finding with no ruling is unresolved — do not dispatch until every finding is ruled.*
+
+| Tasks | Shared surface | Produced vs consumed | Finding | Severity | Ruling |
+|---|---|---|---|---|---|
+
+## Method
+
+*What was checked: the dependency map rows, the file map, the interface signatures, the test expectations. State the inputs you walked so a reader can see the scan's scope.*
+
+Check every task pair sharing a file, every interface contract the plan cites, and every task against itself:
+
+- Signature resolution — every consumed reference resolves to a produced signature: same name, same shape, same argument order.
+- Interface-contract consistency — two contracts defining the same field or type declare the same shape; dict[str, list[str]] beside a record shape for one name is a conflict, not a dialect.
+- Prose-vs-code consistency — implementation code embedded in a task body does not contradict that task's own Requirements/Produces line.
+- Unspecified contract points — a field used across a seam whose element type or shape no cited contract defines gets a Finding row naming the field and the seam.
+EOF
+
+  [ -f "$dir/dispatches.md" ] || cat > "$dir/dispatches.md" <<EOF
+---
+kind: dispatches
+plan: $plan_id
+plan_file: $plan
+created_at: $stamp
+updated_at: $stamp
+---
+
+# Dispatch log — $plan_id
+
+*Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
+*Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
+
+| Task | Role | Model | Agent | Started | Outcome | Context |
+|---|---|---|---|---|---|---|
+EOF
+}
+
+# Seed the initiative-level rulings log — the home for decisions that
+# span plans (plan-regression rulings, contract amendments, answered
+# questions that affect the whole initiative). Created on first need by
+# exec-workspace or exec-ruling; identical contract to the per-plan log.
+exec_seed_initiative_rulings() {
+  local init_id=$1
+  local store rdir file stamp
+  store=$(exec_ensure_run_store)
+  rdir="$store/$init_id"
+  file="$rdir/rulings.md"
+  [ -f "$file" ] && { echo "$file"; return 0; }
+  mkdir -p "$rdir"
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cat > "$file" <<EOF
+---
+kind: rulings
+initiative: $init_id
+created_at: $stamp
+updated_at: $stamp
+---
+
+# Rulings — $init_id (initiative-wide)
+
+*Append-only. Decisions that span or transcend a single plan — plan-set regression rulings, contract amendments (IFCE/SPEC), questions answered by the human mid-run. Per-plan rulings stay in the plan's own rulings.md; a decision that later plans must obey belongs here. Entries are appended by exec-ruling with TASK_ID 'initiative'.*
+EOF
+  echo "$file"
+}
+
+# The initiative-level execution directory: .executor/<INIT>/ — home of
+# artifacts that span plans (plan-regression/, rulings.md). mkdir so the
+# contract location always exists when a plan workspace does.
+exec_initiative_run_dir() {
+  local plan_id=$1 init dir
+  init=$(exec_initiative_of "$plan_id") \
+    || exec_die "cannot derive initiative from plan id '$plan_id'"
+  dir="$(exec_ensure_run_store)/$init"
+  mkdir -p "$dir"
+  echo "$dir"
+}
+
 # Extract a task's ID from its plan heading.
 # Heading form: '### Task 3: Name — `INIT-0004-P01-T03`'
 exec_task_id() {
@@ -244,6 +454,8 @@ exec_section_body() {
 # spec_verdict PASS or null — re-review verdicts carry null — with
 # quality APPROVED), reduces the ledger to the
 # latest state per unique task, and requires the exact plan task set.
+# Ledger parsing goes through exec_ledger_states, which tolerates the
+# narrative drift shape real controllers write.
 # Prints diagnostics to stderr; returns nonzero on any violation.
 exec_run_audit() {
   local plan=$1 dir=$2
@@ -255,16 +467,7 @@ exec_run_audit() {
   #duplicate completion lines never inflate the count, and a
   # later in-fix/reopen event supersedes an earlier complete.
   local task_states
-  task_states=$(awk -v pid="${plan_id}" '
-    $0 ~ ("^" pid "-T[0-9][0-9]: ") {
-      tid = $1; sub(/:$/, "", tid)
-      state = $0; sub(/^"?"?[^:]*: */, "", state)
-      # Keep only the last event per task (input order).
-      last[tid] = state
-      seen[tid] = 1
-    }
-    END { for (t in last) print t "\t" last[t] }
-  ' "$dir/progress.md" 2>/dev/null || true)
+  task_states=$(exec_ledger_states "$dir/progress.md" "$plan_id")
 
   # --- Expected task set from the plan ----------------------------------
   # Fence-aware: a '### Task N' inside a code fence is an example, not a
@@ -322,8 +525,14 @@ exec_run_audit() {
     fi
   done <<< "$expected"
 
-  # Final verdict: file must exist AND content must pass.
+  # Final verdict: file must exist AND content must pass. Both filename
+  # cases exist in the wild (-FINAL- on case-insensitive filesystems);
+  # the canonical name is lowercase -final- per references/layout.md.
   local final="$dir/reviews/verdicts/${plan_id}-final-verdict.md"
+  if [ ! -f "$final" ] && [ -f "$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md" ]; then
+    echo "note: ${plan_id}-FINAL-verdict.md uses uppercase FINAL — canonical is -final-; rename on next touch" >&2
+    final="$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md"
+  fi
   if [ -f "$final" ]; then
     if ! exec_verdict_clean "$final"; then
       echo "AUDIT: final verdict is not clean — needs spec_verdict: PASS or null with quality: APPROVED" >&2
@@ -336,15 +545,21 @@ exec_run_audit() {
 
   # Latest final-R verdict supersedes the base final verdict:
   # if a final fix-wave re-review failed, the run is not clean.
+  # Two globs, each guarded: `ls a b` exits non-zero when either path is
+  # missing (invisible on case-insensitive APFS, fatal on Linux CI), and
+  # under pipefail that status propagates through the pipeline.
   local latest_final_r
-  latest_final_r=$(ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md 2>/dev/null | sort | tail -1)
+  latest_final_r=$( { ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md 2>/dev/null || true
+                      ls "$dir/reviews/verdicts/${plan_id}-FINAL-R"*-verdict.md 2>/dev/null || true; } \
+                    | sort | tail -1)
   if [ -n "$latest_final_r" ] && ! exec_verdict_clean "$latest_final_r"; then
     echo "AUDIT: latest final re-review ($(basename "$latest_final_r")) is not clean — it supersedes the earlier clean verdict" >&2
     violations=$((violations + 1))
   fi
 
-  return $((violations > 0))
+  [ "$violations" -eq 0 ]
 }
+
 
 # A verdict file is clean iff spec_verdict is PASS (first-pass verdicts) or
 # null (re-review verdicts carry null — the spec was judged in R01) AND the

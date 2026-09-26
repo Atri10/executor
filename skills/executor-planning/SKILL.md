@@ -584,7 +584,9 @@ above the first task heading.
 gate; exit 0 or fix. It catches what reading re-derives every time: literal
 store paths written into tasks (artifact locations are resolved by
 `exec-workspace`/`exec-evidence`, never named in a plan — issue #7's
-failure), task headings missing their ID tokens, and missing frontmatter.
+failure), task headings missing their ID tokens, missing frontmatter, and
+the sketch-vs-code cap (≤40-line implementation fences, ≤60% code per task
+body — a plan carrying implementations is a defect, not a shortcut).
 
 ## Rulings Do Not Apply Here
 
@@ -605,8 +607,32 @@ buries it in a task where no reviewer will recognise it as a decision.
 
 ## Execution Handoff
 
-The planning phase gate is the human picking an execution mode. Everything
-below happens in one change.
+The handoff has two gates in sequence: **plan regression first** (the plan
+set survives an adversarial audit as a set), **then** the human picks an
+execution mode. Never offer modes before regression clears — a mode picked
+on an unaudited plan set is approval of defects nobody has read yet.
+
+**0. Plan-set regression.** When the plan set is drafted — whether one
+plan or five — route to `executor-plan-regression` before this section
+continues:
+
+```bash
+../executor/scripts/exec-plan-regression "$PLAN" init   # seeds the summary
+```
+
+The regression skill audits every plan against the spec, the interface
+contracts, and each other; repairs findings in place; and leaves
+`.executor/<INIT>/plan-regression/summary.md` reading clean-or-waived per
+plan. When `exec-plan-regression "$PLAN" check` exits 0:
+
+```bash
+../executor/scripts/exec-initiative phase INIT-0004 plan-regression entered "P01..P03 audit"
+# … audits + repairs land …
+../executor/scripts/exec-initiative phase INIT-0004 plan-regression passed "3 plans clean"
+```
+
+(Skippable only by the human, recorded via
+`exec-initiative phase INIT-0004 plan-regression skipped "<reason>"`.)
 
 **1. Update the initiative INDEX** (`<initiative>/INDEX.md`) — append the
 documents row and update the phase log:

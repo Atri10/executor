@@ -19,6 +19,11 @@ fixture() {
   git -C "$d" init -q -b main
   git -C "$d" config user.email fixture@example.invalid
   git -C "$d" config user.name fixture
+  # Throwaway repos must not inherit a global commit.gpgsign — a signing
+  # agent (1Password, gpg) that is locked or absent aborts every fixture
+  # commit and the suite dies mid-run with a git error, not a test result.
+  git -C "$d" config commit.gpgsign false
+  git -C "$d" config tag.gpgsign false
   printf '%s\n' "$d"
 }
 commit_all() { git -C "$1" add -A && git -C "$1" commit -qm "${2:-fixture}"; }
@@ -149,7 +154,7 @@ bash "$S/exec-run" plan.md start > /dev/null 2>&1
 printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
 printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
 printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
-printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
+printf -- '---\nkind: dispatches\nplan: INIT-0001-P01\nplan_file: plan.md\ncreated_at: 2026-09-12T07:00:00Z\nupdated_at: 2026-09-12T07:00:00Z\n---\n\n| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
 printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
 bash "$S/exec-run" plan.md complete > /dev/null 2>&1
 bash "$S/exec-run" plan.md check > /dev/null 2>&1 || bad "dispatch: empty table failed check"
@@ -598,8 +603,9 @@ printf '%s\n' "$RSCH" | sed 's/FENCEHERE/```\nanything untagged\n```/' > "$SDIR/
 bash "$S/exec-store-check" > /dev/null 2>&1 || bad "doccode: untagged fence rejected in thinking doc"
 ok "D8 doc-code boundary: impl fences banned, structural fences fine"
 
-# 30. Store check B1: discovery passed with no brainstorm session and no
-# recorded skip fails; a session dir or an INDEX note satisfies it.
+# 30. Store check B1/B2: discovery passed with no brainstorm session and no
+# recorded skip fails; a session dir with a session.md satisfies it; a bare
+# dir (no record) or a record with no ## Options fails B2.
 d=$(fixture bstorm)
 cd "$d"
 bash "$S/exec-initiative" new Brain > /dev/null 2>&1
@@ -609,13 +615,39 @@ if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "bstorm: discovery passed with empty brainstorm and no skip note"
 fi
 mkdir -p "$SDIR/brainstorm/sessions/2026-09-12-shape"
-bash "$S/exec-store-check" > /dev/null 2>&1 || bad "bstorm: a session dir did not satisfy B1"
-rmdir "$SDIR/brainstorm/sessions/2026-09-12-shape"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "bstorm: a bare session dir (no session.md) satisfied B2"
+fi
+cat > "$SDIR/brainstorm/sessions/2026-09-12-shape/session.md" <<'EOF'
+---
+kind: brainstorm
+id: null
+initiative: INIT-0001
+question: Which shape?
+status: draft
+decided: null
+created_at: 2026-09-12T00:00:00Z
+updated_at: 2026-09-12T00:00:00Z
+---
+
+# Which shape?
+
+## Options
+### A — flat
+### B — nested
+
+## Outcome
+open
+EOF
+bash "$S/exec-store-check" > /dev/null 2>&1 || bad "bstorm: a session dir with session.md did not satisfy B1/B2"
+rm -rf "$SDIR/brainstorm/sessions/2026-09-12-shape"
 printf '**Notes:** brainstorm skipped — spike already explored the shape.\n' >> "$SDIR/INDEX.md"
 bash "$S/exec-store-check" > /dev/null 2>&1 || bad "bstorm: INDEX skip note did not satisfy B1"
-ok "B1 requires a brainstorm session or a recorded skip"
+ok "B1/B2 require a recorded brainstorm session or a recorded skip"
 
-# 31. Store check I5: execution-phase progress without a **Branch:** line.
+# 31. Store check I5/P1: execution-phase progress without a **Branch:** line
+# fails; with one it passes; execution entered without plan-regression
+# passed/skipped fails P1.
 d=$(fixture brline)
 cd "$d"
 bash "$S/exec-initiative" new Branch > /dev/null 2>&1
@@ -626,8 +658,12 @@ if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "brline: execution progress without **Branch:** passed"
 fi
 printf '**Branch:** initiative/INIT-0001\n' >> "$SDIR/INDEX.md"
-bash "$S/exec-store-check" > /dev/null 2>&1 || bad "brline: **Branch:** line did not satisfy I5"
-ok "I5 requires **Branch:** once execution has progress"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "brline: execution entered without plan-regression passed/skipped passed P1"
+fi
+printf '| plan-regression | 2026-09-12 | **skipped** | fixture |\n' >> "$SDIR/INDEX.md"
+bash "$S/exec-store-check" > /dev/null 2>&1 || bad "brline: **Branch:** + skipped plan-regression did not satisfy I5/P1"
+ok "I5/P1 require **Branch:** and plan-regression clearance once execution has progress"
 
 # 32. Phase artifact gates: passed requires the phase's deliverable on
 # disk; skipped requires a reason note.
@@ -648,6 +684,42 @@ if bash "$S/exec-initiative" phase INIT-0001 architecture skipped >/dev/null 2>&
 fi
 bash "$S/exec-initiative" phase INIT-0001 architecture skipped "single-file change, no arch needed" > /dev/null 2>&1 || bad "artgate: reasoned skip refused"
 ok "phase passed is artifact-gated; skipped requires a note"
+
+# 32b. Plan-regression pipeline: once planning has passed, a run cannot
+# start until the plan set is audited clean or waived; the phase gate
+# refuses without a clean summary; the summary must name every plan.
+d=$(fixture planreg)
+cd "$d"
+bash "$S/exec-initiative" new Regress > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-regress"
+mkdir -p "$IDIR/plans"
+printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-probe.md"
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "planreg: intake pass refused"
+for ph in discovery architecture design specification; do
+  bash "$S/exec-initiative" phase INIT-0001 "$ph" skipped "fixture: not needed" > /dev/null 2>&1 || bad "planreg: $ph skip refused"
+done
+bash "$S/exec-initiative" phase INIT-0001 planning entered "go" > /dev/null 2>&1 || bad "planreg: planning enter refused"
+bash "$S/exec-initiative" phase INIT-0001 planning passed "1 plan" > /dev/null 2>&1 || bad "planreg: planning pass refused"
+bash "$S/exec-initiative" phase INIT-0001 plan-regression entered "go" > /dev/null 2>&1 || bad "planreg: plan-regression enter refused"
+bash "$S/exec-workspace" "$d/plan.md" > /dev/null 2>&1
+if bash "$S/exec-run" "$d/plan.md" start >/dev/null 2>&1; then
+  bad "planreg: run started after planning without plan-regression clearance"
+fi
+if bash "$S/exec-initiative" phase INIT-0001 plan-regression passed "premature" >/dev/null 2>&1; then
+  bad "planreg: phase passed with no summary artifact"
+fi
+bash "$S/exec-plan-regression" "$d/plan.md" init > /dev/null 2>&1 || bad "planreg: init refused"
+if bash "$S/exec-plan-regression" "$d/plan.md" check >/dev/null 2>&1; then
+  bad "planreg: check passed with no audit row"
+fi
+AUDIT=$(bash "$S/exec-plan-regression" "$d/plan.md" audit)
+printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: 1\n---\nPASS — 0 defects\n' > "$AUDIT"
+printf '| INIT-0001-P01 | clean | regression-P01.md | — | 0 defects |\n' >> "$d/.executor/INIT-0001/plan-regression/summary.md"
+bash "$S/exec-plan-regression" "$d/plan.md" check > /dev/null 2>&1 || bad "planreg: check refused a clean set"
+bash "$S/exec-initiative" phase INIT-0001 plan-regression passed "1 plan clean" > /dev/null 2>&1 || bad "planreg: phase pass refused with clean summary"
+bash "$S/exec-run" "$d/plan.md" start > /dev/null 2>&1 || bad "planreg: run refused after clearance"
+ok "plan-regression gates the run and the phase log"
 
 # 33. Dispatch outcome sync: terminal ledger states close running rows;
 # an in-fix boundary closes all but the newest live row.

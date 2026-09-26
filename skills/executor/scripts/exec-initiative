@@ -17,7 +17,7 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-PHASES="intake discovery architecture design specification planning execution review verification handoff"
+PHASES="intake discovery architecture design specification planning plan-regression execution review verification handoff"
 
 # Canonical phase order for transition validation. A phase may
 # only be entered after the previous one passed (or was explicitly
@@ -150,6 +150,27 @@ phase_artifacts_missing() {
     planning)
       has_artifact "$dir/plans" "${id}-P[0-9][0-9]*.md" \
         || { echo "plans/${id}-Pnn-*.md"; missing=$((missing + 1)); } ;;
+    plan-regression)
+      # The one deliverable that lives in the EXECUTION store, not the
+      # thinking store: the clearance summary must exist AND every plan
+      # must be clean|waived — summary.md alone proves init ran, not that
+      # the set cleared. exec-plan-regression check does the row walk;
+      # it needs any one plan file to resolve the initiative.
+      rs=$(exec_run_store 2>/dev/null || true)
+      summary="$rs/$id/plan-regression/summary.md"
+      if [ -z "$rs" ] || [ ! -f "$summary" ]; then
+        echo ".executor/$id/plan-regression/summary.md — run exec-plan-regression PLAN init and audit the set"; missing=$((missing + 1))
+      else
+        pfile=$(find "$dir/plans" -maxdepth 1 -name "${id}-P[0-9][0-9]*.md" -print -quit 2>/dev/null)
+        if [ -z "$pfile" ]; then
+          # A summary with no plans to audit is a clearance record for an
+          # empty set — the gate cannot have run.
+          echo "plans/${id}-Pnn-*.md — plan-regression cannot pass with no plans to audit"; missing=$((missing + 1))
+        else
+          "$(cd "$(dirname "$0")" && pwd)/exec-plan-regression" "$pfile" check >/dev/null 2>&1 \
+            || { echo "plan-regression rows not all clean|waived — exec-plan-regression PLAN check names them"; missing=$((missing + 1)); }
+        fi
+      fi ;;
   esac
   return "$missing"
 }
@@ -333,6 +354,16 @@ _None declared._
 | Phase | Entered | Gate passed | Notes |
 |---|---|---|---|
 | intake | $(today) | — | |
+| discovery | — | — | |
+| architecture | — | — | |
+| design | — | — | |
+| specification | — | — | |
+| planning | — | — | |
+| plan-regression | — | — | |
+| execution | — | — | |
+| review | — | — | |
+| verification | — | — | |
+| handoff | — | — | |
 EOF
 
   # Registry row, newest first, inserted under the header separator — still
@@ -430,7 +461,9 @@ $(printf '%s\n' "$missing" | sed 's/^/  /')"
   fi
 
   # Header line and registry row both track the current phase.
-  sed -i.bak -E "s/(\*\*Phase:\*\* )[a-z]+/\1$phase/" "$idx" && rm -f "$idx.bak"
+  # Phase names may carry a hyphen (plan-regression) — [a-z]+ would replace
+  # only the first word and leave the tail, producing plan-regression-regression.
+  sed -i.bak -E "s/(\*\*Phase:\*\* )[a-z][a-z-]*/\1$phase/" "$idx" && rm -f "$idx.bak"
   local store reg
   store=$(exec_docs_store); reg="$store/INDEX.md"
   [ -f "$reg" ] && awk -v id="$id" -v phase="$phase" -v d="$(today)" '
