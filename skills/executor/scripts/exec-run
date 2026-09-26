@@ -505,12 +505,15 @@ case "$action" in
     # Final verdict: a completed plan needs the whole-branch final verdict
     # too. The plan is not review-complete without it. Accept the uppercase
     # -FINAL- variant produced on case-insensitive filesystems (canonical
-    # stays lowercase; exec_run_audit already tolerates both).
+    # stays lowercase; exec_run_audit already tolerates both). Test each
+    # path with -f: `ls a b` exits non-zero when EITHER is missing, which
+    # passes on case-insensitive APFS and fails on Linux CI.
     if [ "$row_status" = "complete" ] && [ "$done_count" -ge "$total" ] && [ "$total" -gt 0 ]; then
-      ls "$dir/reviews/verdicts/${plan_id}-final-verdict.md" "$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md" >/dev/null 2>&1 || {
+      if [ ! -f "$dir/reviews/verdicts/${plan_id}-final-verdict.md" ] \
+         && [ ! -f "$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md" ]; then
         echo "AUDIT: run is complete but no final verdict (reviews/verdicts/${plan_id}-final-verdict.md) — whole-branch review has not run" >&2
         drift=1
-      }
+      fi
     fi
 
     exit "$drift"

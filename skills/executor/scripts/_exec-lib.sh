@@ -545,8 +545,13 @@ exec_run_audit() {
 
   # Latest final-R verdict supersedes the base final verdict:
   # if a final fix-wave re-review failed, the run is not clean.
+  # Two globs, each guarded: `ls a b` exits non-zero when either path is
+  # missing (invisible on case-insensitive APFS, fatal on Linux CI), and
+  # under pipefail that status propagates through the pipeline.
   local latest_final_r
-  latest_final_r=$(ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md "$dir/reviews/verdicts/${plan_id}-FINAL-R"*-verdict.md 2>/dev/null | sort | tail -1)
+  latest_final_r=$( { ls "$dir/reviews/verdicts/${plan_id}-final-R"*-verdict.md 2>/dev/null || true
+                      ls "$dir/reviews/verdicts/${plan_id}-FINAL-R"*-verdict.md 2>/dev/null || true; } \
+                    | sort | tail -1)
   if [ -n "$latest_final_r" ] && ! exec_verdict_clean "$latest_final_r"; then
     echo "AUDIT: latest final re-review ($(basename "$latest_final_r")) is not clean — it supersedes the earlier clean verdict" >&2
     violations=$((violations + 1))
