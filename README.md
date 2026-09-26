@@ -34,7 +34,7 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v0.5.0 git@github.com:Atri10/executor.git
+git clone --branch v0.5.1 git@github.com:Atri10/executor.git
 ```
 
 ### One-paste install for any LLM agent
@@ -47,7 +47,7 @@ the install:
 Install The Executor skill library for me:
 
 1. Clone https://github.com/Atri10/executor.git into a temp directory
-   (use --branch v0.5.0 for the latest release, or default branch for main).
+   (use --branch v0.5.1 for the latest release, or default branch for main).
 2. Find my agent's skills directory. Candidates, in order — use the first
    that exists, or ask me if none do:
    - ~/.omp/agent/skills/            (omp)

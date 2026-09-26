@@ -4,7 +4,7 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
-## [Unreleased]
+## [0.5.1] — 2026-09-26
 
 ### Fixed
 - 2026-09-26 — **Stale documentation after the branch model.** CONTRIBUTING's
