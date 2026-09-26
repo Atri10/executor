@@ -4,6 +4,45 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+## [Unreleased]
+
+### Added
+- 2026-09-26 — **Task branches and the branch model.** `references/branches.md`
+  is normative: one branch per artifact level named after the artifact ID
+  (`initiative/INIT-NNNN`, `plan/INIT-NNNN-Pnn`, `task/INIT-NNNN-Pnn-Tnn`),
+  each forked from its parent and merged through the gate its level
+  requires. `exec-branch task start|merge|abandon` forks a task branch from
+  the **plan branch tip at dispatch** and merges it back only when the
+  task's own R-verdict is clean — so the plan branch's history is only
+  reviewed merges. `exec-branch side|spike` carry the work that is neither
+  plan nor task (a side branch merges on a recorded initiative ruling; a
+  spike never merges). `exec-branch status` prints the branch stack and
+  flags orphan worktrees.
+- 2026-09-26 — **Worktrees for parallel waves.** `task start --worktree`
+  creates `.executor/worktrees/<TASK-ID>/` and leaves the main tree on the
+  plan branch; `task merge` and `task abandon` remove it. Store resolution
+  already handled this (`exec_root` = worktree for tracked docs,
+  `exec_main_root` = main repo for the shared execution store).
+- 2026-09-26 — **`sequential: true` escape hatch.** A plan may declare it to
+  commit tasks directly to the plan branch (the two-level model).
+  `exec-plan-lint` requires every task after the first to declare
+  `**Depends on:**` the preceding task, so the flag states a fact about the
+  dependency map rather than skipping isolation for convenience.
+- 2026-09-26 — **Branch recording in the ledger.** `dispatches.md` gains a
+  `Branch` column (after Agent, so existing column-index parsers keep
+  working) and the ledger records the branch and fork commit at dispatch
+  and the merge commit at merge.
+- 2026-09-26 — **Topology audit in `exec-run check`.** A task branch must
+  match the task the ledger says is in flight; every recorded merge commit
+  must be an ancestor of the plan branch; a clean final verdict with a task
+  branch still holding unmerged commits is drift; orphan worktrees and
+  non-worktree debris under `.executor/worktrees/` are reported.
+
+### Changed
+- 2026-09-26 — **`exec-branch` grew subcommands** (`task`, `side`, `spike`)
+  and `status` now prints the stack. The plan-level `start|merge|abandon`
+  behaviour is unchanged.
+
 ## [0.4.0] — 2026-09-26
 
 ### Added

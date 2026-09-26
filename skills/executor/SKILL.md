@@ -345,6 +345,7 @@ flowchart TB
 Read the contract references before writing anything into either store:
 
 - [references/layout.md](references/layout.md) — exact directory structure
+- [references/branches.md](references/branches.md) — the branch model: naming, fork rules, merge gates, edge cases
 - [references/frontmatter.md](references/frontmatter.md) — required fields per document type
 - [references/indexes.md](references/indexes.md) — index formats and maintenance
 - [references/safety.md](references/safety.md) — secret hygiene, required because `.executor/` may be committed

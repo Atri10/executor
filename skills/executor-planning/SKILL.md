@@ -203,6 +203,7 @@ spec: INIT-0004-SPEC-01
 interfaces: [INIT-0004-IFCE-01]
 tasks: 7
 execution_mode: null
+sequential: false
 workspace: .executor/INIT-0004/P01
 ---
 ```
@@ -344,6 +345,7 @@ Full task shape:
 
 **Implements:** `INIT-0004-SPEC-01-R04`, `INIT-0004-SPEC-01-R05`
 **Constraints restated here:** `C01` (Python >= 3.11), `C02` (`mypy --strict`)
+**Depends on:** `INIT-0004-P01-T02` — or `none` for the first task
 
 **Files:**
 - Create: `src/cells/scoring.py`
