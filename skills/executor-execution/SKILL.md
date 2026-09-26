@@ -61,28 +61,49 @@ Creating a worktree: prefer the host's native worktree tooling when it
 exists; fall back to `git worktree add <path> -b <branch>` otherwise. Ask
 for consent if the human has not already declared a worktree preference.
 
-**Branch model.** One initiative branch, one branch per plan, forked from
-it:
+**Branch model.** One branch per artifact level, named after the artifact
+ID, merged on the gate its level requires (`references/branches.md` is
+normative):
 
 ```bash
-../executor/scripts/exec-initiative branch INIT-0004     # initiative/INIT-0004
-../executor/scripts/exec-branch "$PLAN" start            # plan/INIT-0004-P01
+../executor/scripts/exec-initiative branch INIT-0004          # initiative/INIT-0004
+../executor/scripts/exec-branch "$PLAN" start                 # plan/INIT-0004-P01
+../executor/scripts/exec-branch "$PLAN" task start INIT-0004-P01-T03   # task/INIT-0004-P01-T03
+../executor/scripts/exec-branch "$PLAN" task merge INIT-0004-P01-T03   # review-gated
 ```
 
 - The initiative branch forks from wherever the human currently is when the
   initiative starts; the fork point is recorded in the initiative's
   `INDEX.md`, so a resumed controller finds it after compaction.
-- Task commits land on `plan/INIT-0004-P01` with detailed messages — the
-  plan branch is the reviewable unit.
+- **Each task gets its own branch, forked from the plan branch tip at
+  dispatch** — not from a snapshot taken when the plan started. Task N+1
+  therefore already contains task N's merged work, which is what keeps
+  sequential tasks conflict-free.
+- A task branch merges back to the plan branch **only when its own review
+  verdict is clean** (`exec-branch "$PLAN" task merge` refuses otherwise).
+  The plan branch's history is then only reviewed merges — clean to bisect,
+  and one `git revert -m 1` away from undoing a single task.
+- A plan declaring `sequential: true` skips task branches: its tasks commit
+  directly to the plan branch. `exec-plan-lint` requires the dependency
+  chain to justify the flag.
+- **Parallel tasks need worktrees, not just branches** — two agents cannot
+  share one working tree. `task start --worktree` creates
+  `.executor/worktrees/<TASK-ID>/` and leaves the main tree on the plan
+  branch; `task merge` and `task abandon` remove it.
 - The plan branch merges back to the initiative branch **only** after its
   final review verdict exists (`exec-branch "$PLAN" merge` refuses
   otherwise). The final review is the merge gate, not the implementer's
   DONE.
+- Work that is neither plan nor task — a docs sweep, a config change —
+  goes on `side/INIT-0004-<slug>` (merged on a recorded ruling) or
+  `spike/INIT-0004-<slug>` (throwaway, never merged). Never commit it on a
+  task or plan branch: the branch's ID names its scope.
 - Initiative completion — merging the initiative branch onward, pushing,
   opening a PR — is the human's decision at `executor-handoff`, never the
   controller's.
-- `exec-branch "$PLAN" status` prints where you are and what is expected;
-  after compaction, run it before dispatching anything.
+- `exec-branch "$PLAN" status` prints the branch stack (initiative → plan →
+  task) and orphan worktrees; after compaction, run it before dispatching
+  anything.
 
 **2. Resolve the execution workspace.**
 
@@ -403,6 +424,21 @@ conflict in the same worktree.
 
 ### 1. Dispatch the implementer
 
+**Start the task branch first** (unless the plan declares
+`sequential: true`, in which case tasks commit directly to the plan branch
+and this step is skipped):
+
+```bash
+../executor/scripts/exec-branch "$PLAN" task start INIT-0004-P01-T03
+# → task/INIT-0004-P01-T03, forked from the plan branch tip, recorded in the ledger
+# parallel wave: add --worktree to give the agent its own working tree
+```
+
+The branch forks from the plan branch **tip**, so it already contains every
+earlier task's merged work. `exec-run "$PLAN" task TASK_ID` marks the
+dispatch in the ledger; the branch start records which branch the work
+lives on, so a resumed controller can find it.
+
 **Record BASE first:** `git rev-parse HEAD`. The review package and every
 fix-round diff need it. Never use `HEAD~1` later — it silently drops all but
 the last commit of a multi-commit task.
@@ -695,6 +731,18 @@ ruling at the cap — append the completion line:
 INIT-0004-P01-T03: complete (commits a1b2c3d..b7c8d9e, review clean)
 INIT-0004-P01-T05: complete (commits b7c8d9e..e1f2a3b, 2 parked)
 ```
+
+**Then merge the task branch** (skip for `sequential: true` plans):
+
+```bash
+../executor/scripts/exec-branch "$PLAN" task merge INIT-0004-P01-T03
+# refuses unless the task's latest R-verdict is clean; records the merge
+# commit in the ledger; removes the worktree; deletes the task branch
+```
+
+The merge is what puts the task's work where the next task will fork from.
+A task whose review is not clean stays on its branch — the plan branch
+never receives unreviewed work.
 
 Update the run's row with `exec-run "$PLAN" task` (it counts the ledger's
 `complete` lines — `3/7`), mark the todo complete, and move on in the same

@@ -112,6 +112,35 @@ case "$plan_status" in
   *) fail "status: '$plan_status' is not draft or active — superseded plans keep their body but gain superseded_by" ;;
 esac
 
+# --- 1b. A sequential plan justifies the flag -------------------------------
+# 'sequential: true' tells execution to commit tasks directly to the plan
+# branch instead of giving each one a branch (references/branches.md). That
+# is only honest when the tasks form a single chain — otherwise the flag
+# claims an ordering the dependency map does not have, and becomes a way
+# to skip the per-task isolation the branch model exists to provide.
+seq_flag=$(exec_frontmatter "$plan" sequential)
+case "$seq_flag" in
+  ""|"false") ;;
+  "true")
+    n_tasks=$(grep -c '^### Task [0-9]' "$plan" 2>/dev/null || true)
+    n_tasks=${n_tasks:-0}
+    if [ "$n_tasks" -gt 1 ]; then
+      n=2
+      while [ "$n" -le "$n_tasks" ]; do
+        prev_id=$(exec_task_id "$plan" $((n - 1)) 2>/dev/null || true)
+        body=$(exec_task_body "$plan" "$n" 2>/dev/null || true)
+        if [ -z "$prev_id" ]; then
+          fail "sequential: true but task $((n - 1)) carries no ID token — the chain cannot be verified"
+        elif ! printf '%s\n' "$body" | grep -qE "^\*\*Depends on:\*\*.*${prev_id}"; then
+          fail "sequential: true but task $n does not declare '**Depends on:** \`${prev_id}\`' — the flag claims a chain the dependency map does not have"
+        fi
+        n=$((n + 1))
+      done
+    fi
+    ;;
+  *) fail "sequential: '$seq_flag' is neither true nor false" ;;
+esac
+
 # --- 2. Task headings carry IDs ---------------------------------------------
 # Real headings only: the shared fence tracker excludes fenced examples.
 # IDs must name THIS plan and match the heading number.
