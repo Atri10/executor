@@ -4,7 +4,7 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
-## [Unreleased]
+## [0.4.0] — 2026-09-26
 
 ### Added
 - 2026-09-26 — **Plan-set regression phase + skill.** New phase
@@ -44,6 +44,26 @@ project is tagged; between releases, entries are dated and `main` moves.
   attaches the question text to both the log entry and its
   `.local/decisions/` mirror.
 
+### Changed
+- 2026-09-26 — **BREAKING for in-flight initiatives:** execution now
+  requires plan-regression clearance (or a recorded skip) once planning
+  has passed. An initiative mid-flight when it upgrades records the
+  decision explicitly:
+  `exec-initiative phase <INIT> plan-regression skipped "<reason>"`.
+  New initiatives get the phase row seeded by `exec-initiative new`.
+- 2026-09-26 — **`exec-run check` audits more.** It now also reports
+  missing verdicts for completed tasks, completed tasks absent from the
+  Task status table, seeded files missing or lacking `kind:` frontmatter,
+  sibling workspaces with a ledger but no registry row, empty scaffold
+  directories, and cross-plan artifacts misfiled inside a plan's
+  `reviews/`. `-FINAL-verdict.md` filenames are accepted with a rename
+  note (canonical stays lowercase).
+- 2026-09-26 — **Workspace seeding is entry-point-independent.**
+  `exec_seed_workspace` runs from `exec-workspace`, `exec-run`,
+  `exec-ruling`, `exec-brief`, `exec-context`, `exec-review-package`, and
+  `exec-fix-package`, so a workspace resolved by any path carries its four
+  seeded files.
+
 ### Fixed
 - 2026-09-26 — **Ledger grammar the audits could not read.** `exec-run`
   counted `complete` by `^<PLAN>-T<nn>: complete`; real controllers write
@@ -64,6 +84,13 @@ project is tagged; between releases, entries are dated and `main` moves.
 - 2026-09-26 — **`exec-plan-lint` documentation drift.** Planning's
   checklist credited three checks; the script enforces four — the
   sketch-vs-code cap is now documented.
+- 2026-09-26 — **Final-verdict check was macOS-only.** `ls a b` exits
+  non-zero when either path is missing; on case-insensitive APFS both
+  `-final-` and `-FINAL-` variants resolve to the same file so the check
+  passed locally, while on Linux a clean run was reported as missing its
+  final verdict. Each path is now tested with `-f`, and the two final-R
+  globs in `exec_run_audit` are guarded the same way (their status
+  propagates under `pipefail`).
 
 ## [0.3.0] — 2026-09-22
 
