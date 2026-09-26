@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Own the plan-set regression pipeline's artifacts: where audit reports and
 # repair ledgers live, and whether the set is cleared to execute.
 #

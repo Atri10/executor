@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Assemble the context an implementer needs before a task executes, into a
 # single file the dispatch prompt points at. The controller never pastes
 # this into its own context — it writes the file and passes the path.

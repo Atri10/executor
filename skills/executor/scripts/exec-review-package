@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Build a review package — commit list, stat summary, the net diff with
 # extended context, PLUS the mechanical context a reviewer needs to judge
 # the diff: the declared-files coverage table, the task's seam contract,

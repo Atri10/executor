@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 """Lint Executor skill files for prompt-injection patterns.
 
 The payload of this repository is prompts: every SKILL.md, template, and

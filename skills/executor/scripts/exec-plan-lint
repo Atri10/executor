@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Lint a plan for contract violations before it passes the planning gate.
 #
 # Plans are the single source of task truth; anything a plan states wrongly
@@ -10,7 +12,9 @@
 #      scripts (exec-workspace, exec-evidence, exec-review-package), never
 #      written into a plan. A plan containing a literal path it intends to
 #      create under docs/executor/... or .executor/... is a planner guessing
-#      an output location — the exact failure issue #7 captured.
+#      an output location — the guess breaks the moment the workspace moves
+#      or the store is relocated, and every tool that resolves paths by ID
+#      then disagrees with the plan about where artifacts live.
 #   2. Task-heading integrity. Every '### Task N:' heading must carry its
 #      task ID backtick token (INIT-NNNN-Pnn-Tnn) — exec-brief refuses
 #      without it.

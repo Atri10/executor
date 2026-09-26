@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Own the run's lifecycle transitions in .executor/INDEX.md. The registry is
 # a contract, not a scratch note: a row whose status lies about the ledger
 # is how a resumed controller re-dispatches completed work.
@@ -413,8 +415,9 @@ case "$action" in
 
     # Verdict audit: every task the ledger marks complete must have a
     # verdict file. A completion line without a verdict is an unjudged
-    # claim — the failure mode issue #5 captured (last task's review
-    # skipped because nothing audited it).
+    # claim — the failure mode is a run whose last task's review was
+    # skipped because nothing audited the gap between the ledger and the
+    # verdicts directory.
     missing_verdicts=0
     while IFS= read -r task_id; do
       [ -n "$task_id" ] || continue

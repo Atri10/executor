@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Lint the TRACKED thinking store (docs/executor/) for contract violations.
 #
 # The live stores showed the drift: the execution store grew script-enforced

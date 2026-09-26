@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Shared helpers for the Executor scripts. Sourced, never executed directly.
 #
 # Single source of truth for ID parsing, frontmatter reading, and store

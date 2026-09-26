@@ -96,10 +96,10 @@ find skills/executor/scripts scripts -type f \( -name 'exec-*' -o -name '*.sh' \
 python3 scripts/lint-prompt-injection.py skills/
 bash scripts/validate-skills.sh skills
 bash skills/executor/scripts/exec-scan-secrets .
-bash scripts/test-issue9-fixes.sh
+bash scripts/test-executor.sh
 ```
 
-`test-issue9-fixes.sh` is the regression suite: thirty-seven fixture cases
+`test-executor.sh` is the regression suite: thirty-seven fixture cases
 that rebuild disposable repositories and assert each enforced contract. Add
 a case whenever a fix teaches a script to refuse something it used to
 accept.

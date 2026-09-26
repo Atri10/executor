@@ -585,10 +585,12 @@ above the first task heading.
 **10. Mechanical lint.** Run `../executor/scripts/exec-plan-lint PLAN_FILE` before the
 gate; exit 0 or fix. It catches what reading re-derives every time: literal
 store paths written into tasks (artifact locations are resolved by
-`exec-workspace`/`exec-evidence`, never named in a plan — issue #7's
-failure), task headings missing their ID tokens, missing frontmatter, and
-the sketch-vs-code cap (≤40-line implementation fences, ≤60% code per task
-body — a plan carrying implementations is a defect, not a shortcut).
+`exec-workspace`/`exec-evidence`, never named in a plan — a guessed path
+breaks the moment the workspace moves and every ID-resolving tool then
+disagrees with the plan), task headings missing their ID tokens, missing
+frontmatter, and the sketch-vs-code cap (≤40-line implementation fences,
+≤60% code per task body — a plan carrying implementations is a defect, not
+a shortcut).
 
 ## Rulings Do Not Apply Here
 

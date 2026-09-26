@@ -378,7 +378,7 @@ project is tagged; between releases, entries are dated and `main` moves.
   mode is a capability inside a session, not its definition.
 
 ### Added
-- 2026-09-12 — **Regression suite:** `scripts/test-issue9-fixes.sh`
+- 2026-09-12 — **Regression suite:** `scripts/test-executor.sh`
   recreates 14 reproduced failure scenarios in disposable git fixtures
   and asserts the fixed behavior (context completeness, evidence
   immutability/aliases/atomicity, method validation, semantic audit,
