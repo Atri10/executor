@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Regression fixtures for the issue #9 fix plan.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
+#
+# Regression fixtures for the executor scripts' contracts.
 #
 # Each case recreates a reproduced failure against disposable synthetic
 # repositories and asserts the fixed behavior. Run from the repo root:
-#   bash scripts/test-issue9-fixes.sh
+#   bash scripts/test-executor.sh
 # Exit 0 = all cases pass; nonzero names the failing case.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/skills/executor/scripts"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/issue9-fixes.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/executor-tests.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 pass=0; fail=0

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Extract one task's full text into a brief file the implementer reads in a
 # single call, so task text never passes through the controller's context.
 #

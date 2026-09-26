@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Record a ruling — a decision taken on the human's behalf — in both places
 # it needs to live: the rulings log, and .local/decisions/ where every other
 # skill's decisions are indexed.

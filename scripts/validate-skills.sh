@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Validate every skill file's structural contract: frontmatter parseable,
 # name/description present, description carries a "Use when ..." trigger,
 # markdown fences balanced. Runs in CI and before any local release.

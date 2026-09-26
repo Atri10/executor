@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Allocate the next free document ID of a kind within one initiative.
 #
 # Lists the initiative immediately before allocating, so two agents racing

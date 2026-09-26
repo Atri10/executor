@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Assemble a fix package — the single file a fix implementer is dispatched
 # with: the open findings verbatim from the verdict that failed, PLUS the
 # contract the fix is judged against — the implementer's report, the task's

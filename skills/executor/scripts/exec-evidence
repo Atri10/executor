@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Write one criterion's observed output as an evidence file in the
 # initiative's TRACKED verification store, and stamp state-R<nn>.txt once
 # per round per plan directory.

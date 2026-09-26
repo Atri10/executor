@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Branch lifecycle: fork from the parent branch, merge back through the
 # gate its level requires. See references/branches.md for the model.
 #

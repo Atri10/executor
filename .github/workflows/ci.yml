@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 name: CI
 
 on:
@@ -127,5 +129,5 @@ jobs:
           printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
           bash "$S/exec-run" "$P" complete > /dev/null
           bash "$S/exec-run" "$P" check
-      - name: Regression suite (scripts/test-issue9-fixes.sh)
-        run: bash scripts/test-issue9-fixes.sh
+      - name: Regression suite (scripts/test-executor.sh)
+        run: bash scripts/test-executor.sh
