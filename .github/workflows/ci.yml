@@ -122,7 +122,8 @@ jobs:
           printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
           printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
           # Empty dispatch table: valid for inline runs, must not fail check.
-          printf -- '| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' > "$W/dispatches.md"
+          # Frontmatter is part of the seeded-file contract (kind: dispatches).
+          printf -- '---\nkind: dispatches\nplan: INIT-0001-P01\nplan_file: %s\ncreated_at: 2026-09-12T07:00:00Z\nupdated_at: 2026-09-12T07:00:00Z\n---\n\n| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' "$P" > "$W/dispatches.md"
           printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
           bash "$S/exec-run" "$P" complete > /dev/null
           bash "$S/exec-run" "$P" check

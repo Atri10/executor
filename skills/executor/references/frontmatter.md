@@ -13,7 +13,7 @@ provenance claim.** If a check did not run, the field says so.
 ---
 id: INIT-0004-ADR-02              # this document's ID; unique within the initiative
 initiative: INIT-0004             # owning initiative; always present
-kind: adr                         # charter|research|options|architecture|adr|interface|design|spec|risk|verification|plan
+kind: adr                         # charter|research|options|architecture|adr|interface|design|spec|risk|verification|plan|brainstorm
 title: Tenant isolation boundary  # one line, human-readable
 status: active                    # draft|active|superseded|withdrawn
 created_at: 2026-09-01T14:55:52Z  # actual UTC from an executed command
@@ -30,6 +30,14 @@ edited to hide its old content — it keeps its body and gains
 `superseded_by`.
 
 ## Per-kind additional fields
+
+### Brainstorm (`kind: brainstorm`)
+
+```yaml
+question: Which placement strategy survives tenant-scale?
+status: open                      # open|decided|abandoned — brainstorm's own lifecycle
+decided: null                     # option name once the human picks
+```
 
 ### Charter (`kind: charter`)
 
@@ -145,7 +153,7 @@ Common shape (all execution artifacts):
 
 ```yaml
 ---
-kind: brief                        # brief|context|ledger|rulings|preflight|dispatches|report|verdict|fix-package|evidence
+kind: brief                        # brief|context|ledger|rulings|preflight|dispatches|report|verdict|fix-package|evidence|regression|repair|gate
 id: INIT-0004-P01-T03              # the task ID; ledger/rulings/preflight/dispatches use the plan ID instead
 initiative: INIT-0004
 plan: INIT-0004-P01
@@ -172,6 +180,9 @@ Per-kind fields:
 | `verdict` | the reviewer | `task`, `round: INIT-0004-P01-T03-R02`, `spec_verdict: PASS`, `quality: APPROVED` | one file per review round |
 | `fix-package` | `exec-fix-package` | `task`, `round: INIT-0004-P01-T03-R02`, `verdict:` provenance path | verdict findings + report + brief + context assembled for the fix dispatch |
 | `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion; written to the initiative's tracked `verification/evidence/PNN/` |
+| `regression` | `executor-plan-regression` | `plan`, `round: 1` | one audit file per plan per pass; lives at `.executor/<INIT>/plan-regression/regression-P<nn>.md` |
+| `repair` | `executor-plan-regression` | `plan`, `round: 1`, `verdict:` audit path | one repair log per plan per pass; lives at `.executor/<INIT>/plan-regression/fix-P<nn>.md` |
+| `gate` | `exec-plan-regression init` | — | the plan-set clearance summary, `.executor/<INIT>/plan-regression/summary.md`; rows: clean\|waived |
 
 `report` and `verdict` files are written by subagents, not scripts — the
 subagent copies the identity block from its brief (or verdict path) and

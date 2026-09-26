@@ -28,6 +28,7 @@ reports, and the verdict files carry the record.
 | A plan at `docs/executor/INIT-NNNN-*/plans/INIT-NNNN-Pnn-*.md` | Everything resolves from its `id:` frontmatter |
 | Every task heading carries its ID: `### Task 3: <name> — \`INIT-0004-P01-T03\`` | `exec-brief` errors out without it, because a brief with no ID cannot be filed, reviewed, or resumed |
 | The planning gate passed and the human picked `execution_mode: subagent` | Execution runs without check-ins, so the approval must already exist |
+| The `plan-regression` phase passed or was explicitly skipped once planning is done (`exec-plan-regression "$PLAN" check` exits 0) | The plan set was audited as a set; `exec-run PLAN start` refuses after planning until it is |
 | A reachable spec (`spec:` in plan frontmatter) | The spec is the binding authority every conflict resolves against |
 
 Scripts live in the sibling contract skill. Invoke them as
@@ -96,6 +97,27 @@ their headers**. You never hand-create those four files, and you never
 invent a different shape for them. It also writes the self-ignoring
 `.executor/.gitignore` and inserts this run's row into `.executor/INDEX.md`
 with `Status: running` and `Tasks: 0/?`.
+
+**Mechanical obligations — the scripts are the contract, not conveniences.**
+A workspace built by hand misses every audit (that failure produced a P02
+workspace with no rulings, no preflight, and no frontmatter). Non-negotiable:
+
+- `exec-workspace` resolves and seeds the workspace BEFORE anything is
+  written into it — never `mkdir`+`cat` the four ledger files yourself.
+  (Every exec script now seeds on entry, so reaching one by another path
+  still lands the files.)
+- `exec-run "$PLAN" start` immediately after `exec-workspace`, then
+  `exec-run "$PLAN" task TASK_ID` at every dispatch and
+  `exec-run "$PLAN" complete` at the end — the registry row only moves
+  through these calls; a ledger without them leaves INDEX reading `0/?`.
+- Ledger state lines use the canonical grammar
+  `INIT-0004-P01-T03: complete (commits …, …)` — one task-ID-prefixed line
+  per state change. Narrative bullet lines (`- ts — T03 complete`) are
+  parsed by the audit but reported as drift by `exec-run check`; write
+  canonical so nothing depends on tolerance.
+- `exec-run "$PLAN" check` before marking the run complete, and any time
+  you resume after an interruption — it is the only thing that catches a
+  missing verdict, an empty task table, or a stale registry row.
 
 Resolution keys on the plan's `id:` frontmatter, not the filename — renaming
 a plan does not orphan its workspace. A plan with no `id:` is pre-Executor
@@ -222,7 +244,38 @@ nothing deletes either copy.
 A wrong ruling costs rework the human can see and undo. A session parked on
 a question costs their whole day and buys nothing.
 
-### Four things stop you, and only these
+### Decision-class questions: ask on the spot, block only that lane
+
+Some decisions mid-run are not yours to derive — the master skill's
+three-tier contract names them: a conflict between two contracts that each
+have authority, a scope cut, an irreversible choice the contracts leave
+open, product judgment the spec does not settle. When one surfaces:
+
+1. **Ask immediately** through your harness's interactive-question
+   affordance — structured ask-tool if it exists, else end your turn with
+   the question. Do not batch it into the next gate; the affected lane
+   cannot move until it's answered, and burying it in a gate presentation
+   stalls the run for hours.
+2. **Block only the affected work.** Other tasks dispatch on schedule; the
+   blocked task's ledger line records the canonical form —
+   `INIT-0004-P01-T05: blocked — question to human (rulings pending)` — so
+   a resume scan sees the lane is waiting, not dead.
+3. **Log the answer as a ruling** the moment it lands — the question rides
+   along so the ruling is not a silent pick:
+
+```bash
+../executor/scripts/exec-ruling "$PLAN" T05 \
+  "queue stays per-tenant, dedupe moves to the dispatcher" \
+  "human chose option B: IFCE-02 and the P03 plan conflicted, theirs is binding" \
+  "if wrong, P03's dispatcher task needs a re-brief" \
+  --answered "IFCE-02 says topic-per-tenant but P03 plan assumes shared queue — which holds?"
+```
+
+A decision spanning plans (`initiative` scope) lands in
+`.executor/<INIT>/rulings.md` — the same call, `initiative` as the ID —
+so later plans' `exec-context` can surface it.
+
+### The four stops
 
 1. An irreversible or destructive operation.
 2. A security-sensitive action.
@@ -230,7 +283,8 @@ a question costs their whole day and buys nothing.
    a merge, a push to a shared branch, a publish.
 4. A defect so deep that every path forward is a guess.
 
-For those, stop and ask. Nothing else.
+For those, stop the run. Decision-class questions ask and continue;
+everything else is a ruling. Nothing else interrupts the human.
 
 ## Model Selection
 

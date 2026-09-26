@@ -47,6 +47,7 @@ if [ $# -eq 3 ]; then
   out=$3
 else
   dir=$(exec_workspace_dir "$plan")
+  exec_seed_workspace "$dir" "$plan"
   out="$dir/briefs/${task_id}-brief.md"
 fi
 

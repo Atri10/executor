@@ -87,10 +87,12 @@ frontmatter description.
 | `executor-architecture` | Architecture, Design | Architecture, ADRs, interfaces, component designs |
 | `executor-spec` | Specification | Spec, risks, verification strategy (one row per requirement) |
 | `executor-planning` | Planning | Plans with tasks, linted before the gate |
+| `executor-plan-regression` | Plan regression | Plan-set audit, repairs, clearance summary — gates execution |
 | `executor-execution` | Execution | Task dispatch, ledger, reports, run registry |
 | `executor-review` | Review | Per-task and whole-branch verdicts, findings, fix loops |
 | `executor-verification` | Verification | Evidence-backed proof each requirement holds |
 | `executor-handoff` | Handoff | Human decision menu: merge, PR, or keep the branch |
+| `executor-brainstorm` | Cross-phase | Recorded divergent ideation sessions; visual companion optional |
 
 **Phases compress, they never vanish.** A small initiative can produce a
 charter and a spec in one exchange and skip discovery — but skipping is a
@@ -144,10 +146,11 @@ not get to demand it.
 | `exec-review-package` | Review diffs with commit list + stat + `-U10` diff in one file, per round |
 | `exec-fix-package` | Fix-round dispatch package: verdict findings + implementer report + brief + context verbatim, so fix agents see the contract, not a paraphrase |
 | `exec-run` | Run lifecycle in the registry: `start`/`task`/`complete`/`pause`/`blocked`/`check` |
+| `exec-plan-regression` | **Plan-set gate**: resolves the initiative-level `plan-regression/` dir, seeds the clearance summary, and `check` refuses a run while any plan is unaudited or unrepaired |
 | `exec-run check` | **Drift + semantic audit**: registry row vs ledger, verdict CONTENT (a FAIL verdict blocks), exact task set with latest-state reduction, final verdict lineage (a failing final re-review supersedes an earlier clean one), completed tasks present in the Task status table — exit 1 names the failure |
 | `exec-branch` | Plan-branch lifecycle: fork from the initiative branch, `merge` **refused** unless the review audit passes |
 | `exec-evidence` | Per-criterion evidence files in the initiative's tracked `verification/evidence/PNN/`, immutable per round (`-attempt2` on same-round reruns), atomic publish, per-round state stamp (branch, commit, dirtiness) |
-| `exec-store-check` | **Thinking-store integrity gate**: registry ↔ folders ↔ Documents table ↔ frontmatter statuses ↔ cross-links ↔ evidence citations ↔ phase-log chronology, plus per-kind document contracts (architecture must carry a Mermaid diagram, specs need requirement headings + a resolving verification link, active options need a decision, `criteria_count` must match `V<nn>` rows), the doc-code boundary, the brainstorm record, and branch provenance |
+| `exec-store-check` | **Thinking-store integrity gate**: registry ↔ folders ↔ Documents table ↔ frontmatter statuses ↔ cross-links ↔ evidence citations ↔ phase-log chronology, plus per-kind document contracts (architecture must carry a Mermaid diagram, specs need requirement headings + a resolving verification link, active options need a decision, `criteria_count` must match `V<nn>` rows), the doc-code boundary, the brainstorm record, branch provenance, and plan-regression clearance (execution entered without a passed/skipped plan-regression phase fails) |
 | `exec-ruling` | Record a decision taken on the human's behalf — to the rulings log *and* the local decisions store |
 | `exec-scan-secrets` | Credential-shaped content scan across both stores; reports file:line, never the value |
 
@@ -228,7 +231,10 @@ flowchart LR
         RP["Reports"]
         V["Diffs, Verdicts"]
         EV["Evidence files"]
+        PR["Plan-regression audits, fixes, gate summary"]
     end
+    P -->|"plan-set audit"| PR
+    PR -->|"clearance"| B
     P -->|"each task dispatch"| B
     B --> RP
     RP --> V

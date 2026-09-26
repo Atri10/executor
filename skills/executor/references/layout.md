@@ -88,6 +88,14 @@ readable after that worktree is gone.
 ├── .gitignore                                `*` — self-ignoring, written once
 ├── INDEX.md                                  every plan run: id, status, dates
 └── INIT-0004/
+    ├── rulings.md                            cross-plan rulings: regression outcomes,
+    │                                         contract amendments, human answers mid-run
+    ├── plan-regression/
+    │   ├── summary.md                        gate record: one row per plan, clean|waived
+    │   ├── regression-P01.md                 audit of the plan DOCUMENT vs spec/peers
+    │   ├── regression-P02.md
+    │   ├── fix-P01.md                        repair pass applied to the plan file
+    │   └── fix-P02.md
     ├── P01/
     │   ├── progress.md                       ledger: per-task status, fast resume scan
     │   ├── preflight-scan.md                 pre-dispatch conflict table + rulings
@@ -112,6 +120,14 @@ readable after that worktree is gone.
     │   │       └── INIT-0004-P01-final-verdict.md
     │   └── ...
 ```
+
+**The initiative-level directory exists because plan-set artifacts need a
+home.** Audits of *plans* (not code), repair passes applied to plan files,
+rulings that bind later plans, and the gate summary all sit beside — never
+inside — the per-plan workspaces. A `regression-P02.md` inside `P01/reviews/`
+is a misfiled artifact: it attributes a cross-plan judgment to one plan's
+code review and becomes unfindable by every tool that walks workspaces.
+`exec-plan-regression` resolves these paths; `exec-run check` flags strays.
 
 ### Why each file exists
 
@@ -237,6 +253,7 @@ Never hand-build a path. Use the scripts:
 | Evidence file for a criterion | `../scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin; writes the initiative's tracked `verification/evidence/PNN/`) |
 | Review diff for a task or the branch | `../scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `../scripts/exec-scan-secrets [PATH]` |
+| Plan-set regression artifacts | `../scripts/exec-plan-regression PLAN_FILE dir\|audit\|fix\|check\|init` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is

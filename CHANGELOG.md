@@ -4,6 +4,67 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+## [Unreleased]
+
+### Added
+- 2026-09-26 — **Plan-set regression phase + skill.** New phase
+  `plan-regression` sits between planning and execution, enforced by the
+  phase-order machine: `exec-run PLAN start` refuses once planning has
+  passed while the phase is not passed or skipped (before planning the
+  gate does not apply — there is nothing to audit), and `execution
+  entered` is refused outright without it. `executor-plan-regression`
+  audits the whole plan set against the spec, interface contracts,
+  sibling plans' Assumes/Produces, ordering, constraint propagation, and
+  vocabulary — the defect class every per-plan check missed — then
+  repairs plans in place, re-audits, and records clearance in
+  `.executor/<INIT>/plan-regression/summary.md`. Companion script
+  `exec-plan-regression` owns the artifact paths and the `check` that
+  turns clearance into an exit code (audit-file kind, waiver notes, and
+  stale rows included); `exec-initiative phase … passed` refuses without
+  a clean summary; `exec-store-check` P1 fails an initiative that
+  entered execution without it.
+- 2026-09-26 — **Initiative-level execution artifacts.** `.executor/`
+  gains `<INIT>/rulings.md` (cross-plan rulings, contract amendments,
+  human-answered questions) and `<INIT>/plan-regression/` — the legal
+  home for artifacts spanning plans. `frontmatter.md` gains `regression`,
+  `repair`, `gate`, and `brainstorm` kinds.
+- 2026-09-26 — **`executor-brainstorm` skill.** Dedicated ideation skill
+  owning session mechanics (≥3 options, known-ancestor pass, adversarial
+  pass on the favorite), `session.md` recording (`kind: brainstorm`,
+  `decided:` field), and the visual-companion offer contract; discovery
+  delegates to it. Also usable standalone and mid-architecture/planning.
+- 2026-09-26 — **Mid-run ask contract.** Decisions now route three ways —
+  rule silently (`exec-ruling`), ask on the spot (decision-class:
+  contract conflicts, scope cuts, irreversible choices, product judgment;
+  blocks only the affected lane), or stop the run (the four conditions).
+  `exec-ruling --answered "<question>"` records the question beside the
+  ruling so answered asks never look like silent controller picks.
+- 2026-09-26 — **`exec-ruling` scope + answered flag.** `initiative` as
+  the task ID writes the initiative-level rulings log; `--answered`
+  attaches the question text to both the log entry and its
+  `.local/decisions/` mirror.
+
+### Fixed
+- 2026-09-26 — **Ledger grammar the audits could not read.** `exec-run`
+  counted `complete` by `^<PLAN>-T<nn>: complete`; real controllers write
+  narrative lines (`- <ts> — T03 complete`), so every audit — verdict
+  presence, task-table coverage, registry-drift, dispatch-outcome sync —
+  silently no-oped while rows read `0/?`. A shared parser
+  (`exec_ledger_states`) now reads both shapes, normalizes `approved` to
+  `complete`, and reports narrative lines as drift notes instead of
+  ignoring them.
+- 2026-09-26 — **Unseeded workspaces.** `exec_seed_workspace` in
+  `_exec-lib.sh` is now called by `exec-run`, `exec-ruling`, and
+  `exec-workspace` — progress/rulings/preflight/dispatches with correct
+  frontmatter exist no matter which entry point runs first. `exec-run
+  check` audits their presence, their `kind:` fields, sibling workspaces
+  missing registry rows, empty scaffold dirs, and cross-plan artifacts
+  misfiled inside a plan's `reviews/`. `-FINAL-verdict.md` filenames are
+  accepted with a rename note.
+- 2026-09-26 — **`exec-plan-lint` documentation drift.** Planning's
+  checklist credited three checks; the script enforces four — the
+  sketch-vs-code cap is now documented.
+
 ## [0.3.0] — 2026-09-22
 
 ### Added
