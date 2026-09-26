@@ -43,8 +43,10 @@ POSIX-ish bash with no dependencies beyond `git` and `find`.
   route correctly? Would a gate still stop the right things?
 - **Match the existing voice.** Declarative, imperative sentences; rules
   stated with their reason; no marketing tone.
-- **Every diagram is Mermaid** with the dark-theme init line used elsewhere
-  in the repo, never ASCII art.
+- **Every diagram is Mermaid**, never ASCII art — `flowchart` for process
+  or hierarchy, `sequenceDiagram` for message exchange, `stateDiagram-v2`
+  for state. Short labels, labeled edges, several small diagrams over one
+  dense one.
 - **Behavioral changes to the contract** (ID grammar, gate ordering, store
   layout) must update `references/layout.md`, `references/frontmatter.md`, or
   `references/indexes.md` in the same change, and call out the behavioral
