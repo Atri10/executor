@@ -312,6 +312,7 @@ diff as a Critical, stop-and-tell-the-human finding.
 
 | Doc | Purpose |
 |---|---|
+| [docs/branch-model.md](docs/branch-model.md) | The branch model: naming grammar, fork rules, merge gates, edge cases |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to change skills, references, and scripts |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Participation standards and enforcement |
 | [SECURITY.md](SECURITY.md) | Reporting vulnerabilities and how artifact secret-hygiene works |
