@@ -4,7 +4,7 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-26
 
 ### Added
 - 2026-09-26 — **Task branches and the branch model.** `references/branches.md`
