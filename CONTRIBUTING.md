@@ -17,10 +17,12 @@ most are:
 | Path | What lives there |
 |---|---|
 | `skills/executor/` | Router skill: contract, ID grammar, phase gates |
-| `skills/executor/references/` | The normative documents: layout, frontmatter, indexes, safety |
+| `skills/executor/references/` | The normative documents: layout, branches, frontmatter, indexes, safety, test-quality |
 | `skills/executor/scripts/` | Executable helpers (`exec-id`, `exec-workspace`, `exec-scan-secrets`, …) |
 | `skills/executor-*/` | One skill per lifecycle phase, each with its own `SKILL.md` |
-| `docs/` | Documentation for using The Executor itself |
+
+There is no `docs/` directory: normative content lives in
+`skills/executor/references/`, which is what the skills cite.
 
 `skills/executor/references/layout.md` is normative: paths, document types,
 and directory names resolve from it. If you move or add a document type,
@@ -48,7 +50,8 @@ POSIX-ish bash with no dependencies beyond `git` and `find`.
   for state. Short labels, labeled edges, several small diagrams over one
   dense one.
 - **Behavioral changes to the contract** (ID grammar, gate ordering, store
-  layout) must update `references/layout.md`, `references/frontmatter.md`, or
+  layout, branch model) must update `references/layout.md`,
+  `references/branches.md`, `references/frontmatter.md`, or
   `references/indexes.md` in the same change, and call out the behavioral
   delta in the PR description.
 
