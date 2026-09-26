@@ -185,22 +185,41 @@ outside the worktree, or a defect where every path forward is a guess.
 
 ### A branch model with review-gated merges
 
-One branch per initiative (`initiative/INIT-NNNN`, forked from wherever the
-human currently is, fork point recorded), one branch per plan
-(`plan/INIT-NNNN-Pnn`, forked from the initiative branch). Task commits land
-with detailed messages on the plan branch; the plan branch merges back with
-`--no-ff` — **only after** its final review verdict exists and the audit
-passes. Merging the initiative branch onward is always the human's
-explicit decision at handoff.
+One branch per artifact level, named after the artifact's ID
+([full spec](skills/executor/references/branches.md)): `initiative/INIT-NNNN` forks from
+wherever the human currently is (fork point recorded), `plan/INIT-NNNN-Pnn`
+forks from the initiative branch, and `task/INIT-NNNN-Pnn-Tnn` forks from
+the **plan branch tip at dispatch** — so task N+1 already contains task N's
+merged work.
+
+Each level merges only through the gate its level requires: a task merges
+when its own review verdict is clean, a plan merges when its final verdict
+exists and the audit passes, and merging the initiative onward is always
+the human's explicit decision at handoff. The plan branch's history is
+therefore only reviewed merges — clean to bisect, one `git revert -m 1`
+from undoing a single task.
+
+Parallel tasks get a worktree each (`task start --worktree`), because two
+agents cannot share one working tree. A plan that is a single chain may
+declare `sequential: true` to commit direct to the plan branch — the lint
+requires the dependency chain to justify it. Work that is neither plan nor
+task goes on `side/` (merged on a recorded ruling) or `spike/` (never
+merged); an urgent out-of-scope fix goes on `hotfix/` from the base branch.
 
 ```mermaid
 flowchart LR
     BASE["base branch"] --> INIT["initiative/INIT-0004"]
     INIT --> P1["plan/INIT-0004-P01"]
-    INIT --> P2["plan/INIT-0004-P02"]
-    P1 -->|"merge: review-gated"| INIT
-    P2 -->|"merge: review-gated"| INIT
-    INIT --> HUMAN["human decides at handoff"]
+    INIT --> SIDE["side/INIT-0004-slug"]
+    P1 --> T1["task/INIT-0004-P01-T01"]
+    P1 --> T2["task/INIT-0004-P01-T02"]
+    T1 -->|"review-gated"| P1
+    T2 -->|"review-gated"| P1
+    SIDE -->|"human"| INIT
+    P1 -->|"final verdict + audit"| INIT
+    INIT -->|"human at handoff"| BASE
+    BASE --> HOT["hotfix/slug"]
+    HOT -->|"human"| BASE
 ```
 
 ### Reviews that survive the session

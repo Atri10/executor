@@ -721,6 +721,89 @@ bash "$S/exec-initiative" phase INIT-0001 plan-regression passed "1 plan clean" 
 bash "$S/exec-run" "$d/plan.md" start > /dev/null 2>&1 || bad "planreg: run refused after clearance"
 ok "plan-regression gates the run and the phase log"
 
+# 32c. Branch model: task branches fork from the plan tip, merge only on a
+# clean R-verdict, abandon guards unique commits, and the topology audit
+# catches a branch that names no task of the plan.
+d=$(fixture branchmodel)
+cd "$d"
+bash "$S/exec-initiative" new Branch > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-branch"
+mkdir -p "$IDIR/plans"
+printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-probe.md"
+printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+git add -A && git commit -qm init
+bash "$S/exec-initiative" branch INIT-0001 > /dev/null 2>&1 || bad "branch: initiative branch refused"
+# The fork point is recorded in INDEX.md — commit it, or the clean-tree
+# guard on the next branch operation correctly refuses.
+git add -A && git commit -qm "record fork point"
+bash "$S/exec-branch" "$d/plan.md" start > /dev/null 2>&1 || bad "branch: plan branch start refused"
+bash "$S/exec-workspace" "$d/plan.md" > /dev/null 2>&1
+bash "$S/exec-run" "$d/plan.md" start > /dev/null 2>&1
+W="$d/.executor/INIT-0001/P01"
+tb=$(bash "$S/exec-branch" "$d/plan.md" task start INIT-0001-P01-T01 2>/dev/null)
+[ "$tb" = "task/INIT-0001-P01-T01" ] || bad "branch: task start printed '$tb'"
+[ "$(git branch --show-current)" = "task/INIT-0001-P01-T01" ] || bad "branch: not on the task branch after start"
+grep -qE "^INIT-0001-P01-T01: dispatched \(branch task/INIT-0001-P01-T01, base " "$W/progress.md" \
+  || bad "branch: the ledger does not record the task branch and fork commit"
+printf 'x\n' > api.ts
+git add -A && git commit -qm "task work"
+if bash "$S/exec-branch" "$d/plan.md" task merge INIT-0001-P01-T01 >/dev/null 2>&1; then
+  bad "branch: task merge accepted with no verdict at all"
+fi
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: NEEDS_FIX\n---\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+if bash "$S/exec-branch" "$d/plan.md" task merge INIT-0001-P01-T01 >/dev/null 2>&1; then
+  bad "branch: task merge accepted a NEEDS_FIX verdict"
+fi
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
+bash "$S/exec-branch" "$d/plan.md" task merge INIT-0001-P01-T01 > /dev/null 2>&1 \
+  || bad "branch: task merge refused a clean verdict"
+[ "$(git branch --show-current)" = "plan/INIT-0001-P01" ] || bad "branch: not back on the plan branch after merge"
+git show-ref --verify --quiet refs/heads/task/INIT-0001-P01-T01 && bad "branch: task branch survived the merge"
+grep -qE "^INIT-0001-P01-T01: complete \(merge " "$W/progress.md" \
+  || bad "branch: the merge commit is not recorded in the ledger"
+bash "$S/exec-branch" "$d/plan.md" task start INIT-0001-P01-T01 > /dev/null 2>&1
+printf 'y\n' > api.ts
+git add -A && git commit -qm "more work"
+if bash "$S/exec-branch" "$d/plan.md" task abandon INIT-0001-P01-T01 >/dev/null 2>&1; then
+  bad "branch: abandon dropped unique commits without -f"
+fi
+bash "$S/exec-branch" "$d/plan.md" task abandon INIT-0001-P01-T01 -f > /dev/null 2>&1 \
+  || bad "branch: abandon -f refused"
+# Topology audit: a task branch naming no task of the plan is drift.
+git checkout -q -b task/INIT-0001-P01-T09 plan/INIT-0001-P01
+if bash "$S/exec-run" "$d/plan.md" check >/dev/null 2>&1; then
+  bad "branch: topology audit passed on a task branch naming no task of the plan"
+fi
+git checkout -q plan/INIT-0001-P01
+git branch -D task/INIT-0001-P01-T09 > /dev/null 2>&1
+ok "task branches fork from the tip, merge on a clean verdict, and the topology audit fires"
+
+# 32d. Sequential escape hatch: the flag is refused unless the dependency
+# chain justifies it, and a justified plan lints clean.
+d=$(fixture seqflag)
+cd "$d"
+SEQ_FM=$(printf '%s' "$FM" | sed -e 's/^tasks: 1$/tasks: 2/' -e 's/^execution_mode: inline$/execution_mode: inline\nsequential: true/')
+TASK2=$'### Task 2: Second — `INIT-0001-P01-T02`
+
+**Files:**
+- Modify: `b.ts`
+'
+printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2" > "$d/seq.md"
+if bash "$S/exec-plan-lint" "$d/seq.md" >/dev/null 2>&1; then
+  bad "seqflag: sequential: true linted clean with no dependency chain"
+fi
+TASK2_CHAINED=$'### Task 2: Second — `INIT-0001-P01-T02`
+
+**Depends on:** `INIT-0001-P01-T01`
+
+**Files:**
+- Modify: `b.ts`
+'
+printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2_CHAINED" > "$d/seq.md"
+bash "$S/exec-plan-lint" "$d/seq.md" > /dev/null 2>&1 \
+  || bad "seqflag: a justified sequential plan was refused"
+ok "sequential: true requires the dependency chain to justify it"
+
 # 33. Dispatch outcome sync: terminal ledger states close running rows;
 # an in-fix boundary closes all but the newest live row.
 d=$(fixture dispsync)

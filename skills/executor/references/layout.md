@@ -249,7 +249,9 @@ Never hand-build a path. Use the scripts:
 | Task context file | `../scripts/exec-context PLAN_FILE N` |
 | Run lifecycle in the registry | `../scripts/exec-run PLAN_FILE start\|task\|complete\|check\|pause\|blocked` |
 | Plan gate lint | `../scripts/exec-plan-lint PLAN_FILE` |
-| Plan-branch lifecycle | `../scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
+| Branch lifecycle | `../scripts/exec-branch PLAN_FILE start\|status\|merge\|audit\|abandon` |
+| Task branch lifecycle | `../scripts/exec-branch PLAN_FILE task start\|merge\|abandon TASK_ID [--worktree\|-f]` |
+| Side / spike branches | `../scripts/exec-branch PLAN_FILE side\|spike start\|merge\|abandon SLUG [-f]` |
 | Evidence file for a criterion | `../scripts/exec-evidence PLAN_FILE ROUND CRITERION METHOD` (reads observed output from stdin; writes the initiative's tracked `verification/evidence/PNN/`) |
 | Review diff for a task or the branch | `../scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `../scripts/exec-scan-secrets [PATH]` |
@@ -279,29 +281,46 @@ common renderer. Three rules keep that true:
 
 ## Branch model
 
-One branch per initiative, one branch per plan, merged on reviewed gates.
-`git branch --list` is the registry; the fork points are recorded in the
-initiative's `INDEX.md`.
+One branch per artifact level, named after the artifact's ID, merged on
+the gate its level requires. `references/branches.md` is normative;
+`git branch --list` is the registry, and fork points are recorded in the
+ledger and the initiative's `INDEX.md`.
 
 ```mermaid
 flowchart LR
     BASE["base branch<br/>(where the human is)"] --> INIT["initiative/INIT-0004"]
     INIT --> P1["plan/INIT-0004-P01"]
-    INIT --> P2["plan/INIT-0004-P02"]
+    INIT --> SIDE["side/INIT-0004-slug"]
+    P1 --> T1["task/INIT-0004-P01-T01"]
+    P1 --> T2["task/INIT-0004-P01-T02"]
+    T1 --> P1
+    T2 --> P1
+    SIDE --> INIT
     P1 --> INIT
-    P2 --> INIT
+    INIT --> BASE
 ```
 
 | Script | Branch | Gate |
 |---|---|---|
 | `exec-initiative branch INIT-0004 [BASE]` | `initiative/INIT-0004`, forked from BASE (default: current HEAD); fork point recorded in `INDEX.md` | none — creating it is cheap and reversible |
 | `exec-branch PLAN start` | `plan/INIT-0004-P01`, forked from the initiative branch | initiative branch must exist |
-| `exec-branch PLAN merge` | plan branch → initiative branch, `--no-ff` (per-task commits preserved) | full audit: registry consistent, a verdict per completed task, final verdict present |
+| `exec-branch PLAN task start TASK_ID [--worktree]` | `task/INIT-0004-P01-T03`, forked from the **plan branch tip**; branch and fork commit recorded in the ledger | plan branch must exist; clean tree |
+| `exec-branch PLAN task merge TASK_ID` | task branch → plan branch, `--no-ff` | the task's latest R-verdict is clean (`spec_verdict: PASS` or `null`, `quality: APPROVED`) |
+| `exec-branch PLAN task abandon TASK_ID [-f]` | delete the task branch | refuses when it carries unmerged commits unless `-f` |
+| `exec-branch PLAN merge` | plan branch → initiative branch, `--no-ff` (per-task merges preserved) | full audit: registry consistent, a verdict per completed task, final verdict present |
 | `exec-branch PLAN abandon` | delete the plan branch | refuses when the branch carries unmerged commits unless `-f` |
+| `exec-branch PLAN side start\|merge\|abandon SLUG` | `side/INIT-0004-<slug>`, forked from the initiative branch | merge requires an initiative ruling naming the slug |
+| `exec-branch PLAN spike start\|abandon SLUG` | `spike/INIT-0004-<slug>`, forked from the initiative branch | never merges |
 
-Plan branches never fork from `main` and never merge to `main` — the
-initiative branch is the only integration line, and merging it onward is
-the human's decision at handoff.
+A plan declaring `sequential: true` skips task branches: its tasks commit
+directly to the plan branch, and `exec-plan-lint` requires the dependency
+chain to justify the flag.
+
+Plan and task branches never fork from `main` and never merge to `main` —
+the initiative branch is the only integration line, and merging it onward
+is the human's decision at handoff. `hotfix/<slug>` is the one branch
+outside the hierarchy: it forks from the base branch and merges back to it,
+because an urgent fix must not wait for an initiative.
 
 ## What is never deleted
 

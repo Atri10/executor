@@ -138,8 +138,14 @@ spec: INIT-0004-SPEC-01            # the spec this plan argues from
 interfaces: [INIT-0004-IFCE-01]
 tasks: 7
 execution_mode: subagent           # subagent|inline — set when the human picks
+sequential: false                  # true = tasks commit direct to the plan branch
 workspace: .executor/INIT-0004/P01
 ```
+
+`sequential: true` opts the plan out of per-task branches
+(`references/branches.md`): tasks commit directly to the plan branch. It is
+only honest for a single chain, so `exec-plan-lint` requires every task
+after the first to declare `**Depends on:**` the preceding task's ID.
 
 ## Execution artifacts (the `.executor/` store)
 
