@@ -481,6 +481,86 @@ case "$action" in
       drift=1
     done < <(find "$dir/reviews" -maxdepth 1 -type f \( -name 'regression-*' -o -name 'fix-P*' \) 2>/dev/null | sort || true)
 
+    # Branch topology (references/branches.md): the branch you are on must
+    # agree with the ledger about what is in flight, and every merge the
+    # ledger records must be findable on the plan branch. A branch and a
+    # ledger that disagree are how a resumed controller commits work to
+    # the wrong history.
+    task_states=$(exec_ledger_states "$dir/progress.md" "$plan_id")
+    plan_branch="plan/$plan_id"
+    if git show-ref --verify --quiet "refs/heads/$plan_branch" 2>/dev/null; then
+      cur_branch=$(git branch --show-current 2>/dev/null || true)
+      case "$cur_branch" in
+        task/*)
+          cur_tid=${cur_branch#task/}
+          case "$cur_tid" in
+            "$plan_id"-T[0-9][0-9])
+              cur_state=$(printf '%s\n' "$task_states" | awk -F'\t' -v t="$cur_tid" '$1 == t { print $2 }')
+              case "${cur_state%%[ (]*}" in
+                dispatched|in-fix|fix) ;;
+                *) echo "AUDIT: on task branch $cur_branch but the ledger says ${cur_tid} is '${cur_state:-absent}' — the branch and the ledger disagree about what is in flight" >&2
+                   drift=1 ;;
+              esac ;;
+            *) echo "AUDIT: on task branch $cur_branch, which names no task of $plan_id" >&2
+               drift=1 ;;
+          esac ;;
+      esac
+      # Every merge the ledger records must be an ancestor of the plan
+      # branch: a recorded merge that is not there means the branch was
+      # rewritten or the merge was lost.
+      while IFS= read -r tid; do
+        [ -n "$tid" ] || continue
+        msha=$(awk -v t="$tid" '
+          $0 ~ ("^" t ": complete \\(merge ") {
+            line = $0; sub(/^.*merge /, "", line); sub(/[ ).].*$/, "", line); m = line
+          }
+          END { if (m != "") print m }
+        ' "$dir/progress.md" 2>/dev/null)
+        [ -n "$msha" ] || continue
+        if ! git merge-base --is-ancestor "$msha" "$plan_branch" 2>/dev/null; then
+          echo "AUDIT: $tid records merge $msha but that commit is not on $plan_branch — the merge was lost or the branch rewritten" >&2
+          drift=1
+        fi
+      done <<< "$done_ids"
+      # A clean final verdict with a task branch still holding unmerged
+      # commits means the plan was cleared while work sat outside it.
+      final_v="$dir/reviews/verdicts/${plan_id}-final-verdict.md"
+      [ -f "$final_v" ] || final_v="$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md"
+      if [ -f "$final_v" ] && exec_verdict_clean "$final_v"; then
+        while IFS= read -r tb; do
+          [ -n "$tb" ] || continue
+          ahead=$(git rev-list --count "$plan_branch".."$tb" 2>/dev/null || echo 0)
+          if [ "${ahead:-0}" -gt 0 ]; then
+            echo "AUDIT: $tb holds $ahead commit(s) not on $plan_branch while the final verdict is clean — merge or abandon it" >&2
+            drift=1
+          fi
+        done < <(git for-each-ref --format='%(refname:short)' "refs/heads/task/$plan_id-T*" 2>/dev/null | sort)
+      fi
+    fi
+
+    # Orphan worktrees: a directory under .executor/worktrees that is not a
+    # worktree at all, or whose branch is gone, is debris from an
+    # interrupted run — it holds files nobody will merge and disk nobody
+    # will reclaim. The .git probe matters: `git -C <dir>` walks UP to the
+    # enclosing repository, so a plain directory would otherwise report the
+    # main tree's branch and look healthy.
+    wtroot="$(exec_main_root)/.executor/worktrees"
+    if [ -d "$wtroot" ]; then
+      while IFS= read -r wt; do
+        [ -n "$wt" ] || continue
+        if [ ! -e "$wt/.git" ]; then
+          echo "AUDIT: $wt is not a worktree (no .git) — debris under .executor/worktrees; remove it" >&2
+          drift=1
+          continue
+        fi
+        wb=$(git -C "$wt" branch --show-current 2>/dev/null || true)
+        if [ -z "$wb" ] || ! git show-ref --verify --quiet "refs/heads/$wb"; then
+          echo "AUDIT: orphan worktree $wt (branch '${wb:-none}' is gone) — git worktree remove $wt" >&2
+          drift=1
+        fi
+      done < <(find "$wtroot" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    fi
+
     # Agent identity grammar: the Agent column follows
     # <ROLE>-<Pnn>-<Tnn>[-R<nn>] (IMPL/REVIEW/VERIFY; REVIEW-P01-final for
     # the whole-branch review). A non-conforming cell is a NOTE, not drift:

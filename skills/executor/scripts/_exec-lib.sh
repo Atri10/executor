@@ -195,6 +195,89 @@ exec_ledger_drift_count() {
   ' "$progress"
 }
 
+# Record the branch a task is executing on. Two surfaces, one act:
+#
+#   - the ledger's State changes line, canonical shape, which is what
+#     exec_ledger_states parses and what a resume scan reads;
+#   - the dispatches.md Branch cell, which is what a human reads.
+#
+# The dispatch cell is best-effort: a task with no dispatches row yet gets
+# no row created here (rows carry Agent/Model the controller owns), and
+# the ledger line is the authoritative record either way.
+#
+#   exec_record_task_branch DIR TASK_ID BRANCH BASE_SHA
+exec_record_task_branch() {
+  local dir=$1 tid=$2 branch=$3 base=$4
+  [ -f "$dir/progress.md" ] || return 0
+  printf '%s: dispatched (branch %s, base %s)\n' "$tid" "$branch" "$base" >> "$dir/progress.md"
+  local dfile="$dir/dispatches.md"
+  [ -f "$dfile" ] || return 0
+  local tmp
+  tmp=$(mktemp "$dir/.branch.XXXXXX") || return 0
+  if awk -v tid="$tid" -v branch="$branch" '
+    BEGIN { bcol = 0; last = 0 }
+    $0 ~ /^\|[ \t]*Task[ \t]*\|/ {
+      # Locate the Branch column by name — a differently-shaped table is
+      # never rewritten in the wrong cell.
+      n = split($0, h, "|")
+      for (i = 2; i <= n; i++) {
+        c = h[i]; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c == "Branch") { bcol = i; break }
+      }
+      rows[NR] = $0; next
+    }
+    $0 ~ ("^\\|[ \t]*" tid "(-R[0-9]+)?[ \t]*\\|") { last = NR }
+    { rows[NR] = $0 }
+    END {
+      if (bcol && last) {
+        split(rows[last], f, "|")
+        f[bcol] = " " branch " "
+        rebuilt = f[1]
+        for (i = 2; i <= length(f); i++) rebuilt = rebuilt "|" f[i]
+        rows[last] = rebuilt
+      }
+      for (i = 1; i <= NR; i++) print rows[i]
+    }
+  ' "$dfile" > "$tmp"; then
+    mv "$tmp" "$dfile"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
+# The branch a task is recorded on, or empty. Reads the ledger's canonical
+# dispatch line ("<tid>: dispatched (branch <name>, base <sha>)") — the
+# same line exec_record_task_branch writes.
+exec_task_branch() {
+  local dir=$1 tid=$2
+  [ -f "$dir/progress.md" ] || return 0
+  awk -v tid="$tid" '
+    $0 ~ ("^" tid ": dispatched \\(branch ") {
+      line = $0
+      sub(/^.*\(branch /, "", line)
+      sub(/,.*$/, "", line)
+      b = line
+    }
+    END { if (b != "") print b }
+  ' "$dir/progress.md"
+}
+
+# The fork commit recorded beside a task's branch, or empty.
+exec_task_branch_base() {
+  local dir=$1 tid=$2
+  [ -f "$dir/progress.md" ] || return 0
+  awk -v tid="$tid" '
+    $0 ~ ("^" tid ": dispatched \\(branch ") {
+      line = $0
+      sub(/^.*, base /, "", line)
+      sub(/\\).*$/, "", line)
+      b = line
+    }
+    END { if (b != "") print b }
+  ' "$dir/progress.md"
+}
+
 # Seed a plan workspace's four ledger files (idempotent — existing files
 # are never rewritten). Every script that writes into a workspace calls
 # this first, so no entry point can produce the bare-dir drift seen in
@@ -297,9 +380,10 @@ updated_at: $stamp
 
 *Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
 *Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
+*Branch is the task branch the agent worked on (task/<TASK-ID>), written by exec-branch task start; a sequential plan leaves it empty.*
 
-| Task | Role | Model | Agent | Started | Outcome | Context |
-|---|---|---|---|---|---|---|
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context |
+|---|---|---|---|---|---|---|---|
 EOF
 }
 
