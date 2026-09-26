@@ -4,6 +4,17 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+## [Unreleased]
+
+### Fixed
+- 2026-09-26 — **Stale documentation after the branch model.** CONTRIBUTING's
+  repository-layout table still described a `docs/` directory (the repo
+  keeps none — normative content lives in `skills/executor/references/`),
+  its references list was missing `branches.md` and `test-quality.md`, and
+  its contract-update rule did not name the branch model. The README's
+  `exec-branch` and `exec-run check` rows predated the task/side/spike
+  subcommands and the topology audit.
+
 ## [0.5.0] — 2026-09-26
 
 ### Added
