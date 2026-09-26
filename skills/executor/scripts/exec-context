@@ -36,6 +36,7 @@ if [ $# -eq 3 ]; then
   out=$3
 else
   dir=$(exec_workspace_dir "$plan")
+  exec_seed_workspace "$dir" "$plan"
   out="$dir/briefs/${task_id}-context.md"
 fi
 
@@ -138,6 +139,21 @@ rulings_file=""
 if [ -n "$plan_id" ]; then
   ws=$(exec_workspace_dir "$plan")
   [ -f "$ws/rulings.md" ] && rulings_file="$ws/rulings.md"
+  # Initiative-level rulings (cross-plan decisions: contract amendments,
+  # regression outcomes, human-answered questions) bind every later plan —
+  # they are appended to the same match input, under the initiative log.
+  init_seg=$(exec_initiative_of "$plan_id" 2>/dev/null || true)
+  init_rulings=""
+  [ -n "$init_seg" ] && init_rulings="$(exec_run_store)/$init_seg/rulings.md"
+  if [ -n "$init_rulings" ] && [ -f "$init_rulings" ]; then
+    if [ -n "$rulings_file" ]; then
+      rulings_both=$(mktemp)
+      cat "$init_rulings" "$rulings_file" > "$rulings_both"
+      rulings_file=$rulings_both
+    else
+      rulings_file=$init_rulings
+    fi
+  fi
 fi
 if [ -n "$rulings_file" ]; then
   # Rulings for this task, or rulings mentioning any file this task
@@ -171,6 +187,7 @@ if [ -n "$rulings_file" ]; then
     }
   ' "$rulings_file" || true)
   rm -f "$files_tmp"
+  if [ -n "${rulings_both:-}" ]; then rm -f "$rulings_both"; fi
   if [ -n "$matches" ]; then
     parked="## Rulings touching this task
 

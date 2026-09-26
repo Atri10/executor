@@ -5,9 +5,15 @@
 #
 # Usage:
 #   exec-run PLAN_FILE start            # Status: running, Tasks: 0/N
+#                                       # refuses once planning passed while
+#                                       # plan-regression is not passed/skipped
 #   exec-run PLAN_FILE task TASK_ID     # mark TASK_ID dispatched; Tasks: N/M
 #   exec-run PLAN_FILE complete         # Status: complete, Finished: today
 #   exec-run PLAN_FILE check            # verify row matches ledger; exit 1 on drift
+#                                       # also audits: verdict presence, task-table
+#                                       # coverage, seeded files + frontmatter,
+#                                       # sibling registry rows, misfiled cross-plan
+#                                       # artifacts, ledger-grammar drift
 #   exec-run PLAN_FILE pause|blocked    # partial-handoff states
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
@@ -24,6 +30,10 @@ dir=$(exec_workspace_dir "$plan")
 store=$(exec_run_store)
 reg="$store/INDEX.md"
 [ -f "$reg" ] || exec_die "no run registry at $reg — run exec-workspace first"
+# A workspace resolved without exec-workspace still gets its seeded files —
+# unseeded workspaces (missing rulings/preflight/frontmatter) were the
+# P02 drift: audits read what should exist, so the files must exist.
+exec_seed_workspace "$dir" "$plan"
 
 
 # Count task headings in the plan. Fence-aware: '### Task' lines inside
@@ -48,12 +58,12 @@ total=$(awk '
 ' "$plan")
 total=${total:-0}
 
-# Count complete lines in the ledger: '^<TASK_ID>: complete'
-# grep -c prints "0" AND exits 1 when nothing matches; `|| echo 0` would
-# produce a two-line value ("0\n0") that breaks awk's arithmetic below.
-# Capture the count separately from the exit status.
-done_count=$(grep -cE "^${plan_id}-T[0-9]{2}: complete" "$dir/progress.md" 2>/dev/null || true)
-done_count=${done_count:-0}
+# Count complete lines in the ledger via the shared parser — it reads both
+# the canonical "^<TASK-ID>: <state>" shape and the narrative drift shape
+# real controllers write ("- <ts> — T03 complete"). A grammar the counter
+# cannot read makes every downstream audit silently no-op.
+done_count=$(exec_ledger_states "$dir/progress.md" "$plan_id" \
+  | awk -F'\t' '$2 ~ /^complete([ (]|$)/ { n++ } END { print n + 0 }')
 
 update_row() {
   # $1 = new Status cell, $2 = Tasks cell, $3 = Finished cell (or keep)
@@ -113,19 +123,18 @@ sync_dispatch_outcomes() {
   [ -f "$dfile" ] || return 0
   [ -f "$dir/progress.md" ] || return 0
   tmp=$(mktemp "$dir/.dispatches.XXXXXX") || return 0
-  if awk -v pid="$plan_id" -v prog="$dir/progress.md" -v status="$row_status" '
+  local states_file
+  states_file=$(mktemp "$dir/.states.XXXXXX") || return 0
+  exec_ledger_states "$dir/progress.md" "$plan_id" > "$states_file"
+  if awk -v pid="$plan_id" -v statesf="$states_file" -v status="$row_status" '
     BEGIN {
-      # Latest ledger state per task — same reduction the run audit
-      # uses: last state-change line wins, the state is the leading
-      # word ("complete (commits…)" annotations count as complete).
-      while ((getline line < prog) > 0) {
-        if (line ~ ("^" pid "-T[0-9][0-9]: ")) {
-          t = line; sub(/:.*/, "", t)
-          s = line; sub(/^[^:]*:[ \t]*/, "", s)
-          last[t] = s
-        }
+      # Latest ledger state per task — from exec_ledger_states, the same
+      # reduction the run audit uses (canonical + narrative-drift shapes).
+      while ((getline line < statesf) > 0) {
+        split(line, kv, "\t")
+        last[kv[1]] = kv[2]
       }
-      close(prog)
+      close(statesf)
       for (t in last) {
         w = last[t]; sub(/[ (].*$/, "", w)
         if (w == "complete" || w == "parked") term[t] = w
@@ -188,6 +197,7 @@ sync_dispatch_outcomes() {
   else
     rm -f "$tmp"
   fi
+  rm -f "$states_file"
   return 0
 }
 
@@ -259,6 +269,32 @@ case "$action" in
     # resumed controller re-dispatch work the audit already blessed.
     row_status=$(awk -v id="$plan_id" 'BEGIN{FS="|"} $0 ~ "^\\| " id " \\|" { gsub(/ /,"",$4); print $4 }' "$reg")
     [ "$row_status" = "complete" ] && exec_die "$plan_id is already complete — a finished run does not rewind; supersede the plan or correct the registry row by hand"
+    # Plan-regression gate: once planning has passed (or the regression
+    # phase was entered), a run may not start until plan-regression passed
+    # or was explicitly skipped. Before planning, the gate does not apply —
+    # an initiative that has not drafted plans has nothing to audit, and
+    # the phase-order machine still refuses `execution entered` without it.
+    init_id=$(exec_initiative_of "$plan_id" 2>/dev/null || true)
+    if [ -n "$init_id" ]; then
+      idx_dir=$(exec_initiative_dir "$init_id" 2>/dev/null || true)
+      if [ -n "$idx_dir" ] && [ -f "$idx_dir/INDEX.md" ]; then
+        prg_row=$(awk -F'|' '/^\|[ \t]*plan-regression[ \t]*\|/ { print; exit }' "$idx_dir/INDEX.md" 2>/dev/null || true)
+        plan_row=$(awk -F'|' '/^\|[ \t]*planning[ \t]*\|/ { print; exit }' "$idx_dir/INDEX.md" 2>/dev/null || true)
+        prg_entered=$(printf '%s' "$prg_row" | awk -F'|' '{ gsub(/ /,"",$3); print $3 }')
+        prg_gate=$(printf '%s' "$prg_row" | awk -F'|' '{ gsub(/ /,"",$4); print $4 }')
+        plan_gate=$(printf '%s' "$plan_row" | awk -F'|' '{ gsub(/ /,"",$4); print $4 }')
+        case "$prg_gate" in
+          ????-??-??|"**skipped**") : ;;                    # passed or waived — clear
+          *)
+            case "$plan_gate$prg_entered" in
+              *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*)
+                exec_die "$plan_id: planning is done but plan-regression has not passed or been skipped — run executor-plan-regression before starting a run" ;;
+              *)
+                echo "note: $init_id has not reached plan-regression (planning gate unset) — the gate is not yet applicable" >&2 ;;
+            esac ;;
+        esac
+      fi
+    fi
     update_row "running" "0/$total" ""
     echo "$plan_id: running (0/$total)"
     ;;
@@ -295,7 +331,7 @@ case "$action" in
     # Re-dispatching a complete task rewrites history; the fix flow goes
     # through an explicit in-fix line first. The state is the leading
     # word — "complete (commits…)" annotations count, matching the audit.
-    latest_state=$( { grep -E "^${task_id}: " "$dir/progress.md" 2>/dev/null || true; } | tail -1 | sed -E 's/^[^:]*:[[:space:]]*//')
+    latest_state=$(exec_ledger_states "$dir/progress.md" "$plan_id" | awk -F'\t' -v t="$task_id" '$1 == t { s = $2 } END { print s }')
     [ "${latest_state%%[ (]*}" = "complete" ] && exec_die "$task_id is already complete in the ledger — record an in-fix line before re-dispatching it"
     # A dispatch for a task already at the fix-round cap is round 6+ —
     # the documented maximum was reached, so only a recorded
@@ -358,6 +394,10 @@ case "$action" in
     # changes must also have a row in the Task status table. The resume
     # scan reads the table first — prose-only completion (the P04/P05 live
     # failure) makes a resumed controller re-dispatch finished work.
+    # Completed-task enumeration goes through exec_ledger_states so the
+    # narrative line shape real controllers write is counted too.
+    done_ids=$(exec_ledger_states "$dir/progress.md" "$plan_id" \
+      | awk -F'\t' '$2 ~ /^complete([ (]|$)/ { print $1 }' | sort -u)
     table_missing=0
     while IFS= read -r task_id; do
       [ -n "$task_id" ] || continue
@@ -365,7 +405,7 @@ case "$action" in
         echo "AUDIT: $task_id is complete in State changes but has no row in the Task status table — the resume scan would miss it" >&2
         table_missing=$((table_missing + 1))
       }
-    done < <( { grep -E "^${plan_id}-T[0-9]{2}: complete" "$dir/progress.md" 2>/dev/null || true; } | sed -E "s/^(${plan_id}-T[0-9]{2}):.*/\1/" | sort -u || true)
+    done <<< "$done_ids"
     if [ "$table_missing" -gt 0 ]; then
       echo "$plan_id: $table_missing completed task(s) missing from the Task status table" >&2
       drift=1
@@ -382,11 +422,64 @@ case "$action" in
         echo "AUDIT: $task_id is complete but no verdict file exists in reviews/verdicts/ — the task is unjudged" >&2
         missing_verdicts=$((missing_verdicts + 1))
       }
-    done < <( { grep -E "^${plan_id}-T[0-9]{2}: complete" "$dir/progress.md" 2>/dev/null || true; } | sed -E "s/^(${plan_id}-T[0-9]{2}):.*/\1/" | sort -u || true)
+    done <<< "$done_ids"
     if [ "$missing_verdicts" -gt 0 ]; then
       echo "$plan_id: $missing_verdicts completed task(s) without a verdict file" >&2
       drift=1
     fi
+
+    # Seeded-file audit: the workspace contract is four files with
+    # frontmatter kinds — a missing or frontmatterless file means the
+    # workspace was built by hand instead of exec_seed_workspace.
+    for f in progress.md rulings.md preflight-scan.md dispatches.md; do
+      [ -f "$dir/$f" ] || echo "AUDIT: seeded file $f is missing from the workspace — run exec-workspace on the plan file" >&2
+    done
+    if ! grep -qE '^kind: ledger' "$dir/progress.md" 2>/dev/null; then
+      echo "AUDIT: progress.md carries no 'kind: ledger' frontmatter — the resume scan cannot identify it" >&2
+      drift=1
+    fi
+    if ! grep -qE '^kind: dispatches' "$dir/dispatches.md" 2>/dev/null; then
+      echo "AUDIT: dispatches.md carries no 'kind: dispatches' frontmatter" >&2
+      drift=1
+    fi
+
+    # Ledger grammar drift: narrative state lines are parsed, but each
+    # one is a line the canonical grammar never wrote — surface the count
+    # so a controller drifting from the contract gets told.
+    ndrift=$(exec_ledger_drift_count "$dir/progress.md" "$plan_id")
+    if [ "${ndrift:-0}" -gt 0 ]; then
+      echo "NOTE: $ndrift ledger line(s) use narrative grammar ('- <ts> — T<nn> <state>') instead of canonical '<TASK-ID>: <state>' — parsed, but write canonical going forward" >&2
+    fi
+
+    # Sibling workspaces: a plan dir under this initiative with a progress
+    # file but no registry row means a run started without exec-workspace —
+    # the registry lies about what ran. NOTE-level: the checker's plan is
+    # the one being verified.
+    init_seg=$(exec_initiative_of "$plan_id" 2>/dev/null || true)
+    if [ -n "$init_seg" ] && [ -d "$store/$init_seg" ]; then
+      for sibling in "$store/$init_seg"/P[0-9][0-9]; do
+        [ -d "$sibling" ] || continue
+        sib_plan="${init_seg}-$(basename "$sibling")"
+        [ "$sib_plan" = "$plan_id" ] && continue
+        if [ -f "$sibling/progress.md" ] && ! grep -q "^| $sib_plan |" "$reg" 2>/dev/null; then
+          echo "AUDIT: sibling workspace $sib_plan has a ledger but no registry row in INDEX.md — a run started without exec-workspace/exec-run" >&2
+          drift=1
+        fi
+        # A sibling dir with no files at all is an orphan scaffold.
+        if ! find "$sibling" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+          echo "NOTE: sibling workspace $sib_plan exists but is empty — scaffolded, never run; harmless but undeclared" >&2
+        fi
+      done
+    fi
+
+    # Misfiled cross-plan artifacts: plan-regression audits and fix docs
+    # belong to .executor/<INIT>/plan-regression/, never inside one plan's
+    # reviews/ — the run that invented them ad-hoc filed them under P01.
+    while IFS= read -r stray; do
+      [ -n "$stray" ] || continue
+      echo "AUDIT: cross-plan artifact '$(basename "$stray")' sits in a plan's reviews/ — plan-regression artifacts live at .executor/$init_seg/plan-regression/" >&2
+      drift=1
+    done < <(find "$dir/reviews" -maxdepth 1 -type f \( -name 'regression-*' -o -name 'fix-P*' \) 2>/dev/null | sort || true)
 
     # Agent identity grammar: the Agent column follows
     # <ROLE>-<Pnn>-<Tnn>[-R<nn>] (IMPL/REVIEW/VERIFY; REVIEW-P01-final for
@@ -410,12 +503,17 @@ case "$action" in
     fi
 
     # Final verdict: a completed plan needs the whole-branch final verdict
-    # too. The plan is not review-complete without it.
+    # too. The plan is not review-complete without it. Accept the uppercase
+    # -FINAL- variant produced on case-insensitive filesystems (canonical
+    # stays lowercase; exec_run_audit already tolerates both). Test each
+    # path with -f: `ls a b` exits non-zero when EITHER is missing, which
+    # passes on case-insensitive APFS and fails on Linux CI.
     if [ "$row_status" = "complete" ] && [ "$done_count" -ge "$total" ] && [ "$total" -gt 0 ]; then
-      ls "$dir/reviews/verdicts/${plan_id}-final-verdict.md" >/dev/null 2>&1 || {
+      if [ ! -f "$dir/reviews/verdicts/${plan_id}-final-verdict.md" ] \
+         && [ ! -f "$dir/reviews/verdicts/${plan_id}-FINAL-verdict.md" ]; then
         echo "AUDIT: run is complete but no final verdict (reviews/verdicts/${plan_id}-final-verdict.md) — whole-branch review has not run" >&2
         drift=1
-      }
+      fi
     fi
 
     exit "$drift"

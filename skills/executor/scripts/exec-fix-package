@@ -60,6 +60,7 @@ spec_id=$(exec_frontmatter "$plan" spec)
 [ "$task_plan" = "$plan_id" ] || exec_die "task ID '$task_id' is not ${plan_id}-Tnn — cannot package a fix for a task this plan does not own"
 
 dir=$(exec_workspace_dir "$plan")
+exec_seed_workspace "$dir" "$plan"
 
 # Latest verdict wins — a task mid-loop has one verdict per round and the
 # fix works from the most recent judgment. Same selection the run audit
