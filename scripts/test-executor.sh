@@ -27,6 +27,35 @@ echo "#           date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 pass=0; fail=0
 ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
 bad()  { fail=$((fail + 1)); echo "FAIL - $1" >&2; }
+
+# The scripts use `#!/usr/bin/env bash`, which resolves to whatever bash is
+# first on PATH — on a stock macOS that is /bin/bash 3.2, and on a GitHub
+# macOS runner it is exactly the same. So the floor is bash 3.2, not
+# "whatever the author happens to have installed".
+#
+# `declare -A` (bash 4.0) failed there, and because exec-store-check runs
+# under `set -e` the failure killed it at that line: every check after it
+# never ran, and sixteen tests reported a perfectly clean store as
+# "rejected". A construct that is harmless on the author's machine and fatal
+# on the user's is the worst kind there is, and nothing about the failure
+# said so — the tests simply went red. Assert the floor mechanically.
+# Scoped to the scripts the engine EXECUTES. `declare -a` (indexed) is
+# fine in 3.2 — only `declare -A` (associative) needs 4.0 — and matching `-A`
+# rather than `-[aA]` is the difference between a check that works and one
+# that reports a false positive until someone deletes it. The suite's own
+# 3.2 compatibility is not this check's job: the macos-latest matrix job
+# runs it on the stock 3.2 interpreter, which is a stronger check than any
+# grep.
+bash4_constructs() {
+  /usr/bin/grep -rnE 'declare[[:space:]]+-A[[:space:]]|mapfile|readarray|[[:space:]]coproc[[:space:]]' \
+    "$ROOT/skills/executor/scripts" 2>/dev/null \
+    | /usr/bin/grep -vE ':[[:space:]]*#' | cut -d: -f1 | sort -u
+}
+if [ -n "$(bash4_constructs)" ]; then
+  bad "bash 3.2: bash 4.0+ construct in $(bash4_constructs | tr '\n' ' ')"
+else
+  ok "bash 3.2: no bash 4.0+ construct in the shipped scripts"
+fi
 fixture() {
   local d="$WORK/$1"; mkdir -p "$d"
   git -C "$d" init -q -b main
