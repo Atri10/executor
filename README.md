@@ -151,6 +151,29 @@ until every plan is `clean` or the human has explicitly `waived` a
 finding — enforced by the phase-order machine, by `exec-run start`, and
 by `exec-store-check`.
 
+### Dispatched agents are briefed from a template, not memory
+
+Every role that dispatches a subagent — implementer, task reviewer,
+re-reviewer, final reviewer, plan auditor, plan repairer, plan
+re-auditor, evidence runner, prior-art scout, concept explorer, design
+critic — has a registered prompt template with its identity grammar, a
+required `model:` line, and a filled `[PLACEHOLDER]` contract. An agent
+briefed from the dispatcher's memory is a dispatch defect:
+`validate-skills.sh` fails on a dispatch role with no registered template,
+a template missing its `## Self-Critique Before You Return` /
+`## Verification` / `## What You Return` sections, or a prompt file nobody
+registered. The dispatch registry lives in
+[references/layout.md](skills/executor/references/layout.md).
+
+### Every artifact critiques and verifies itself before its gate
+
+Each phase skill carries a `## Self-Critique` section — an adversarial
+pass over the artifact it just wrote — and a `## Verification` section —
+the commands that prove it, run in-session with output cited at the gate.
+A gate claimed before both ran is not claimed. The same two sections are
+required inside every dispatch template, so a subagent checks its own
+output before returning a status line the controller will trust.
+
 ### Decisions: rule, ask, or stop
 
 Inside a phase the workflow does not wait on a human — but it does not

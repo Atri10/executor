@@ -4,6 +4,67 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+
+## [Unreleased]
+
+### Added
+- 2026-09-28 — **A dispatch registry and a prompt per dispatched role.**
+  `references/layout.md` gains a Dispatch registry: every role that
+  spawns a subagent (implementer, task reviewer, re-reviewer, final
+  reviewer, plan auditor, plan repairer, plan re-auditor, evidence
+  runner, prior-art scout, concept explorer, design critic) is listed
+  with its identity grammar, its prompt template, and the dispatch log it
+  writes to. New prompt files under the owning skill: the three
+  plan-regression prompts, `evidence-runner-prompt.md`, and the three
+  brainstorm prompts. `validate-skills.sh` fails on a dispatch role with
+  no registered prompt, a prompt missing any of the required markers
+  (`Subagent`, `agent_identity`, `model:`, `## Identity`,
+  `## Self-Critique Before You Return`, `## Verification`,
+  `## What You Return`, `**Placeholders`), or a `*-prompt.md` file no
+  registry entry names.
+- 2026-09-28 — **Self-Critique and Verification on every phase skill and
+  every dispatch template.** Each `skills/*/SKILL.md` now carries a
+  `## Self-Critique` section (an adversarial pass over the artifact the
+  phase just produced) and a `## Verification` section (the commands that
+  prove it, run in-session with output cited at the gate). The router,
+  `executor-initiative`, `executor-discovery`, `executor-architecture`,
+  `executor-spec`, `executor-planning`, `executor-execution`,
+  `executor-review`, `executor-verification`, and `executor-handoff` all
+  gained both; the four existing dispatch prompts gained the in-prompt
+  versions.
+- 2026-09-28 — **`exec-id BRN` allocation** and `brainstorm` frontmatter
+  kinds (`mode: design | decision`, `feeds:`), so a session ID is
+  allocated by the script and its downstream phase is machine-readable.
+
+### Changed
+- 2026-09-28 — **`executor-brainstorm` redesigned around full-feature
+  design.** A session may start before any initiative exists (the dossier
+  seeds `exec-initiative new`), and fans out to independent concept
+  explorers plus a prior-art scout and a red-team critic. `mode`
+  distinguishes a full `design` session from a single-question `decision`
+  session; `exec-store-check` B2 is mode-aware and B3 requires a
+  Documents-table row for every session ID.
+- 2026-09-28 — **`executor-plan-regression` runs in numbered rounds.**
+  Audit and repair files are round-suffixed (`regression-P02-R01.md`,
+  `fix-P02-R01.md`); a re-audit is always a fresh auditor, never the
+  repairer, and `check` requires the *latest* audit's `verdict: PASS` for
+  a `clean` row. Legacy unsuffixed files read as round 1.
+- 2026-09-28 — **Specification and planning are gated on a decided
+  brainstorm session.** `exec-initiative phase <INIT> specification
+  entered` refuses without a session whose `feeds:` names specification;
+  `planning entered` refuses without one naming planning. A discovery
+  skip note records that discovery needed no ideation — it does not
+  satisfy the spec/plan gates.
+- 2026-09-28 — **No ASCII-art diagrams anywhere.** `validate-skills.sh`
+  rejects box-drawing characters used as diagram edges in skill markdown;
+  the layout trees and the test-quality gate table moved to Mermaid.
+
+### Fixed
+- 2026-09-28 — **Prompt registry was unenforced.** Plan regression
+  dispatched auditors with no template and overwrote round-1 findings;
+  verification dispatched `VERIFY` runners with no prompt. Both are now
+  registered templates and round-safe file naming.
+
 ## [0.5.1] — 2026-09-26
 
 ### Fixed

@@ -155,6 +155,28 @@ transitions can still lose an update to a write race. So:
 | `skipped_phases:` | The list, plus a body section naming each reason (§5). |
 | Charter body | Section by section, per §3. |
 
+### Adopting a pre-initiative design session
+
+When the idea was already designed in a session under
+`docs/executor/brainstorm/sessions/` before the initiative existed, intake
+adopts it — the charter is derived from its brief, not re-interviewed:
+
+1. `git mv docs/executor/brainstorm/sessions/<stamp>-<topic>
+   docs/executor/INIT-0004-<slug>/brainstorm/sessions/` — history moves
+   with it.
+2. `../executor/scripts/exec-id INIT-0004 BRN` → set `id:` to the result
+   and `initiative:` to `INIT-0004` in its `session.md`, bump
+   `updated_at`.
+3. Add its Documents-table row (`INIT-0004-BRN-01`, kind `brainstorm`) —
+   `exec-store-check` B3 fails a session ID with no row.
+4. Write the charter's Problem, Goals, Non-goals, Success criteria, and
+   Constraints from the session's `## Brief`, and cite the session path
+   in the charter body. Where the charter must differ from the brief,
+   say what changed and why — the human approves both.
+
+A session left at the store root with `initiative:` set is flagged by B2:
+it was adopted in name and never moved.
+
 ## 3. The Charter
 
 The charter is the document the human approves to pass the intake gate. It
@@ -450,10 +472,52 @@ not drift from them.
    `active`.
 9. `phase <next> entered` and route to that phase's owning skill.
 
+**Two entry gates need a decided brainstorm session.** `phase
+specification entered` refuses until a session with `status: active` and
+`feeds:` naming `specification` exists (the feature's design session);
+`phase planning entered` refuses until one naming `planning` exists (the
+decomposition session). A skip note does not satisfy either — route to
+`executor-brainstorm`.
+
 **A phase gate passes later:** `phase <phase> passed "<what the human
 approved>"`, then `phase <next> entered`, then route. Skipping a phase:
 record the `skipped` row with its reason **before** entering the next one,
 add it to `skipped_phases:` and the charter's Skipped phases section.
+
+## Self-Critique
+
+Before presenting the charter, run this against it and fix what it
+catches:
+
+1. **Is the classification honest?** Could this ship as a bounded change
+   with a short design in chat? An initiative for bounded work spends a
+   phase pipeline on a two-file change.
+2. **Is every success criterion observable** — a number, a threshold, an
+   event someone can watch? `executor-verification` will be asked to prove
+   exactly what you wrote.
+3. **Does every non-goal exclude something someone would plausibly
+   expect?** A non-goal nobody would assume is padding; a missing one is
+   an argument mid-execution.
+4. **Does any relationship field name another initiative without a real
+   relationship?** Each one is a cross-initiative dependency someone must
+   honor.
+5. **If a design session was adopted, does the charter agree with its
+   brief** — or state what changed and why?
+6. **Is every skipped phase justified in the body**, and is each
+   justification a fact about this initiative rather than a hope?
+
+## Verification
+
+Run these in this session and cite their output when presenting the
+charter:
+
+1. `ls docs/executor/` and read `docs/executor/INDEX.md` — exactly one
+   folder and one registry row carry the new ID.
+2. `../executor/scripts/exec-store-check` — no finding for this
+   initiative, including B2/B3 for an adopted session.
+3. Frontmatter timestamps came from `date -u` output in this session.
+4. `../executor/scripts/exec-initiative phase <INIT> intake passed "…"` —
+   accepted; it refuses a charter stripped to frontmatter and headings.
 
 ## Common Rationalizations
 

@@ -25,8 +25,15 @@
 #   Brainstorm
 #     B1. discovery gate passed ⇒ a session under brainstorm/sessions/
 #         or a recorded skip note (INDEX.md or a discovery document)
-#     B2. every session dir carries session.md with kind: brainstorm,
-#         question/decided fields, and a non-empty ## Options section
+#     B2. every session dir — in an initiative or at the store root —
+#         carries session.md with kind: brainstorm, question/decided, and
+#         the sections its mode requires: a draft its opening section, an
+#         active session the whole method (design: Brief, Map, >=3
+#         Concepts, Stress test, Decision log, Design, Risks and open
+#         questions, Handoff; decision: >=3 Options, Adversarial pass,
+#         Outcome) and a decided: pick. A root session naming an
+#         initiative was adopted in name but never moved.
+#     B3. a session carrying an INIT-NNNN-BRN-nn id has a Documents row
 #   Documents
 #     D1. frontmatter present; id/initiative/kind/title/status/timestamps set
 #     D2. id matches the filename's ID segment
@@ -94,6 +101,60 @@ fm_epoch() {
     || date -u -d "$1" +%s 2>/dev/null
 }
 
+# B2 for one brainstorm session directory. $1 = session dir, $2 = the
+# directory findings are reported relative to (initiative or store root).
+# The record is the deliverable: its mode decides which sections must
+# exist, and a decided (status: active) session must show the whole method
+# — a design session its brief, map, three or more concepts, stress test,
+# decision log, design, and handoff; a decision session three or more
+# options, the adversarial pass, and the outcome. A draft only needs the
+# section it opened with, so a session in progress is never a finding.
+check_brainstorm_session() {
+  local sdir=$1 base=$2 sfile rel mode st decided sec n req
+  sfile="$sdir/session.md"
+  if [ ! -f "$sfile" ]; then
+    fail "B2: ${sdir#"$base"/} has no session.md — a session directory without its record is an empty claim"
+    return
+  fi
+  rel=${sfile#"$base"/}
+  [ "$(fm_field "$sfile" kind)" = "brainstorm" ] \
+    || fail "B2: $rel kind is '$(fm_field "$sfile" kind)' — brainstorm sessions carry kind: brainstorm"
+  for k in question decided; do
+    exec_frontmatter_has "$sfile" "$k" \
+      || fail "B2: $rel missing $k: field — the question and the pick are the session's identity"
+  done
+  # Sessions written before modes existed are decision records.
+  mode=$(fm_field "$sfile" mode); mode=${mode:-decision}
+  st=$(fm_field "$sfile" status)
+  decided=$(fm_field "$sfile" decided)
+  case "$mode" in
+    design)
+      if [ "$st" = "active" ]; then
+        req="Brief|Map|Concepts|Stress test|Decision log|Design|Risks and open questions|Handoff"
+      else
+        req="Brief"
+      fi ;;
+    decision)
+      if [ "$st" = "active" ]; then req="Options|Adversarial pass|Outcome"; else req="Options"; fi ;;
+    *)
+      fail "B2: $rel mode is '$mode' — want design or decision"
+      return ;;
+  esac
+  while IFS= read -r sec; do
+    [ -n "$(exec_section_body "$sfile" "$sec" | tr -d '[:space:]')" ] \
+      || fail "B2: $rel ($mode, ${st:-no status}) has no non-empty ## $sec section"
+  done < <(printf '%s\n' "$req" | tr '|' '\n')
+  if [ "$st" = "active" ]; then
+    case "$decided" in
+      ""|null|"~") fail "B2: $rel is active but decided: is empty — an active session records the human's pick" ;;
+    esac
+    sec=Options; [ "$mode" = "design" ] && sec=Concepts
+    n=$(exec_section_body "$sfile" "$sec" | grep -c '^### ' || true)
+    [ "${n:-0}" -ge 3 ] \
+      || fail "B2: $rel records ${n:-0} ### entries under ## $sec — a decided session compares at least three"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # R1–R3: registry
 # ---------------------------------------------------------------------------
@@ -149,6 +210,23 @@ if [ -n "$reg" ]; then
     [ "$found" -eq 1 ] || fail "R2: initiative folder '$base' has no registry row"
   done < <(find "$store" -maxdepth 1 -type d -name 'INIT-[0-9][0-9][0-9][0-9]-*' | sort)
 fi
+
+# ---------------------------------------------------------------------------
+# B2 at the store root: pre-initiative design sessions
+# ---------------------------------------------------------------------------
+# A session started before any initiative existed lives under
+# docs/executor/brainstorm/sessions/ and gets the same record contract as
+# one inside an initiative. It carries no initiative, so a non-null
+# initiative: field means it was adopted in name but never moved.
+while IFS= read -r sdir; do
+  [ -n "$sdir" ] || continue
+  check_brainstorm_session "$sdir" "$store"
+  pinit=$(fm_field "$sdir/session.md" initiative)
+  case "$pinit" in
+    ""|null|"~") ;;
+    *) fail "B2: ${sdir#"$store"/} names initiative $pinit but sits at the store root — adopt it: git mv it into that initiative's brainstorm/sessions/" ;;
+  esac
+done < <(find "$store/brainstorm/sessions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 
 # ---------------------------------------------------------------------------
 # Per-initiative pass
@@ -261,27 +339,23 @@ for idir in "$store"/INIT-*/; do
     done < <(grep -E '^\| *discovery *\|' "$idx")
 
     # B2: every session directory carries a session.md whose frontmatter
-    # identifies it (kind: brainstorm, question, decided) and whose body
-    # records the divergent pass (## Options). A session dir with no
-    # record, or a record with no alternatives, is ideation that left no
-    # evidence — the exact failure B1 exists to prevent, one level deeper.
-    # Sessions are excluded from the D-scan (their IDs are not in the
-    # document namespace), so this is their only structural check.
+    # identifies it and whose body records the work its mode requires
+    # (rules in check_brainstorm_session). B3: a session with an allocated
+    # BRN id is a document, so it needs a Documents-table row like every
+    # other document — the phase entry gates read sessions, and an
+    # unregistered one is invisible in INDEX.md. Sessions are excluded
+    # from the D-scan, so these are their structural checks.
     while IFS= read -r sdir; do
       [ -n "$sdir" ] || continue
-      sfile="$sdir/session.md"
-      if [ ! -f "$sfile" ]; then
-        fail "B2: ${sdir#"$idir"/} has no session.md — a session directory without its record is an empty claim"
-        continue
-      fi
-      [ "$(fm_field "$sfile" kind)" = "brainstorm" ] \
-        || fail "B2: ${sfile#"$idir"/} kind is '$(fm_field "$sfile" kind)' — brainstorm sessions carry kind: brainstorm"
-      for k in question decided; do
-        exec_frontmatter_has "$sfile" "$k" \
-          || fail "B2: ${sfile#"$idir"/} missing $k: field — the question and the pick are the session's identity"
-      done
-      [ -n "$(exec_section_body "$sfile" Options | tr -d '[:space:]')" ] \
-        || fail "B2: ${sfile#"$idir"/} carries no ## Options section — a session with no recorded alternatives is a decision, not ideation"
+      check_brainstorm_session "$sdir" "$idir"
+      sid=$(fm_field "$sdir/session.md" id)
+      case "$sid" in
+        "$init_id"-BRN-[0-9][0-9])
+          grep -qE "^\| *$sid *\|" "$idx" 2>/dev/null \
+            || fail "B3: ${sdir#"$idir"/}/session.md carries id $sid but $init_id INDEX.md has no Documents row for it" ;;
+        ""|null|"~") ;;
+        *) fail "B3: ${sdir#"$idir"/}/session.md id '$sid' is not $init_id-BRN-nn — allocate it with exec-id $init_id BRN" ;;
+      esac
     done < <(find "$idir/brainstorm/sessions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 
     # P1: a passed plan-regression gate (or an initiative already past it —

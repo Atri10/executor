@@ -334,6 +334,36 @@ Subagent (general-purpose):
     sentences, technical.
     ```
 
+    ## Self-Critique Before You Return
+
+    Attack your own branch verdict before you file it. This is the last
+    read of the whole diff before merge — a wrong APPROVED ships the
+    defect, a wrong NEEDS_FIXES re-runs the loop on a clean tree.
+
+    1. **Did you read the whole branch diff**, not the union of task
+       verdicts? Cross-task seams — two tasks editing adjacent code, a
+       contract one produces and another consumes — only exist here.
+    2. **Is every MUST FIX item triaged with a reason**, and every accept
+       logged so a later reader knows it was seen, not missed?
+    3. **Is a finding duplicated across tasks reported once** — the same
+       defect flagged by three task reviewers is one finding, not three.
+    4. **Did you check for work that satisfies no task** — drift the
+       per-task reviews each could not see?
+    5. **Is every Critical and Important finding at a `file:line`** with
+       the consequence stated? An unlocatable finding cannot be fixed or
+       adjudicated.
+
+    ## Verification
+
+    Before you return, confirm the artifacts you produced:
+
+    1. The verdict file at [VERDICT_FILE] exists and its triage table
+       counts equal the counts in your return line — count them.
+    2. Every MUST FIX item names the finding it resolves or the task it
+       blocks — an orphan triage row is a gate nobody can satisfy.
+    3. The merge assessment line is consistent with the GATE — a FAIL
+       verdict cannot read "Ready".
+
     ## What You Return
 
     Your final message is exactly this, and nothing else — no preamble, no

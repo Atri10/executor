@@ -370,9 +370,10 @@ The same rule governs ARCH, IFCE, and DSGN. A `frozen` interface is
 especially strict: supersede it, never edit it, because its consumers were
 written against the text they read.
 
-## Self-review before the gate
+## Self-Critique
 
-Run this yourself. It is a checklist, not a subagent dispatch.
+Run this yourself before the gate — an adversarial pass, not a subagent
+dispatch.
 
 **The mismatch test.** Pick any two components on opposite sides of a seam.
 Hand their sections to two readers who will never read each other's. Could
@@ -397,8 +398,29 @@ whole phase.
       anywhere — auth and config are described as a redacted existence
       statement plus a safe pointer, per
       [`../executor/references/safety.md`](../executor/references/safety.md).
-- [ ] Index rows exist for every document written, and the phase-log row is
-      updated.
+- [ ] Every index row exists for every document written, and the phase-log
+      row is updated.
+- [ ] Every one-way-door decision in the design session's dossier has an
+      ADR, and every ADR's chosen option matches the session's decided
+      concept — or supersedes it with a stated reason.
+- [ ] The strongest rejected concept from the design session appears in
+      the ADR's alternatives, argued honestly, not as a strawman.
+
+## Verification
+
+Run these in this session and cite their output at the gate:
+
+1. `../executor/scripts/exec-store-check` — no finding for this
+   initiative; D8 requires every ARCH to carry a top-level `mermaid`
+   diagram.
+2. `rg -n 'INIT-[0-9]{4}' architecture/` — every ID belongs to this
+   initiative.
+3. For each IFCE: count its `provides:` entries against the operations it
+   specifies with exact types and error cases — equal.
+4. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>/architecture`
+   — exit 0.
+5. `../executor/scripts/exec-initiative phase <INIT> architecture passed "…"`
+   — accepted; the gate refuses with no ARCH or ADR on disk.
 
 ## Handoff to specification
 

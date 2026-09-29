@@ -265,11 +265,11 @@ output, and a gate that must pass before the next phase starts.
 | Phase | Skill | Output | Gate |
 |---|---|---|---|
 | Intake | `executor-initiative` | Initiative folder, charter | Human approves the charter's problem statement and success criteria |
-| Discovery | `executor-discovery` | Research, options comparison | Human picks an approach |
+| Discovery | `executor-discovery` | Research, options comparison, the feature's design session | Human picks an approach |
 | Architecture | `executor-architecture` | Architecture, ADRs, interfaces | Human approves the structure |
 | Design | `executor-architecture` | Component designs | Human approves, or waives for simple initiatives |
-| Specification | `executor-spec` | Spec, risks, verification strategy | Human reviews the written spec |
-| Planning | `executor-planning` | One or more plans with tasks | Plan set drafted |
+| Specification | `executor-spec` | Spec, risks, verification strategy | Entry: a decided brainstorm session feeding specification. Exit: human reviews the written spec |
+| Planning | `executor-planning` | One or more plans with in-depth tasks | Entry: a decided decomposition session feeding planning. Exit: plan set drafted and linted |
 | Plan regression | `executor-plan-regression` | Plan-set audit reports, repairs, gate summary | Every plan clean or human-waived; human then picks an execution mode |
 | Execution | `executor-execution` | Commits, reports, ledger | Every task reviewed and complete |
 | Review | `executor-review` | Verdicts, findings, rulings | Final whole-branch review clean |
@@ -312,11 +312,15 @@ happened.
 
 ```mermaid
 flowchart TB
+    BR["Brainstorm, design session"] -->|"adopted at intake"| I
     I["Intake, charter"] --> DI["Discovery, research, options"]
-    DI --> AR["Architecture, ADRs, interfaces"]
+    DI -->|"design session"| BRD["Brainstorm, decided"]
+    BRD --> AR["Architecture, ADRs, interfaces"]
     AR --> DE["Design, components"]
     DE --> SP["Specification, spec, risks, verification"]
-    SP --> PL["Planning, plans, tasks"]
+    BRD -->|"feeds specification"| SP
+    SP --> BRP["Brainstorm, decomposition decided"]
+    BRP -->|"feeds planning"| PL["Planning, plans, tasks"]
     PL --> RG["Plan regression, plan-set audit"]
     RG --> EX["Execution, dispatch loop"]
     RG -->|"findings"| PL
@@ -327,11 +331,22 @@ flowchart TB
     VF -->|"gap found"| EX
 ```
 
+**Every phase critiques and verifies its own output before its gate.**
+Each phase skill carries a `## Self-Critique` section — an adversarial
+pass over the artifacts it just wrote — and a `## Verification` section —
+the commands that prove them, run in this session with their output
+cited. A gate claimed before both ran is not claimed. Every subagent a
+phase dispatches is briefed from its dedicated prompt template in the
+[dispatch registry](references/layout.md#dispatch-registry), and each
+template carries the same two sections for the agent's own output.
+
 ## Routing
 
 | You need to… | Skill |
 |---|---|
 | Start a body of work, allocate an initiative | `executor-initiative` |
+| Design a new feature or use case from a rough idea | `executor-brainstorm` (before any initiative exists, or at discovery) |
+| Decide one open design question, or how a spec splits into plans | `executor-brainstorm` (decision mode) |
 | Understand the problem, compare approaches | `executor-discovery` |
 | Decide structure, record a decision, define interfaces | `executor-architecture` |
 | Write the requirements contract | `executor-spec` |
@@ -433,6 +448,38 @@ gate crossed in the same message that presented it, no invented state when
 the indexes disagreed with memory, no phase transition without the script.
 The whole discipline is: ground first, work one phase, end turns at gates,
 record through scripts.
+
+## Self-Critique
+
+Before routing, and again before claiming any gate, run this against what
+you are about to do:
+
+1. **Is this the right phase?** Name the phase from the initiative's
+   `INDEX.md` phase log, not from memory. A plan written while the log says
+   specification is work past a gate nobody passed.
+2. **Is the next entry gated?** Specification and planning need a decided
+   brainstorm session feeding them. If none exists, the route is
+   `executor-brainstorm`, not the phase skill.
+3. **Did the phase skill's own Self-Critique and Verification run** — and
+   is their output in this session, not recalled from an earlier one?
+4. **Is every subagent about to be dispatched briefed from its registered
+   prompt template**, every placeholder filled, and its model named?
+5. **Is anything in the message past the gate?** A gate presentation ends
+   the turn; work after it is unapproved.
+
+## Verification
+
+Run these at the start of every session and before every gate:
+
+1. `git branch --show-current; git rev-parse HEAD; git status --short` —
+   the repository state the session starts from.
+2. Read `docs/executor/INDEX.md` and the initiative's `INDEX.md` — the
+   phase and gate state come from disk.
+3. `scripts/exec-store-check` — the thinking store is consistent; a
+   finding is repaired before new work, not after.
+4. In a run: `scripts/exec-run PLAN check` — the registry row agrees with
+   the ledger.
+5. Before any handoff: `scripts/exec-scan-secrets` — exit 0.
 
 ## Common Rationalizations
 

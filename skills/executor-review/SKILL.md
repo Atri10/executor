@@ -370,6 +370,39 @@ hand off to `executor-verification`. Nothing is deleted: the workspace, the
 diffs, and the verdicts stay where they are. Pruning is a human decision,
 never a cleanup step.
 
+## Self-Critique
+
+Before acting on a verdict, check the review itself:
+
+1. **Did the reviewer get the package, not a paraphrase?** The dispatch
+   named the diff, brief, and report paths from `exec-review-package` —
+   no summary of what changed, no "focus on", no pre-judgment.
+2. **Is every Critical and Important finding tied to a `file:line`** and a
+   consequence? A finding without one cannot be fixed or disputed.
+3. **Is severity set by consequence**, not by fix size or reviewer tone?
+   Re-grade any Important that describes a style preference.
+4. **Did a re-review do its impact review before closure**, and did it
+   report pre-existing Critical defects as new findings?
+5. **Is any verdict marked APPROVED with an open Important finding?** That
+   is a contradiction the merge gate will trust — fix the verdict.
+6. **Did the controller read the diff itself** instead of the verdict? It
+   burned the context the run needs and replaced an independent judgment
+   with its own.
+
+## Verification
+
+Run these in this session before moving on from a review round:
+
+1. Read the verdict file from `reviews/verdicts/` — frontmatter
+   `spec_verdict` and `quality` present and consistent with the findings
+   listed.
+2. `../executor/scripts/exec-run "$PLAN" check` — every completed task has
+   a clean verdict.
+3. For a final review: `../executor/scripts/exec-branch "$PLAN" audit` —
+   exit 0 before any merge.
+4. `../executor/scripts/exec-scan-secrets .executor/<INIT>` — exit 0;
+   diffs and packages capture whatever a task added.
+
 ## Common Rationalizations
 
 | Excuse | Reality |

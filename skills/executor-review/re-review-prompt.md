@@ -253,6 +253,39 @@ Subagent (general-purpose):
     **Reasoning:** one or two sentences, technical.
     ```
 
+    ## Self-Critique Before You Return
+
+    Attack your own re-review before you file it. This is a closure gate —
+    a wrong PASS merges a defect, a wrong FAIL burns a round.
+
+    1. **Did you run the impact review before closure?** For every fix
+       touching shared code — a signature, a type, a contract, a file other
+       tasks read — you traced the consumers it affects. A fix that broke a
+       caller is new breakage, not a closed finding.
+    2. **Is each ADDRESSED judgment tied to the root cause** — did the fix
+       change the condition that produced the defect, not just guard one
+       call path or catch-and-continue?
+    3. **Did you re-review the fix diff, not the original task?** New
+       breakage comes from the fix diff; re-raising a settled finding
+       re-runs work already judged.
+    4. **Is pre-existing breakage reported as a finding, not attributed to
+       this fix?** A defect older than the fix diff is a new finding for
+       the controller, not a FAIL reason here.
+    5. **Are the still-open IDs exactly the ones your verdict file lists?**
+       The controller parks by ID — an ID you name in prose but omit from
+       the file is never closed.
+
+    ## Verification
+
+    Before you return, confirm the artifacts you produced:
+
+    1. The verdict file at [VERDICT_FILE] exists and every listed finding
+       carries a verdict of ADDRESSED, NOT ADDRESSED, or OUT_OF_SCOPE.
+    2. The ADDRESSED/NOT-ADDRESSED counts in your return line match the
+       file — count them, do not recall them.
+    3. On a PASS, your message carries the five status lines and nothing
+       after them.
+
     ## What You Return
 
     Your final message is exactly this, and nothing else:

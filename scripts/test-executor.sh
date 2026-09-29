@@ -51,6 +51,9 @@ execution_mode: inline
 '
 TASK=$'### Task 1: Probe — `INIT-0001-P01-T01`
 
+**Implements:** `INIT-0001-SPEC-01-R01`
+**Depends on:** none
+
 **Files:**
 - Modify: `api.ts`
 
@@ -59,6 +62,13 @@ TASK=$'### Task 1: Probe — `INIT-0001-P01-T01`
 
 **Requirements:**
 - INIT-0001-SPEC-01-R01
+
+- [ ] **Step 1: Write the failing test**
+- [ ] **Step 2: Implement**
+- [ ] **Step 3: Run the test and see it pass**
+
+Run: `bun test`
+Expected: PASS
 '
 
 # 1. Context carries all interfaces and constraints (no silent clipping).
@@ -337,7 +347,7 @@ ok "fenced task examples do not inflate the expected set"
 # real one still fails with the correct (file-absolute) line number.
 d=$(fixture fencedpath)
 cd "$d"
-printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n\n```markdown\n- Create: docs/executor/INIT-0002/x.md\n```\n' > "$d/plan.md"
+{ printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n'; printf '%s\n' "$TASK"; printf '```markdown\n- Create: docs/executor/INIT-0002/x.md\n```\n'; } > "$d/plan.md"
 bash "$S/exec-plan-lint" "$d/plan.md" > /dev/null 2>&1 || bad "fencedpath: fenced store-path example failed lint"
 printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Create: docs/executor/INIT-0002/x.md\n' > "$d/plan.md"
 out=$(bash "$S/exec-plan-lint" "$d/plan.md" 2>&1) && bad "fencedpath: real store-path mutation passed lint"
@@ -702,6 +712,13 @@ bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 ||
 for ph in discovery architecture design specification; do
   bash "$S/exec-initiative" phase INIT-0001 "$ph" skipped "fixture: not needed" > /dev/null 2>&1 || bad "planreg: $ph skip refused"
 done
+# Brainstorming is required before planning: entry refused with no decided
+# session feeding planning, accepted once one exists.
+if bash "$S/exec-initiative" phase INIT-0001 planning entered "go" >/dev/null 2>&1; then
+  bad "planreg: planning entered with no decided brainstorm session feeding planning"
+fi
+mkdir -p "$IDIR/brainstorm/sessions/20260928T000000Z-split"
+printf -- '---\nkind: brainstorm\nid: null\ninitiative: INIT-0001\nmode: decision\nquestion: How does the spec split into plans?\nfeeds: [planning]\nstatus: active\ndecided: one-plan\ncreated_at: 2026-09-28T00:00:00Z\nupdated_at: 2026-09-28T00:00:00Z\n---\n\n## Options\n### A — one-plan\n### B — two-plans\n### C — per-component\n\n## Adversarial pass\nB doubles review cost.\n\n## Outcome\nA.\n' > "$IDIR/brainstorm/sessions/20260928T000000Z-split/session.md"
 bash "$S/exec-initiative" phase INIT-0001 planning entered "go" > /dev/null 2>&1 || bad "planreg: planning enter refused"
 bash "$S/exec-initiative" phase INIT-0001 planning passed "1 plan" > /dev/null 2>&1 || bad "planreg: planning pass refused"
 bash "$S/exec-initiative" phase INIT-0001 plan-regression entered "go" > /dev/null 2>&1 || bad "planreg: plan-regression enter refused"
@@ -716,9 +733,17 @@ bash "$S/exec-plan-regression" "$d/plan.md" init > /dev/null 2>&1 || bad "planre
 if bash "$S/exec-plan-regression" "$d/plan.md" check >/dev/null 2>&1; then
   bad "planreg: check passed with no audit row"
 fi
-AUDIT=$(bash "$S/exec-plan-regression" "$d/plan.md" audit)
-printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: 1\n---\nPASS — 0 defects\n' > "$AUDIT"
-printf '| INIT-0001-P01 | clean | regression-P01.md | — | 0 defects |\n' >> "$d/.executor/INIT-0001/plan-regression/summary.md"
+AUDIT=$(bash "$S/exec-plan-regression" "$d/plan.md" audit 01)
+case "$AUDIT" in */regression-P01-R01.md) ;; *) bad "planreg: audit path not round-suffixed ($AUDIT)";; esac
+printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: R01\nverdict: FAIL\nhigh: 1\nmedium: 0\nlow: 0\n---\n' > "$AUDIT"
+printf '| INIT-0001-P01 | clean | regression-P01-R01.md | — | 1 defect |\n' >> "$d/.executor/INIT-0001/plan-regression/summary.md"
+if bash "$S/exec-plan-regression" "$d/plan.md" check >/dev/null 2>&1; then
+  bad "planreg: check passed a clean row whose latest audit is FAIL"
+fi
+AUDIT2=$(bash "$S/exec-plan-regression" "$d/plan.md" audit 02)
+printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: R02\nverdict: PASS\nhigh: 0\nmedium: 0\nlow: 0\n---\n' > "$AUDIT2"
+[ -f "$AUDIT" ] || bad "planreg: round-2 audit overwrote round 1"
+[ "$(bash "$S/exec-plan-regression" "$d/plan.md" latest)" = "$AUDIT2" ] || bad "planreg: latest does not name the round-2 audit"
 bash "$S/exec-plan-regression" "$d/plan.md" check > /dev/null 2>&1 || bad "planreg: check refused a clean set"
 bash "$S/exec-initiative" phase INIT-0001 plan-regression passed "1 plan clean" > /dev/null 2>&1 || bad "planreg: phase pass refused with clean summary"
 bash "$S/exec-run" "$d/plan.md" start > /dev/null 2>&1 || bad "planreg: run refused after clearance"
@@ -786,22 +811,14 @@ ok "task branches fork from the tip, merge on a clean verdict, and the topology 
 d=$(fixture seqflag)
 cd "$d"
 SEQ_FM=$(printf '%s' "$FM" | sed -e 's/^tasks: 1$/tasks: 2/' -e 's/^execution_mode: inline$/execution_mode: inline\nsequential: true/')
-TASK2=$'### Task 2: Second — `INIT-0001-P01-T02`
-
-**Files:**
-- Modify: `b.ts`
-'
+# Both variants are the full task fixture renumbered; they differ only in
+# the dependency line, so the sequential rule is the only thing under test.
+TASK2=$(printf '%s' "$TASK" | sed -e 's/Task 1: Probe — `INIT-0001-P01-T01`/Task 2: Second — `INIT-0001-P01-T02`/')
+TASK2_CHAINED=$(printf '%s' "$TASK2" | sed -e 's/^\*\*Depends on:\*\* none$/**Depends on:** `INIT-0001-P01-T01`/')
 printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2" > "$d/seq.md"
 if bash "$S/exec-plan-lint" "$d/seq.md" >/dev/null 2>&1; then
   bad "seqflag: sequential: true linted clean with no dependency chain"
 fi
-TASK2_CHAINED=$'### Task 2: Second — `INIT-0001-P01-T02`
-
-**Depends on:** `INIT-0001-P01-T01`
-
-**Files:**
-- Modify: `b.ts`
-'
 printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2_CHAINED" > "$d/seq.md"
 bash "$S/exec-plan-lint" "$d/seq.md" > /dev/null 2>&1 \
   || bad "seqflag: a justified sequential plan was refused"
@@ -900,6 +917,160 @@ case "$out" in *"gamma body"*) ;; *) bad "reqgram: heading form R03 not extracte
 out=$( . "$S/_exec-lib.sh"; exec_requirement_body "$d/spec.md" R01 )
 [ -z "$out" ] || bad "reqgram: R011 matched a lookup for R01"
 ok "requirement extraction covers paragraph and heading grammars"
+
+# 38. Brainstorm entry gates: `specification entered` and `planning
+# entered` refuse until a decided (status: active) session's feeds: names
+# the phase. A draft session, or one feeding a different phase, does not
+# count. The phase ladder is walked with minimal deliverables so the gate
+# under test is the brainstorm check, not an ordering failure.
+d=$(fixture entrygate)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+SDIR="$IDIR/brainstorm/sessions/s1"
+mkdir -p "$SDIR" "$IDIR/discovery" "$IDIR/architecture" "$IDIR/specs" "$IDIR/risks" "$IDIR/verification" "$IDIR/plans"
+printf -- '---\nid: INIT-0001-RSCH-01\n---\n\nx\n' > "$IDIR/discovery/INIT-0001-RSCH-01-r.md"
+printf -- '---\nid: INIT-0001-ARCH-01\n---\n\nx\n' > "$IDIR/architecture/INIT-0001-ARCH-01-a.md"
+bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 discovery entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 discovery passed "picked" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 architecture entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 architecture passed "ok" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 design entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 design passed "waived" >/dev/null 2>&1
+
+# No session at all -> specification refuses.
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered with no brainstorm session"
+fi
+# A draft session does not count.
+printf -- '---\nkind: brainstorm\nstatus: draft\nfeeds: [specification]\ndecided: null\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered on a draft session"
+fi
+# An active session feeding only planning does not open specification.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [planning]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered on a session feeding planning"
+fi
+# An active session feeding specification opens the gate.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1 \
+  || bad "entrygate: decided specification session refused"
+
+# Now satisfy specification's artifacts and pass it, then gate planning.
+printf -- '---\nid: INIT-0001-SPEC-01\n---\n\nx\n' > "$IDIR/specs/INIT-0001-SPEC-01-s.md"
+printf -- '---\nid: INIT-0001-RISK-01\n---\n\nx\n' > "$IDIR/risks/INIT-0001-RISK-01-r.md"
+printf -- '---\nid: INIT-0001-VRFY-01\n---\n\nx\n' > "$IDIR/verification/INIT-0001-VRFY-01-v.md"
+bash "$S/exec-initiative" phase INIT-0001 specification passed "ok" >/dev/null 2>&1 \
+  || bad "entrygate: specification passed refused with artifacts present"
+
+# The specification session does not feed planning -> planning refuses.
+if bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1; then
+  bad "entrygate: planning entered on a specification-only session"
+fi
+# A session feeding planning opens the gate.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification, planning]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1 \
+  || bad "entrygate: decided planning session refused"
+ok "brainstorm sessions gate specification and planning entry"
+
+# 39. exec-id allocates BRN ids and increments past existing ones — a
+# session already carrying INIT-0001-BRN-01 in its frontmatter must make
+# the next allocation 02, so concurrent sessions never share an id.
+d=$(fixture brnid)
+cd "$d"
+bash "$S/exec-initiative" new Brn > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-brn"
+first=$(bash "$S/exec-id" INIT-0001 BRN)
+[ "$first" = "INIT-0001-BRN-01" ] || bad "brnid: first allocation was '$first'"
+mkdir -p "$IDIR/brainstorm/sessions/s1"
+printf -- '---\nkind: brainstorm\nid: INIT-0001-BRN-01\nstatus: draft\n---\n\n## Options\n\nx\n' > "$IDIR/brainstorm/sessions/s1/session.md"
+second=$(bash "$S/exec-id" INIT-0001 BRN)
+[ "$second" = "INIT-0001-BRN-02" ] || bad "brnid: allocation past BRN-01 returned '$second'"
+ok "exec-id allocates and increments BRN ids"
+
+# 40. exec-plan-regression check: the clearance gate reads the LATEST
+# audit round's verdict, so a 'clean' row against a FAIL audit is caught,
+# and a PASS re-audit round clears it. Waived needs a note.
+d=$(fixture regcheck)
+cd "$d"
+bash "$S/exec-initiative" new Reg > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-reg"
+printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-plan.md"
+RD="$d/.executor/INIT-0001/plan-regression"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" init > /dev/null 2>&1
+# Audit round 1 FAILs.
+printf -- '---\nkind: regression\nverdict: FAIL\n---\n\nFAIL — 2 defects\n' > "$RD/regression-P01-R01.md"
+# A 'clean' row is a lie while the latest audit FAILs.
+printf '| INIT-0001-P01 | clean | regression-P01-R01.md | fix-P01-R01.md | |\n' >> "$RD/summary.md"
+if bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1; then
+  bad "regcheck: clean row accepted while latest audit FAILs"
+fi
+# A PASS re-audit round clears the row.
+printf -- '---\nkind: regression\nverdict: PASS\n---\n\nPASS — 0 defects\n' > "$RD/regression-P01-R02.md"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1 \
+  || bad "regcheck: clean row refused after a PASS re-audit"
+# A waived row with no note is a self-granted waiver.
+perl -pi -e 's/\| INIT-0001-P01 \| clean \|/| INIT-0001-P01 | waived |/' "$RD/summary.md"
+if bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1; then
+  bad "regcheck: waived row accepted with no note"
+fi
+perl -pi -e 's/(INIT-0001-P01 \| waived \| regression-P01-R01.md \| fix-P01-R01.md \|) \|/$1 human waived low-severity naming |/' "$RD/summary.md"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1 \
+  || bad "regcheck: waived row with a note refused"
+ok "plan-regression check reads the latest audit round and gates waivers"
+
+# 41. exec-store-check B2: a pre-initiative session at the store root that
+# claims an initiative is adoption-in-name-only — it was never moved.
+d=$(fixture storeb2)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+RDIR="$d/docs/executor/brainstorm/sessions/2026-09-28-feature"
+mkdir -p "$RDIR"
+printf -- '---\nkind: brainstorm\ninitiative: INIT-0001\nstatus: draft\ndecided: null\nquestion: q\n---\n\n## Options\n\nx\n' > "$RDIR/session.md"
+out=$(bash "$S/exec-store-check" 2>&1 || true)
+echo "$out" | grep -q 'adopt it' || bad "storeb2: root session claiming an initiative not flagged"
+ok "store-check flags a root session adopted in name only"
+
+# 42. exec-store-check B3: a session carrying an allocated BRN id is a
+# document and needs a Documents-table row; an id that is not BRN-nn is
+# refused. A correctly-registered session passes.
+d=$(fixture storeb3)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+SDIR="$IDIR/brainstorm/sessions/s1"
+mkdir -p "$SDIR"
+printf -- '---\nkind: brainstorm\nid: INIT-0001-BRN-01\ninitiative: INIT-0001\nstatus: draft\ndecided: null\nquestion: q\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "storeb3: BRN id with no Documents row passed store check"
+fi
+regdoc "$IDIR" INIT-0001-BRN-01 brainstorm draft "brainstorm/sessions/s1/session.md"
+bash "$S/exec-store-check" >/dev/null 2>&1 \
+  || bad "storeb3: registered BRN session still failed store check"
+# A non-BRN id on a session is refused.
+perl -pi -e 's/id: INIT-0001-BRN-01/id: INIT-0001-FOO-01/' "$SDIR/session.md"
+perl -pi -e 's/INIT-0001-BRN-01/INIT-0001-FOO-01/' "$IDIR/INDEX.md"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "storeb3: a session with a non-BRN id passed store check"
+fi
+ok "store-check requires a Documents row and a BRN id for sessions"
+
+# 43. exec-store-check P1: an initiative that entered execution with the
+# plan-regression gate unpassed is flagged — and a passed gate requires
+# the clearance summary to exist on disk.
+d=$(fixture storep1)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+# Mark execution entered (and the branch it implies) without passing
+# plan-regression.
+perl -pi -e 's/^\| execution \| — \| — \|/| execution | 2026-09-28 | — |/' "$IDIR/INDEX.md"
+perl -pi -e 's/^\*\*Status:\*\* active/**Status:** active\n\n**Branch:** initiative\/INIT-0001 (forked 2026-09-28)/' "$IDIR/INDEX.md"
+out=$(bash "$S/exec-store-check" 2>&1 || true)
+echo "$out" | grep -q 'plan-regression' || bad "storep1: execution entered without plan-regression not flagged"
+ok "store-check flags execution entered without plan-regression clearance"
 
 echo
 echo "$pass passed, $fail failed"

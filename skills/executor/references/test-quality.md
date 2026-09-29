@@ -40,24 +40,27 @@ that can fail it is a deliberate design change, it is a **change detector**
 
 ### The Break-Naming Gate
 
-```text
-BEFORE writing the test body:
-  Name the production change that would make this test fail.
+Before writing the test body, name the production change that would make
+this test fail — then route on the answer:
 
-  Cannot name one             -> redesign the test around an observable
-                                 behavior, or delete it
-  "The source text changed"   -> run the artifact and assert its effects,
-                                 not its text
-  Only intentional decisions  -> change detector; test the behavior that
-                                 depends on the decision instead
-                                 (e.g. not expect(MAX_RETRIES).toBe(5)
-                                 but: a failing call is retried 5 times
-                                 and the 6th attempt never happens)
-
-  Then confirm the expected value is derived WITHOUT the code under test.
-  If it reuses the code's logic or helpers, replace it with a literal or
-  a hand-checked fixture.
+```mermaid
+flowchart TD
+    Q{"What change makes this test fail?"}
+    Q -->|"cannot name one"| R1["Redesign around an observable behavior, or delete the test"]
+    Q -->|"the source text changed"| R2["Run the artifact and assert its effects, not its text"]
+    Q -->|"only an intentional decision"| R3["Change detector: test the behavior that depends on the decision"]
+    Q -->|"a real defect: wrong branch, boundary, contract"| OK["Keep the test"]
+    R1 --> E
+    R2 --> E
+    R3 --> E
+    OK --> E{"Is the expected value derived without the code under test?"}
+    E -->|"no, it reuses the code's logic or helpers"| FIXV["Replace it with a literal or a hand-checked fixture"]
+    E -->|"yes"| WRITE["Write the test body"]
+    FIXV --> WRITE
 ```
+
+A change detector in practice: not `expect(MAX_RETRIES).toBe(5)`, but a
+failing call is retried five times and the sixth attempt never happens.
 
 ### Derive expectations independently
 

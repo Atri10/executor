@@ -50,20 +50,61 @@ Resolve the artifact root first:
 
 ```bash
 ../executor/scripts/exec-plan-regression "$PLAN" init
-# → .executor/INIT-0004/plan-regression/summary.md (seeded, one header)
+# → .executor/INIT-0004/plan-regression/summary.md, plus dispatches.md
 ```
 
 `init` also seeds `.executor/INIT-0004/rulings.md` — the initiative-level
 log where every ruling this phase produces lands (`exec-ruling "$PLAN"
 initiative "<decision>" "<why>" "<cost>"`).
 
-## The Audit — per plan, one `regression-P<nn>.md`
+## The Round Loop
 
-For each plan in the set, write its audit to
-`exec-plan-regression PLAN audit` (`.executor/<INIT>/plan-regression/
-regression-P<nn>.md`). Frontmatter `kind: regression`, `plan: <id>`,
-`round: 1` (increment on re-audit after repair). Verdict line at top:
-`PASS — 0 defects` or `FAIL — N defects (X high, Y medium, Z low)`.
+Three roles, each with a dedicated prompt, each a separate dispatch —
+never one agent grading its own work:
+
+| Role | Identity | Prompt | Writes |
+|---|---|---|---|
+| Auditor, round 1 | `AUDIT-P02-R01` | [plan-auditor-prompt.md](plan-auditor-prompt.md) | `regression-P02-R01.md` |
+| Repairer | `REPAIR-P02-R01` | [plan-repairer-prompt.md](plan-repairer-prompt.md) | edits to the plan file, `fix-P02-R01.md` |
+| Re-auditor, rounds 2–3 | `AUDIT-P02-R02` | [plan-reauditor-prompt.md](plan-reauditor-prompt.md) | `regression-P02-R02.md` |
+
+```mermaid
+sequenceDiagram
+    participant C as Controller
+    participant A as Auditor
+    participant R as Repairer
+    participant Q as Re-auditor
+    C->>A: plan set, spec, IFCEs, lint output
+    A-->>C: regression-P02-R01.md
+    C->>C: amend SPEC or IFCE for contract findings
+    C->>R: assigned plan and cross-plan finding IDs
+    R-->>C: repaired plan, fix-P02-R01.md
+    C->>C: apply escalations, commit, capture repair diff
+    C->>Q: prior audit, fix log, repair diff
+    Q-->>C: regression-P02-R02.md
+    C->>C: PASS sets the row clean, FAIL loops or escalates
+```
+
+- **Every dispatch is logged** in `plan-regression/dispatches.md` with its
+  identity and model, and every prompt placeholder is filled — a
+  dispatch briefed from memory is not an audit.
+- **One auditor per plan, all receiving the whole set** — checks 2, 4, 6,
+  and 7 are cross-plan by definition. Audits of different plans run in
+  parallel; a repair and the re-audit that grades it never do.
+- **Rounds never overwrite.** `exec-plan-regression PLAN audit 02` names
+  the next file beside the first; the re-auditor verdicts the prior
+  round's findings from it.
+- **Round cap: three audits per plan.** When `R03` still fails, stop
+  repairing: take the open findings to the human for a ruling, a spec
+  change, or a recorded waiver.
+
+## The Audit — per plan per round, one `regression-P<nn>-R<nn>.md`
+
+The auditor writes its findings to the path from
+`exec-plan-regression PLAN audit <ROUND>`. Frontmatter `kind: regression`,
+`round: R<nn>`, `verdict: PASS | FAIL`, and the `high`/`medium`/`low`
+counts — `exec-plan-regression check` reads `verdict:` from the latest
+round. `PASS` means zero HIGH and zero MEDIUM.
 
 Walk these checks **in this order** — each class cheap to verify, and the
 order surfaces contract-breaking defects before polish ones:
@@ -99,39 +140,37 @@ order surfaces contract-breaking defects before polish ones:
    (queue `x.dlq` vs `x-dead-letter`) → MEDIUM: naming drift is how two
    plans provision incompatible halves of one seam.
 8. **Plan lint.** `exec-plan-lint` must pass for every plan — mechanical
-   contract, zero tolerance.
+   contract, zero tolerance. Task-depth violations (a task missing
+   Implements, Depends on, Files, Interfaces, Requirements, three steps,
+   or a Run/Expected pair) are HIGH: a fresh implementer cannot finish a
+   task its brief does not describe.
 9. **Skipped-phase honesty.** If the initiative skipped architecture or
    spec, verify the plan does not cite contracts that were never written.
 
-Dispatched audit subagents are right for multi-plan sets — one agent per
-plan, all receiving the full plan set plus spec + IFCE paths as inputs so
-cross-plan checks are real, not per-plan guesses. A single plan still
-gets the audit: coverage vs its spec and lint checks apply.
+A single-plan set still gets the audit: coverage against its spec, the
+seams to its IFCEs, and lint all apply.
 
-## Repair — per plan, one `fix-P<nn>.md`
+## Repair — per plan per round, one `fix-P<nn>-R<nn>.md`
 
-For every plan with findings, write the repair log to
-`exec-plan-regression PLAN fix` (same dir, `fix-P<nn>.md`). `kind:
-repair`, `verdict:` pointing at the audit file.
+For every plan with findings, the controller sorts the findings before
+any repairer starts:
 
-Rules of the repair pass:
+- **`contract` findings are the controller's.** Amend the SPEC or IFCE
+  (targeted edit, `updated_at` bump), log the amendment with
+  `exec-ruling "$PLAN" initiative …`, and pass it to the repairers as
+  `[CONTRACT_AMENDMENTS]`. Never adapt a plan around a broken contract.
+- **`cross-plan` findings go to the side that is wrong.** Decide which
+  plan owns the fix before dispatch; one finding, one repairer.
+- **`plan` findings go to that plan's repairer.**
 
-- **Repair the plan file in place.** The audit's job ends at naming the
-  defect; this pass edits `plans/INIT-…-P<nn>-*.md` (and re-runs
-  `exec-plan-lint`). Fix-package-style "attach the patch" is for code;
-  plans are edited directly — they are the deliverable.
-- **Contract defects route outward.** A finding whose truth lives in an
-  IFCE or the SPEC amends that document (targeted edit + `updated_at`
-  bump), with the amendment listed in the fix log's `## Contract
-  amendments` section — never adapt the plan around a broken contract.
-- **Every repair is re-verified.** After repairs, re-run the audit for
-  that plan (`round: 2`). The fix log's `## Verification` section records
-  the re-audit result per finding — not grep counts, the actual check
-  that would have caught the defect re-run.
-- **Findings you cannot repair are rulings, not deletions.** A defect the
-  plan needs human input on goes to the initiative rulings log via
-  `exec-ruling "$PLAN" initiative …` and the summary row stays `audited`
-  until answered — or the human waives it (below).
+The repairer edits only its own plan file, writes the log to
+`exec-plan-regression PLAN fix <ROUND>`, and ends every finding FIXED,
+ESCALATED (the fix belongs in another document — the controller applies
+it), or DISPUTED (the re-auditor adjudicates). Then the controller applies
+the escalations, commits the repair, captures the repair diff, and
+dispatches a fresh re-auditor. A finding that needs human input goes to
+the initiative rulings log, and the summary row stays `audited` until it
+is answered — or the human waives it (below).
 
 ## The summary — `summary.md`
 
@@ -140,13 +179,14 @@ per plan:
 
 | Plan | Status | Audit | Repairs | Notes |
 |---|---|---|---|---|
-| INIT-0004-P01 | clean | regression-P01.md r2 | fix-P01.md r1 | 56 defects → 0 |
-| INIT-0004-P02 | waived | regression-P02.md r1 | — | human waived low-severity DTO naming |
+| INIT-0004-P01 | clean | regression-P01-R02.md | fix-P01-R01.md | 56 defects → 0 |
+| INIT-0004-P02 | waived | regression-P02-R03.md | fix-P02-R02.md | human waived low-severity DTO naming |
 
-`Status` vocabulary: `clean` (audit passed or all findings repaired and
-re-audited), `audited` (report exists, findings open), `waived` (human
-explicitly accepted the open findings — record the waiver as an
-initiative ruling too). `draft`/`audited` rows block the gate.
+`Status` vocabulary: `clean` (the latest audit round has `verdict: PASS`
+— `check` refuses a clean row whose latest audit says otherwise),
+`audited` (report exists, findings open), `waived` (human explicitly
+accepted the open findings — record the waiver as an initiative ruling
+too). `draft`/`audited` rows block the gate.
 
 ## The gate
 
@@ -177,11 +217,51 @@ plans: amend, re-audit, re-clear — before the dependent task dispatches.
   inside a `Pnn/` workspace (one plan's ledger). The initiative-level
   `plan-regression/` dir is the only legal home.
 - Never mark a plan `clean` from a fix log alone — `check` requires the
-  audit file; re-audit after repair is what makes the row honest.
+  latest audit round to say `verdict: PASS`; a fresh re-audit after repair
+  is what makes the row honest.
+- Never let a repairer re-audit its own repair, and never dispatch any
+  role without its prompt template filled.
 - Contract amendments (IFCE/SPEC edits) are rulings: `exec-ruling "$PLAN"
   initiative …` the moment the amendment is made.
 - Human waivers are the only path to `waived` — you may recommend, never
   self-grant.
+
+## Self-Critique
+
+Before claiming the gate, run this against the summary and every latest
+audit, and fix what it catches:
+
+1. **Does every plan on disk have a row**, and does every row name the
+   latest audit round on disk? A row naming `R01` when `R02` exists is
+   stale.
+2. **Was every repair graded by a fresh auditor?** Check `dispatches.md`:
+   a `REPAIR-P02-R01` row with no later `AUDIT-P02-R02` row means a clean
+   claim with no re-audit.
+3. **Did any repair weaken the plan to pass** — a deleted requirement, a
+   dropped `Covers:` line, a loosened value? Grep the repair diffs; each
+   one is a new HIGH, whatever the re-audit said.
+4. **Was every `contract` finding applied to the contract** and logged as
+   an initiative ruling — not repaired inside a plan?
+5. **Is every `waived` row backed by the human's words** in an initiative
+   ruling? A waiver you recommended but they did not state is not one.
+6. **Did any plan exceed three rounds?** Then the human decided, and the
+   ruling says what.
+7. **Did the set change after its audit** — a plan edited, added, or its
+   spec amended — without a re-audit of the affected plans?
+
+## Verification
+
+Run these in this session and cite their output when claiming the gate:
+
+1. `../executor/scripts/exec-plan-regression "$PLAN" check` — exit 0,
+   "plan-regression clean".
+2. `../executor/scripts/exec-plan-lint <plan>` for every plan — exit 0.
+3. `../executor/scripts/exec-plan-regression <plan> latest` for every plan
+   — names the file the summary row cites.
+4. `../executor/scripts/exec-scan-secrets .executor/<INIT>/plan-regression`
+   — exit 0; the execution store may be committed.
+5. `../executor/scripts/exec-initiative phase <INIT> plan-regression passed "…"`
+   — accepted; the phase gate re-runs `check` itself and refuses on any gap.
 
 ## Common Rationalizations
 

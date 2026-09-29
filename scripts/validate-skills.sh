@@ -3,7 +3,10 @@
 # Copyright (c) 2026 Atri10
 # Validate every skill file's structural contract: frontmatter parseable,
 # name/description present, description carries a "Use when ..." trigger,
-# markdown fences balanced. Runs in CI and before any local release.
+# markdown fences balanced, every SKILL.md carries its Self-Critique and
+# Verification sections, every dispatch role in the registry has a prompt
+# template that carries the dispatch contract, and no markdown file draws
+# a diagram in box-drawing characters. Runs in CI and before any release.
 #
 # Usage: scripts/validate-skills.sh [SKILLS_DIR]   (default: skills)
 set -euo pipefail
@@ -81,6 +84,78 @@ if [ -n "$dups" ]; then
   fail=1
 fi
 rm -f "$tmp"
+
+# Every SKILL.md carries the two sections that make a phase self-checking:
+# an adversarial pass over its own output (Self-Critique) and the checks
+# that prove it before the gate is claimed (Verification). Exactly one of
+# each — two copies drift apart.
+for sk in "$dir"/*/SKILL.md; do
+  [ -f "$sk" ] || continue
+  for sec in "Self-Critique" "Verification"; do
+    n=$(grep -cxE "## ${sec}" "$sk" || true)
+    if [ "$n" -ne 1 ]; then
+      echo "FAIL ${sk#./}: expected exactly one '## ${sec}' section, found $n"
+      fail=1
+    fi
+  done
+done
+
+# Dispatch registry (references/layout.md): every template the registry
+# names must exist and carry the dispatch contract, and every *-prompt.md
+# on disk must be registered. A dispatch without a dedicated prompt is an
+# agent briefed from memory; a prompt nobody registered is dead weight.
+layout="$dir/executor/references/layout.md"
+if [ -f "$layout" ]; then
+  registered=$(awk '
+    /^## Dispatch registry/ { on = 1; next }
+    on && /^## / { exit }
+    on && /^\|/ {
+      while (match($0, /`[a-z0-9-]+\/[a-z0-9-]+-prompt\.md`/)) {
+        print substr($0, RSTART + 1, RLENGTH - 2)
+        $0 = substr($0, RSTART + RLENGTH)
+      }
+    }
+  ' "$layout" | sort -u)
+  [ -n "$registered" ] || { echo "FAIL ${layout#./}: no prompt templates found under ## Dispatch registry"; fail=1; }
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    p="$dir/$rel"
+    if [ ! -f "$p" ]; then
+      echo "FAIL dispatch registry names $rel but $p does not exist"
+      fail=1
+      continue
+    fi
+    for marker in 'Subagent (general-purpose):' 'agent_identity:' 'model:' '## Identity' \
+                  '## Self-Critique Before You Return' '## Verification' '## What You Return' \
+                  '**Placeholders'; do
+      grep -qF -- "$marker" "$p" || { echo "FAIL ${p#./}: prompt template lacks '$marker'"; fail=1; }
+    done
+  done <<< "$registered"
+  while IFS= read -r -d '' p; do
+    rel=${p#"$dir"/}
+    printf '%s\n' "$registered" | grep -qxF "$rel" \
+      || { echo "FAIL ${p#./}: prompt template is not listed in the dispatch registry (references/layout.md)"; fail=1; }
+  done < <(find "$dir" -name '*-prompt.md' -print0)
+fi
+
+# No ASCII-art diagrams. Box-drawing characters draw trees and boxes whose
+# edges live only in whitespace — nothing renders or checks them, and they
+# silently drift from the structure they claim to show. Mermaid carries the
+# structure explicitly. Inline code spans are exempt, so prose can still
+# name the characters it bans.
+while IFS= read -r -d '' f; do
+  awk -v file="${f#./}" '
+    {
+      line = $0
+      gsub(/`[^`]*`/, "", line)
+      if (line ~ /[├└│┌┐┘┬┴┼╭╮╯╰═║╔╗╚╝]/) {
+        printf "FAIL %s:%d: box-drawing character — draw it as a mermaid diagram or a table\n", file, NR
+        bad = 1
+      }
+    }
+    END { exit bad }
+  ' "$f" || fail=1
+done < <(find "$dir" -name '*.md' -print0)
 
 if [ "$fail" -ne 0 ]; then
   echo "skill validation: FAILURES"

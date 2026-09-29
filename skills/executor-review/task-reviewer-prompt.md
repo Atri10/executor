@@ -406,6 +406,38 @@ Subagent (general-purpose):
     **Reasoning:** one or two sentences, technical.
     ```
 
+    ## Self-Critique Before You Return
+
+    Attack your own verdict before you file it. A verdict you certify wrong
+    sends a bad diff to merge or a good diff back for a pointless round.
+
+    1. **Is every Critical and Important finding tied to a `file:line`** in
+       the diff, with the consequence stated? A finding that cannot be
+       located cannot be fixed, and a re-reviewer will bounce it.
+    2. **Is severity set by consequence**, not by how large the fix is or
+       how the code reads? Re-grade any Important that describes a style
+       preference or a tidy-up.
+    3. **Did you judge the diff, not the task?** The implementer built what
+       the brief specified. A defect in the plan is out of scope — ledger
+       it, do not fail the task for it.
+    4. **Did you re-run nothing the implementer already proved?** Their
+       test output is evidence; re-running it is not.
+    5. **Is every CANNOT_VERIFY honest** — a real capability gap named, not
+       a way to soften a finding you could not prove from the diff?
+
+    ## Verification
+
+    Before you return, confirm the artifacts you produced:
+
+    1. The verdict file at [VERDICT_FILE] exists and carries frontmatter
+       `spec_verdict` and `quality` consistent with the findings listed in
+       it — no APPROVED with an open Important.
+    2. Every finding ID you cite in the reply is defined in the verdict
+       file (C1, I1, …) — the controller ledgers from the file, and an
+       orphan ID is lost.
+    3. The counts in your return line equal the counts in the file — run
+       them, do not recall them.
+
     ## What You Return
 
     Your final message is exactly this, and nothing else — no preamble, no

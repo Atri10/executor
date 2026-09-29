@@ -74,7 +74,15 @@ Do not start until all of these hold:
 |---|---|---|
 | Architecture gate passed | Initiative `INDEX.md` phase log shows `architecture` gate passed, or a `skipped` row | Stop; that phase is `executor-architecture`'s |
 | Design approved or waived | Phase log `design` row shows passed or `**skipped**` | Stop; same owner |
-| Inputs readable | `charter.md`, every `ARCH`, `ADR`, `IFCE`, `DSGN` in the initiative | Read them; never spec against remembered architecture |
+| Feature designed in a brainstorm session | A session under `brainstorm/sessions/` with `status: active` and `feeds:` naming `specification` — `exec-initiative phase <INIT> specification entered` refuses without one | Stop; run `executor-brainstorm` in design mode |
+| Inputs readable | `charter.md`, the design session's dossier, every `ARCH`, `ADR`, `IFCE`, `DSGN` in the initiative | Read them; never spec against remembered architecture |
+
+**Requirements start from the design session.** Its `## Handoff` lists
+requirement candidates, one per use-case flow and success criterion, each
+tagged with the flow it came from. Every candidate becomes a requirement or
+an explicit out-of-scope entry; the spec cites the session ID in
+`informed_by:`. A requirement with no candidate behind it is scope the human
+never saw in the design — flag it at the gate.
 
 Read the whole input set before writing one requirement. The spec's job
 is to make approved decisions executable, not to relitigate them. If
@@ -94,7 +102,7 @@ flowchart TB
     SP --> RK["Write RISK, pre-mortem"]
     RK -->|"requirement-affecting risks"| SP
     RK --> VF["Write VRFY, one row per requirement"]
-    VF --> SR["Self-review, 5 checks"]
+    VF --> SR["Self-Critique, then Verification"]
     SR -->|"issues found"| SP
     SR --> GA["Present and STOP"]
     GA -->|"changes requested"| SP
@@ -272,10 +280,10 @@ goes in **Open Questions** with a named owner and a blocking flag, where
 the human sees it at the gate. The failure is hiding it inside a
 requirement so it looks answered.
 
-## Spec Self-Review
+## Self-Critique
 
-Run all five yourself after the three documents exist. This is a
-checklist you execute, not a subagent dispatch. Fix inline.
+Run all of these yourself after the three documents exist — an
+adversarial pass, not a subagent dispatch. Fix inline.
 
 **1. Placeholder scan.** Search all three documents for the ban list.
 Grep case-insensitively for at least: `TBD`, `TODO`, `appropriate`,
@@ -322,10 +330,35 @@ Keep the table in the spec body. It is how the human checks coverage at
 the gate in one glance, and how a later reader sees that `evictCell` was
 excluded on purpose rather than forgotten.
 
+**6. Design traceability.** Walk the design session's `## Handoff`
+candidates: each maps to a requirement or an out-of-scope entry. Walk the
+requirements: each traces to a candidate, or is flagged as new scope. Walk
+the session's failure and abuse flows: each has a requirement saying what
+the system does, or an explicit out-of-scope entry.
+
+**7. Verifiability.** For every requirement, name the observation that
+would prove it false. A requirement nothing could falsify cannot get a VRFY
+row — rewrite it with a threshold, an observable, or an exact value.
+
 **Re-run the loop after any fix that changed requirement text**, not just
 the section you touched. Splitting an "and" into two requirements, adding
 a requirement, or tightening a threshold can break check 2 and check 5
 elsewhere.
+
+## Verification
+
+Run these in this session and cite their output at the gate:
+
+1. `../executor/scripts/exec-store-check` — no finding for this
+   initiative. D8 checks the spec's `### R<nn>` headings, its verification
+   pointer, and its constraint count; X2 checks the VRFY resolves.
+2. The placeholder grep from check 1, re-run after the last edit — zero
+   unjustified hits.
+3. Count `### R<nn>` headings in the spec and rows in the VRFY — equal,
+   and the VRFY's `criteria_count` matches.
+4. The Coverage table from check 5 has no row blank in both columns.
+5. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>/specs`
+   — exit 0.
 
 ## Risk Documents (`RISK`)
 

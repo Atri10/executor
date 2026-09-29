@@ -253,7 +253,7 @@ Subagent (general-purpose):
     are stuck on, what you tried, and what help you need. The controller can
     supply context, re-dispatch on a more capable model, or split the task.
 
-    ## Before Reporting Back: Self-Review
+    ## Self-Critique Before You Return
 
     Read your own diff with fresh eyes. Then go one step further:
     challenge the work you just did.
@@ -293,7 +293,29 @@ Subagent (general-purpose):
     Fix what you find now, before reporting. A defect you found and fixed
     costs one turn; the same defect found by the reviewer costs a full round.
 
-    ## After Review Findings
+    ## Verification
+
+    Before you write the report, prove the claims it will make — run these
+    yourself in this worktree, and paste the observed output into Evidence:
+
+    1. `git status --short` and `git log --oneline` in the worktree — the
+       commits you report are the commits on this branch, and no file the
+       task did not name is modified.
+2. The covering test command, run against this exact tree — the failing
+       run before your change, the passing run after, both quoted.
+    3. Every file in the task's `**Files:**` block exists as changed or
+       untouched, matching what the task specified.
+    4. If any line of your report cannot point at an output you just
+       produced, mark that item NOT-RUN rather than assert it.
+
+    ## What You Return
+
+    Two artifacts, in this order:
+
+    - The **report file** at [REPORT_FILE], in the format below — the
+      durable record a reviewer and the ledger read.
+    - A **reply** to the controller under 15 lines — the status contract.
+
 
     If the task review finds issues, you will be resumed with them. Fix
     them, re-run the tests covering the amended code, and **append** a fix
@@ -359,6 +381,22 @@ Subagent (general-purpose):
     NEEDS_CONTEXT if you need information that was not provided. **Never
     silently produce work you are unsure about.**
 ```
+
+
+**Placeholders — every one is required:**
+
+| Placeholder | Value |
+|---|---|
+| `[TASK_ID]` / `[task name]` | the task's ID and heading, e.g. `INIT-0004-P01-T03` |
+| `[MODEL]` | implementer model, per `executor-execution` Model Selection — never omitted |
+| `[INIT-NNNN]` / `[INIT-NNNN-Pnn]` | the initiative and plan IDs |
+| `[BRIEF_FILE]` / `[CONTEXT_FILE]` / `[REPORT_FILE]` | `exec-brief`/`exec-context` outputs and the report path |
+| `[plan file path]` | the plan file's path |
+| `[covering test files]` | the test files that exercise the amended code, for fix rounds |
+| `[findings …]` | the open findings copied verbatim from the verdict file, for fix rounds |
+
+An unfilled bracket is a defect — the implementer has no session history to
+infer it from.
 
 ## Fix-round variant
 

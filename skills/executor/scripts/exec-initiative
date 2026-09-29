@@ -84,6 +84,46 @@ validate_phase_transition() {
 }
 
 # ------------------------------------------------------------------
+# Entry gate: brainstorming is required before specs and plans are built.
+# Entering specification needs a decided (status: active) brainstorm
+# session whose feeds: list names specification — normally the design
+# session for the feature; entering planning needs one that names
+# planning — the decomposition session deciding how the spec splits into
+# plans and tasks. A skip note does not satisfy either: the gate asks
+# whether the design space was explored and decided, and a note records
+# only that it was not.
+
+# True when some session under $1/brainstorm/sessions is active and lists
+# $2 in its feeds:. Word-matched so "planning" never matches "replanning".
+has_decided_session_feeding() {
+  local dir=$1 phase=$2 s st feeds
+  for s in "$dir"/brainstorm/sessions/*/session.md; do
+    [ -f "$s" ] || continue
+    st=$(exec_frontmatter "$s" status)
+    feeds=$(exec_frontmatter "$s" feeds)
+    [ "$st" = "active" ] || continue
+    printf '%s\n' "$feeds" | tr '[],' '   ' | tr ' ' '\n' | grep -qx "$phase" && return 0
+  done
+  return 1
+}
+
+# Prints what an `entered` event still needs; returns nonzero when missing.
+phase_entry_missing() {
+  local phase=$1 dir=$2
+  case "$phase" in
+    specification)
+      has_decided_session_feeding "$dir" specification && return 0
+      echo "a decided brainstorm session feeding specification — run executor-brainstorm (design mode) and record feeds: [specification] with status: active"
+      return 1 ;;
+    planning)
+      has_decided_session_feeding "$dir" planning && return 0
+      echo "a decided brainstorm session feeding planning — run executor-brainstorm on how the spec decomposes into plans and tasks, feeds: [planning], status: active"
+      return 1 ;;
+  esac
+  return 0
+}
+
+# ------------------------------------------------------------------
 # Artifact gate: a `passed` row asserts the phase produced its
 # deliverable, not just that the log moved. The checks below are
 # existence-level — a non-empty file carrying the initiative's ID
@@ -412,10 +452,18 @@ cmd_phase() {
   validate_phase_transition "$id" "$phase" "$event" "$idx" \
     || exec_die "illegal phase transition: $phase $event refused (see reason above)"
 
-  # A `passed` event asserts the phase's deliverable exists on disk, not
-  # only that the log row advanced — ordering was checked above, output
-  # presence is checked here, before any mutation. `entered` and
-  # `skipped` carry no artifact requirement; a skip stays legal.
+  # An `entered` event for specification or planning requires a decided
+  # brainstorm session feeding that phase (see phase_entry_missing), and
+  # a `passed` event asserts the phase's deliverable exists on disk, not
+  # only that the log row advanced. Both are checked before any mutation;
+  # `skipped` carries no requirement, so a skip stays legal.
+  if [ "$event" = "entered" ]; then
+    local needs
+    if ! needs=$(phase_entry_missing "$phase" "$dir"); then
+      exec_die "phase $phase cannot be entered: brainstorming is required before it — missing under $dir/brainstorm/sessions:
+  $needs"
+    fi
+  fi
   if [ "$event" = "passed" ]; then
     local missing
     if ! missing=$(phase_artifacts_missing "$id" "$phase" "$dir"); then

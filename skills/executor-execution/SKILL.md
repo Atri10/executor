@@ -865,6 +865,40 @@ ruling genuinely depends on another initiative, state the requirement in
 your own words — the dependency belongs in the charter's `depends_on`, which
 is the only place a cross-initiative ID may appear.
 
+## Self-Critique
+
+Before routing to verification, attack the run you just finished:
+
+1. **Did every task merge only on a clean verdict?** A task branch merged
+   before its latest R-verdict read `APPROVED` put unreviewed work on the
+   plan branch.
+2. **Was every dispatch briefed from its registered prompt template**, with
+   every placeholder filled and the model named — or did any agent get a
+   paraphrase?
+3. **Is every ruling in `rulings.md`**, and every decision-class question
+   asked on the spot and logged with `--answered`? A decision made in chat
+   and never logged is lost at compaction.
+4. **Is the ledger canonical** — `<TASK-ID>: <state>` lines — or did
+   narrative drift creep in? `exec-run check` tolerates drift but notes
+   it; a resumed controller should not need tolerance.
+5. **Did any implementer's DONE stand in for its review?** Every task has a
+   verdict file, not a report claiming success.
+6. **Did any task touch files outside its `**Files:**` list?** Check the
+   task diffs; out-of-scope edits bypassed the plan.
+
+## Verification
+
+Run these in this session and cite their output before routing onward:
+
+1. `../executor/scripts/exec-run "$PLAN" check` — exit 0: registry row
+   agrees with the ledger, every completed task has a clean verdict, the
+   topology audit is clean.
+2. `../executor/scripts/exec-branch "$PLAN" audit` — the plan branch is
+   ready to merge: final verdict present, audit clean.
+3. The project's own test suite on the plan branch tip — exit 0, skip
+   count read.
+4. `../executor/scripts/exec-scan-secrets` — exit 0 over both stores.
+
 ## Common Rationalizations
 
 | Excuse | Reality |
