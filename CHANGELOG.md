@@ -89,6 +89,25 @@ project is tagged; between releases, entries are dated and `main` moves.
   `_exec-lib.sh`. `exec-initiative` validates transitions against it and
   `exec-step` folds the phase log against it; two hand-maintained copies
   would let a run advance and refuse in the same turn.
+- 2026-09-29 — **Autonomous mode, fail-closed.** `exec-gate INIT PHASE
+  --auto` clears a phase gate without a human only when the initiative's
+  `autonomous.md` names that phase with mode `gate` or `allow`. Every
+  ambiguity resolves to `deny`: no policy file, `enabled: false`, an
+  unlisted phase, or an unrecognized mode. An auto-pass is recorded as
+  `**auto-passed** <date>` — a visibly different result from a human
+  `passed`, not a synonym — and it must satisfy the same artifact gate a
+  human pass does. A pick-class phase (`design`, `specification`) in
+  `allow` mode additionally requires a scored verdict already on disk:
+  a script can count files, it cannot choose between designs.
+
+  The event grammar gains `auto-passed` and `superseded`. `superseded` is
+  the deliberate inverse of the "already passed" refusal — only a phase
+  that actually finished can be overturned, it requires a stated reason,
+  and it clears the Entered date so the phase reopens. Without it, a human
+  who disagreed with an autonomous pass had no move but to hand-edit the
+  phase log, which is the one thing the log exists to prevent.
+  `exec-step` treats `**auto-passed**` as finished and `**superseded**`
+  as reopened, so the pump advances and re-enters correctly.
 - 2026-09-28 — **`executor-brainstorm` redesigned around full-feature
   design.** A session may start before any initiative exists (the dossier
   seeds `exec-initiative new`), and fans out to independent concept

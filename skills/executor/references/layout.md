@@ -340,6 +340,7 @@ Never hand-build a path. Use the scripts:
 | Worker liveness and the revive ladder | `../scripts/exec-supervise PLAN_FILE [--all]` |
 | Commit a worker's result through its gate | `../scripts/exec-report PLAN_FILE REPORT_FILE [BASE_SHA] [HEAD_SHA]` |
 | Record a ruling, an unsolicited correction, or a stop | `../scripts/exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost>" [--answered "<q>" \| --unsolicited "<verbatim>" [--stop]]` |
+| Decide whether a phase gate may clear without a human | `../scripts/exec-gate INIT_ID PHASE [--auto\|--policy]` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is

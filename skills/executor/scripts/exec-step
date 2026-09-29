@@ -359,11 +359,18 @@ step_initiative_raw() {
         fi
         echo "PHASE-GATE $init $p"
         return 0 ;;
-      **skipped**|????-??-??|????????)
-        : ;;                      # passed or explicitly skipped: advance
+      **skipped**|????-??-??|????????|**auto-passed**\ ????-??-??)
+        : ;;   # passed, auto-passed, or explicitly skipped: advance
+      **superseded\***)
+        # A superseded phase is NOT finished — the human overturned the
+        # gate and cleared the Entered date, so the only legal next move
+        # is to re-enter it. Treating the marker as "advance" here would
+        # walk straight past a gate a human just rejected.
+        echo "PHASE-ENTER $init $p"
+        return 0 ;;
     esac
   done
-  echo "DONE $init: every phase passed or was explicitly skipped"
+  echo "DONE $init: every phase passed, was auto-passed, or was explicitly skipped"
 }
 
 # Public entry: fold, then emit through the guard. The initiative's own

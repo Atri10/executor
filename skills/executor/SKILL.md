@@ -119,6 +119,8 @@ assumes it will try to be clever and takes away the opportunity.
 | `ASK <topic>` | Relay to the human, or spawn a `DECIDE`/`SUPERVISOR` for a `decision`-class question |
 | `WAIT` | Stop and let the workers run. Say what you are waiting on |
 | `DONE` | The run is finished. Report and stop |
+| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered` |
+| `PHASE-GATE <init> <phase>` | Ask the human to gate the phase. If autonomous mode is declared for it, `exec-gate <init> <phase> --auto`; if that refuses, present the artifact — a refusal is the answer, not an obstacle to work around |
 
 ### What the pump never does
 
@@ -134,6 +136,42 @@ assumes it will try to be clever and takes away the opportunity.
   or redispatched with its report in context. Taking over the task yourself
   deletes the audit trail and is the single most damaging thing a pump can
   do.
+- **Never passes a phase gate yourself.** Not with
+  `exec-initiative phase … passed`, and not by editing the phase log. A
+  gate the human did not clear goes through `exec-gate --auto`, which
+  refuses unless the initiative's `autonomous.md` permits it. When it
+  refuses, the correct next move is to present the artifact to the human
+  — never to find another route to the same state.
+
+### Autonomous mode
+
+An initiative may run unattended for the phases its `autonomous.md` names.
+The file lives at the initiative's root and is a table, one row per phase:
+
+```markdown
+| Phase | Mode | Why |
+|---|---|---|
+| intake | deny | the charter is the human's to approve |
+| execution | allow | every stage is gated; workers are dispatched, not self-approved |
+```
+
+`deny` never clears unattended. `gate` clears when the phase's own
+structural gate passes. `allow` is the same for a gate a script can verify,
+and additionally permitted for a pick-class phase **only** when a scored
+verdict is already on disk — a script can count files, it cannot choose
+between designs.
+
+The policy fails closed. A missing file, `enabled: false`, an unlisted
+phase, or a mode spelled anything else all read as `deny`. If you find
+yourself wanting to widen it mid-run, that is a change for the human to
+make, not you.
+
+An auto-pass is recorded as `**auto-passed**`, never as a bare date. Keep
+it that way: the difference between "a person looked at this" and "the
+policy cleared this" is the difference a reader needs six weeks later. A
+human who disagrees overturns it with
+`exec-initiative phase <init> superseded <phase> "<why>"`, which reopens
+the phase.
 
 ### When the human interrupts
 

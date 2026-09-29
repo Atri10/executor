@@ -114,6 +114,54 @@ exec_initiative_dir_opt() {
   return 0
 }
 
+# ------------------------------------------------------------------
+# Autonomous policy: which phase gates may be cleared without a human.
+#
+# The file is `autonomous.md` at the initiative's root:
+#
+#   ---
+#   kind: autonomous
+#   initiative: INIT-0001
+#   enabled: true
+#   ---
+#
+#   | Phase | Mode | Why |
+#   |---|---|---|
+#   | intake | deny | the charter is the human's to approve |
+#   | execution | allow | every stage is gated; workers are dispatched, not self-approved |
+#
+# Modes are `deny`, `gate`, `allow`. Anything else — a missing file, a
+# missing row, an unparseable mode, or `enabled: false` — reads as `deny`.
+# That default is the whole point: a policy that fails open turns a typo in
+# a table cell into an unattended phase gate, which is the one failure this
+# file exists to make impossible.
+exec_autonomous_mode() {
+  local dir=${1:-} phase=${2:-}
+  local f="$dir/autonomous.md"
+  [ -n "$dir" ] && [ -f "$f" ] || { echo "no policy"; return 0; }
+  exec_frontmatter "$f" enabled 2>/dev/null | grep -q '^true$' || { echo "disabled"; return 0; }
+  local mode
+  mode=$(awk -F'|' -v ph="$phase" '
+    /^\|[ \t]*Phase[ \t]*\|/ {
+      for (i = 2; i <= NF; i++) {
+        c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c == "Phase") pi = i
+        else if (c == "Mode") mi = i
+      }
+      next
+    }
+    pi && $0 ~ ("^\\|[ \t]*" ph "[ \t]*\\|") {
+      m = $mi; gsub(/^[ \t]+|[ \t]+$/, "", m)
+      print m; exit
+    }
+  ' "$f" 2>/dev/null)
+  case "${mode:-}" in
+    deny|gate|allow) echo "$mode" ;;
+    # An unlisted or unrecognized phase is denied, never guessed at.
+    *) echo "deny" ;;
+  esac
+}
+
 # Ensure the run store exists and is self-ignoring. Writing the .gitignore
 # unconditionally means no subsystem can forget it and no user has to add it
 # by hand — that omission is what made the legacy store pollute git status.

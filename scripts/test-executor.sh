@@ -1247,6 +1247,123 @@ bash "$S/exec-ruling" "$ENGPLAN" T d w c --stop >/dev/null 2>&1 \
   && bad "ruling: a bare --stop was accepted" \
   || ok "ruling: --stop without --unsolicited is refused"
 
+# ---------------------------------------------------------------------
+# Autonomy: which phase gates may clear without a human, and how a human
+# takes one back. The contract that matters most is the failure direction:
+# every ambiguity must resolve to deny.
+
+au=$(fixture autonomy)
+cd "$au"
+bash "$S/exec-initiative" new Auto > /dev/null 2>&1
+AIDIR="$au/docs/executor/INIT-0001-auto"
+# `|| true` on the setup transitions: intake is already entered by the
+# seed, so re-entering it is correctly refused. Under `set -e` an expected
+# refusal inside a fixture aborts the suite before any assertion runs.
+for ph in intake discovery architecture design; do
+  bash "$S/exec-initiative" phase INIT-0001 $ph entered >/dev/null 2>&1 || true
+  bash "$S/exec-initiative" phase INIT-0001 $ph skipped "smoke scaffolding" >/dev/null 2>&1 || true
+done
+mkdir -p "$AIDIR/brainstorm/sessions/s1"
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification]\ndecided: A\n---\n\n## Options\n\nx\n' \
+  > "$AIDIR/brainstorm/sessions/s1/session.md"
+bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1
+
+# No policy file: an auto-pass must be refused, never defaulted.
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed with no policy file" \
+  || ok "autonomy: no policy file refuses an auto-pass"
+grep -q 'auto-passed' "$AIDIR/INDEX.md" \
+  && bad "autonomy: a refused auto-pass still recorded" \
+  || ok "autonomy: a refused auto-pass writes nothing"
+
+autonomy_policy() { # enabled mode
+  cat > "$AIDIR/autonomous.md" <<EOF
+---
+kind: autonomous
+initiative: INIT-0001
+enabled: $1
+---
+
+| Phase | Mode | Why |
+|---|---|---|
+| specification | $2 | |
+EOF
+}
+
+autonomy_policy false allow
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed under a disabled policy" \
+  || ok "autonomy: a disabled policy refuses an auto-pass"
+
+autonomy_policy true deny
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed a deny-mode phase" \
+  || ok "autonomy: mode deny refuses an auto-pass"
+[ "$(bash "$S/exec-gate" INIT-0001 specification --policy)" = "INIT-0001 specification: deny" ] \
+  && ok "autonomy: --policy reports the declared mode" \
+  || bad "autonomy: --policy did not report the mode"
+
+# A pick-class phase is one a script cannot decide: bash counts files, it
+# cannot choose between designs. `allow` without a recorded verdict must
+# still refuse, and must say why.
+autonomy_policy true allow
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: a pick-class gate was decided without a verdict" \
+  || ok "autonomy: pick-class without a scored verdict is refused"
+
+mkdir -p "$AIDIR/specs" "$AIDIR/risks" "$AIDIR/verification" "$AIDIR/verdicts"
+printf -- '---\nid: INIT-0001-SPEC-01\ninitiative: INIT-0001\nkind: spec\nstatus: active\ntitle: Smoke spec\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\nspec: null\nrequirements_count: 1\n---\n\n## R01 — A requirement\n\nBody.\n' > "$AIDIR/specs/INIT-0001-SPEC-01-smoke.md"
+printf -- '---\nid: INIT-0001-RISK-01\ninitiative: INIT-0001\nkind: risk\nstatus: active\ntitle: Smoke risk\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\n---\n\nx\n' > "$AIDIR/risks/INIT-0001-RISK-01-smoke.md"
+printf -- '---\nid: INIT-0001-VRFY-01\ninitiative: INIT-0001\nkind: verification\nstatus: active\ntitle: Smoke vrfy\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\nspec: INIT-0001-SPEC-01\ncriteria_count: 1\nevidence_types: [unit]\n---\n\n| V01 | R01 verified by unit test | unit |\n' > "$AIDIR/verification/INIT-0001-VRFY-01-smoke.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\n' > "$AIDIR/verdicts/INIT-0001-SPEC-01-scored-verdict.md"
+
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && ok "autonomy: a pick-class gate with a recorded verdict auto-passes" \
+  || bad "autonomy: a permitted auto-pass was refused"
+# Marker AND date: the marker says no human was involved, the date keeps
+# the row ordered. A date alone is indistinguishable from a human pass.
+grep -qE '^\| specification \| [^|]*\| \*\*auto-passed\*\* [0-9]{4}-[0-9]{2}-[0-9]{2} \|' "$AIDIR/INDEX.md" \
+  && ok "autonomy: the phase log records a typed auto-pass, not a human pass" \
+  || bad "autonomy: the auto-pass marker or date is missing from the phase log"
+[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 planning" ] \
+  && ok "autonomy: exec-step advances past an auto-passed phase" \
+  || bad "autonomy: exec-step did not advance past an auto-passed phase"
+
+# Taking it back. Only a phase that actually finished can be superseded,
+# and superseding reopens it — otherwise a human who rejects an autonomous
+# pass would have to hand-edit the log.
+bash "$S/exec-initiative" phase INIT-0001 specification superseded "the human rejected the design" >/dev/null 2>&1 \
+  && ok "autonomy: an auto-pass can be superseded by a human" \
+  || bad "autonomy: superseding an auto-passed phase was refused"
+grep -qE '^\| specification \| — \| \*\*superseded\*\*' "$AIDIR/INDEX.md" \
+  && ok "autonomy: supersession clears Entered and marks the gate" \
+  || bad "autonomy: supersession did not reopen the phase"
+[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 specification" ] \
+  && ok "autonomy: exec-step re-enters a superseded phase" \
+  || bad "autonomy: exec-step did not re-enter a superseded phase"
+
+bash "$S/exec-initiative" phase INIT-0001 handoff superseded "no such gate" >/dev/null 2>&1 \
+  && bad "autonomy: superseded a phase that never passed" \
+  || ok "autonomy: a never-passed phase cannot be superseded"
+# `planning` has its own brainstorm-entry requirement, so this setup step
+# may legitimately be refused; the assertion below is about the reason
+# note, not about whether the phase could be entered here.
+bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 planning skipped "smoke" >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 planning superseded "" >/dev/null 2>&1 \
+  && bad "autonomy: superseded without stating a reason" \
+  || ok "autonomy: supersession requires a stated reason"
+before=$(cksum < "$AIDIR/INDEX.md")
+# Check-only exits 1 when the gate is not ready — that is the answer, not
+# a suite failure, and the point of the assertion is what it did or did
+# not write on the way out.
+bash "$S/exec-gate" INIT-0001 planning >/dev/null 2>&1 || true
+after=$(cksum < "$AIDIR/INDEX.md")
+case "$after" in
+  "$before") ok "autonomy: check-only mode mutates nothing" ;;
+  *) bad "autonomy: check-only mode wrote to the phase log" ;;
+esac
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
