@@ -7,6 +7,15 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-29
+
+The controller no longer carries the work. The pipeline is two axes of
+script-driven state with dispatched subagents at every step that needs
+judgment, a critique gate on every authoring phase, and a fail-closed path
+for unattended runs. The three defects this closes: only two of eleven
+phases could reject a bad deliverable, upstream drift was structurally
+undetectable, and the pump's "never authors" rule had no mechanism behind it.
+
 ### Added
 - 2026-09-29 — **The thin-controller engine: scripts and subagents own
   the pipeline, the main agent only drives it.** During execution the

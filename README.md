@@ -34,7 +34,7 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v0.5.1 git@github.com:Atri10/executor.git
+git clone --branch v0.6.0 git@github.com:Atri10/executor.git
 ```
 
 ### One-paste install for any LLM agent
@@ -47,7 +47,7 @@ the install:
 Install The Executor skill library for me:
 
 1. Clone https://github.com/Atri10/executor.git into a temp directory
-   (use --branch v0.5.1 for the latest release, or default branch for main).
+   (use --branch v0.6.0 for the latest release, or default branch for main).
 2. Find my agent's skills directory. Candidates, in order — use the first
    that exists, or ask me if none do:
    - ~/.omp/agent/skills/            (omp)
@@ -58,8 +58,10 @@ Install The Executor skill library for me:
 3. Copy every directory from the clone's skills/ folder into that skills
    directory (each is one skill: skills/executor, skills/executor-spec, ...).
 4. Verify: run bash <skills-dir>/executor/scripts/exec-run with no arguments
-   — it must print a usage line and exit non-zero. Then confirm the twelve
-   SKILL.md files exist under the skills directory.
+   — it must print a usage line and exit non-zero. Then confirm every copied
+   skills/<name>/ directory contains a SKILL.md (count the directories, not a
+   remembered number — the skill set grows, and a stale count here fails an
+   install that is actually fine).
 5. Tell me which directory you installed into, and how to invoke the
    router in my harness (usually /skill:executor or just asking for
    "the executor").
@@ -245,6 +247,80 @@ A gate claimed before both ran is not claimed. The same two sections are
 required inside every dispatch template, so a subagent checks its own
 output before returning a status line the controller will trust.
 
+### Every authoring phase passes an independent critique gate
+
+The pipeline has eleven phases. Before this, only **two** of them could
+reject a bad deliverable — `plan-regression` and `review`. `design` and
+`verification` had no artifact gate at all, and architecture and spec ran
+adversarial *self*-critiques whose own skills refused the word critic,
+correctly: one agent grading its own work is not review.
+
+`executor-critique` generalises the plan-regression contract to all nine
+authoring components. Each phase's artifacts are audited as a **set** — the
+defects worth finding live between documents — and the phase cannot be marked
+`passed` until that audit is clean or the human has waived it in writing.
+
+The gate is a script, and it is harder than the stage it generalises from:
+
+- **`verdict: PASS` beside a non-zero `high`/`medium` is refused**, not
+  believed. PASS means zero HIGH and zero MEDIUM, and the check recomputes
+  that from the auditor's own counts.
+- **The three-round cap is enforced by the script.** `audit 04` exits 2
+  with a message. A cap nobody counts is a suggestion, and a suggestion is
+  how a fourth round appears with nobody able to say when the loop started.
+- **A waiver needs both a note in the row and an initiative ruling naming
+  the artifact.** A bare `waived` cell is indistinguishable from a controller
+  self-granting one.
+- **An empty clearance is not a cleared one** — for document components and
+  run-axis components alike.
+
+The controller never clears its own work. `exec-initiative` runs the check on
+the controller's behalf and refuses the phase, and the refusal names what to
+do about it rather than leaving a way around it.
+
+### Upstream drift has a seat
+
+No reviewer prompt in the system ever opened the architecture store. Its
+inputs were the spec, the plan, the ledger, reports, verdicts and the diff —
+so an implementation satisfying every `R-nn` and every `C-nn` while violating
+the ARCH passed **every gate in the system**. Adapters importing each other, an
+ORM row crossing into policy, a seam renamed from its IFCE: there was no point
+at which anything could see it.
+
+Two seats now catch it. The `code` component's check catalog makes the
+architecture, IFCE and design stores *required inputs* of the implementation
+critique, and the final reviewer's prompt takes them as required inputs with an
+architecture-conformance check — where the spec and the architecture disagree,
+that is a finding, and the diff alone cannot say which side is wrong.
+
+### Unattended runs, fail-closed
+
+An initiative can declare which phase gates a human agreed to let go
+unattended:
+
+```markdown
+| Phase | Mode | Why |
+|---|---|---|
+| intake | deny | the charter is the human's to approve |
+| execution | allow | every stage is gated; workers are dispatched, not self-approved |
+```
+
+`exec-gate INIT PHASE --auto` clears a gate only when the policy permits it,
+and **every ambiguity resolves to deny**: no policy file, `enabled: false`, an
+unlisted phase, or a mode spelled wrong. A typo in a table cell must not become
+an unattended phase gate. A pick-class phase (`design`, `specification`) in
+`allow` mode still requires a scored verdict already on disk — a script can
+count files, it cannot choose between designs, so it declines rather than
+guesses.
+
+An auto-pass is recorded as `**auto-passed** <date>`, visibly distinct from a
+human `passed`, and it must clear the same artifact gate a human pass does. A
+human who disagrees overturns it with one command, which reopens the phase:
+
+```bash
+exec-initiative phase INIT-0004 superseded specification "the design was wrong"
+```
+
 ### Decisions: rule, ask, or stop
 
 Inside a phase the workflow does not wait on a human — but it does not
@@ -360,6 +436,91 @@ identity block refuses a ledger that belongs to another plan; live subagent
 identities are recorded so a fix round can *resume* rather than replace.
 Nothing in either store is ever deleted by a skill — pruning is a human
 decision.
+
+## How the engine is put together
+
+### Two axes, one loop
+
+The engine runs two axes over the same machinery, and confusing them is the
+main thing to get right when reading a transcript.
+
+**The phase axis** is the initiative's own lifecycle: intake → discovery →
+architecture → design → specification → planning → plan-regression →
+execution → review → verification → handoff. Its atomic step is
+`exec-step INIT-NNNN`, which prints `PHASE-ENTER` or `PHASE-GATE`. Between
+those two, the phase's `AUTHOR` writes the artifact and the phase's critique
+audits it.
+
+**The plan axis** is what happens inside execution: `exec-step PLAN_FILE`
+prints `DISPATCH`, `REPORT`, `GATE-STAGE`, `REVIVE`, `ADJUDICATE`, `WAIT` or
+`DONE`. Workers run on their own branches; a worker's result reaches run state
+only through `exec-report`, which refuses unless the latest verdict is clean.
+
+The canonical phase order lives in exactly one place — `exec_phases()` in
+`_exec-lib.sh` — and both the validator and the pump fold against it. Two
+hand-maintained copies would let a run advance and refuse in the same turn.
+
+### The controller carries no weight
+
+The controller runs one loop: run `exec-step`, read the single action word it
+prints, do that, go back. It never authors, never judges, never passes a gate.
+The reason is not stylistic — the controller is the least reliable worker in
+the system. It dies, compacts, drifts, and is under pressure at exactly the
+moment a judgment call matters, so the design assumes it will get clever and
+takes away the opportunity.
+
+Every step is therefore one of two things, and the distinction is load-bearing:
+
+- A **dispatch** is intellectual work — authoring, auditing, implementing,
+  reviewing, adjudicating. It goes to a named role with a registered prompt
+  template, and its output is an artifact someone else will read.
+- A **script call** is a transition — `exec-initiative phase … entered`,
+  `exec-workspace`, `exec-branch merge`. It writes state, and no judgment
+  exists anywhere in the path.
+
+The test: *would a subagent reading only its prompt know more than you do right
+now?* If yes, dispatch. If the prompt would be a transcript of the command
+you are about to type, run the command.
+
+### Every dispatch is a registered role with a prompt
+
+There is no ad-hoc dispatch. `references/layout.md` carries a registry of
+roles, and every row names the prompt template that implements it — the
+auditor, the repairer, the re-auditor, the implementer, the reviewers, the
+supervisor, the scouts. The suite checks that every action `exec-step` can
+emit has a decision-table row, and that every registered role's prompt exists
+on disk. Adding an action or a role without wiring it fails the build rather
+than a run.
+
+The prompts themselves carry the dispatch contract: an identity block, a
+self-critique pass, a verification section, and a machine-readable return
+block. They also carry the states a naive agent invents behaviour for — a
+missing upstream artifact, two inputs that contradict, an output file left
+behind by an aborted prior run, a test that fails for a reason outside the
+task's remit. A prompt is the only definition of what a subagent does, so an
+undefined state is an unreviewed behaviour, not a style gap.
+
+### Adding a component is a row, not a fork
+
+The critique engine is the extension point worth knowing about. Which
+artifacts a component owns, where its clearance record lives, and which check
+catalog applies are **one row of data** in `exec_critique_components()`:
+
+```
+component | phase | set_spec | summary_dir | catalog
+```
+
+Adding a twelfth component means adding a row and a catalog section in
+`executor-critique/SKILL.md`. It does not mean writing a script, forking
+`exec-plan-regression`, or teaching the pump a new case. `plans` is the proof:
+it resolves to the pre-existing `plan-regression/` home and reads the same
+`summary.md` the shipped skill writes — one gate with two front doors, not two
+gates that can disagree.
+
+The registry is positional data, so its shape is enforced where it is read:
+`exec-critique` counts each row's fields and refuses a miscount. A row with one
+field too many reads as plausible-but-wrong, and that class of bug once put two
+components' clearance records in a directory literally named `-`.
 
 ## The Two Stores
 
