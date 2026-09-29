@@ -254,14 +254,21 @@ for idir in "$store"/INIT-*/; do
 
   # ---- I1/I2/I3: documents table vs disk -----------------------------------
   if [ -f "$idx" ]; then
-    declare -A LISTED=()
+    # Newline-delimited set, not `declare -A`. Associative arrays are
+    # bash 4.0+, and macOS still ships bash 3.2 as /bin/bash — which is what
+    # a GitHub macOS runner puts on PATH ahead of any newer bash. Under 3.2
+    # `declare -A` is a hard error, and with `set -e` the script dies at this
+    # line, so every check downstream of it silently never ran. The symptom
+    # was sixteen green-looking checks reporting "rejected" on a store that
+    # was fine. A newline-delimited string does the same job in 3.2.
+    LISTED=$'\n'
     while IFS= read -r row; do
       row=${row#\|}; row=${row%\|}          # trim outer pipes
       IFS='|' read -r did _ _ status path <<< "$row"
       did=$(printf '%s' "$did" | xargs)
       [ -n "$did" ] || continue
       case "$did" in INIT-[0-9][0-9][0-9][0-9]-*) ;; *) continue ;; esac
-      LISTED["$did"]=1
+      LISTED+="$did"$'\n'
       path=$(printf '%s' "$path" | xargs)
       path=${path#\`}; path=${path%\`}
       if [ -n "$path" ] && [ ! -f "$idir/$path" ]; then
@@ -282,7 +289,10 @@ for idir in "$store"/INIT-*/; do
       base=$(basename "$f")
       seg=$(printf '%s' "$base" | grep -oE '^INIT-[0-9]{4}-(CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY)-[0-9]+|^INIT-[0-9]{4}-P[0-9]{2}') || seg=""
       [ -n "$seg" ] || { note "unregistered-content file skipped: $rel (no document ID segment)"; continue; }
-      [ -n "${LISTED[$seg]:-}" ] || fail "I1: $rel exists on disk but has no Documents-table row in $init_id INDEX.md"
+      # Membership: the set carries a leading and trailing newline, so a
+      # segment can only match a WHOLE line — INIT-0001-P01 never matches
+      # INIT-0001-P011, which a bare substring test would.
+      [ "${LISTED#*$'\n'"$seg"$'\n'}" != "$LISTED" ] || fail "I1: $rel exists on disk but has no Documents-table row in $init_id INDEX.md"
     done < <(find "$idir" -type f -name '*.md' \
               ! -name 'INDEX.md' ! -name 'README.md' ! -path '*/brainstorm/*' ! -path '*/evidence/*' | sort)
 

@@ -14,9 +14,48 @@ S="$ROOT/skills/executor/scripts"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/executor-tests.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
+
+# A suite that fails on someone else's machine and passes on yours is
+# usually a toolchain difference, not a logic difference. Print what the
+# suite is actually running against, once, so a CI log carries the answer
+# instead of the next person having to ask.
+echo "# toolchain: bash $BASH_VERSION | $(uname -s) $(uname -m) | ${LANG:-unset}"
+echo "#           awk: $(awk --version 2>&1 | head -1 || awk -W version 2>&1 | head -1)"
+echo "#           grep: $(grep --version 2>/dev/null | head -1 || echo 'BSD grep (no --version)')"
+echo "#           sed:  $(sed --version 2>/dev/null | head -1 || echo 'BSD sed (no --version)')"
+echo "#           date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 pass=0; fail=0
 ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
 bad()  { fail=$((fail + 1)); echo "FAIL - $1" >&2; }
+
+# The scripts use `#!/usr/bin/env bash`, which resolves to whatever bash is
+# first on PATH — on a stock macOS that is /bin/bash 3.2, and on a GitHub
+# macOS runner it is exactly the same. So the floor is bash 3.2, not
+# "whatever the author happens to have installed".
+#
+# `declare -A` (bash 4.0) failed there, and because exec-store-check runs
+# under `set -e` the failure killed it at that line: every check after it
+# never ran, and sixteen tests reported a perfectly clean store as
+# "rejected". A construct that is harmless on the author's machine and fatal
+# on the user's is the worst kind there is, and nothing about the failure
+# said so — the tests simply went red. Assert the floor mechanically.
+# Scoped to the scripts the engine EXECUTES. `declare -a` (indexed) is
+# fine in 3.2 — only `declare -A` (associative) needs 4.0 — and matching `-A`
+# rather than `-[aA]` is the difference between a check that works and one
+# that reports a false positive until someone deletes it. The suite's own
+# 3.2 compatibility is not this check's job: the macos-latest matrix job
+# runs it on the stock 3.2 interpreter, which is a stronger check than any
+# grep.
+bash4_constructs() {
+  /usr/bin/grep -rnE 'declare[[:space:]]+-A[[:space:]]|mapfile|readarray|[[:space:]]coproc[[:space:]]' \
+    "$ROOT/skills/executor/scripts" 2>/dev/null \
+    | /usr/bin/grep -vE ':[[:space:]]*#' | cut -d: -f1 | sort -u
+}
+if [ -n "$(bash4_constructs)" ]; then
+  bad "bash 3.2: bash 4.0+ construct in $(bash4_constructs | tr '\n' ' ')"
+else
+  ok "bash 3.2: no bash 4.0+ construct in the shipped scripts"
+fi
 fixture() {
   local d="$WORK/$1"; mkdir -p "$d"
   git -C "$d" init -q -b main
@@ -344,7 +383,7 @@ d=$(fixture stored7)
 cd "$d"
 bash "$S/exec-initiative" new Store > /dev/null 2>&1
 SDIR="$d/docs/executor/INIT-0001-store"
-bash "$S/exec-store-check" >/dev/null 2>&1 || bad "stored7: fresh seeded initiative failed store check"
+sc=$(bash "$S/exec-store-check" 2>&1) || bad "stored7: fresh seeded initiative failed store check: $sc"
 printf -- '\n<!-- leftover guidance -->\n' >> "$SDIR/charter.md"
 if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "stored7: HTML comment in charter passed store check"
@@ -481,7 +520,7 @@ if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "archdia: mermaid nested inside a markdown fence counted"
 fi
 { printf '%s\n' "$ARCH"; printf '```mermaid\nflowchart TD\n  A --> B\n```\n'; } > "$SDIR/architecture/INIT-0001-ARCH-01-main.md"
-bash "$S/exec-store-check" > /dev/null 2>&1 || bad "archdia: arch doc with mermaid rejected"
+sc=$(bash "$S/exec-store-check" 2>&1) || bad "archdia: arch doc with mermaid rejected: $sc"
 ok "D8 requires a real top-level mermaid diagram in architecture"
 
 # 26. Store check D8 spec contract: numbered ### R<nn> headings, a
