@@ -14,6 +14,16 @@ S="$ROOT/skills/executor/scripts"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/executor-tests.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
+
+# A suite that fails on someone else's machine and passes on yours is
+# usually a toolchain difference, not a logic difference. Print what the
+# suite is actually running against, once, so a CI log carries the answer
+# instead of the next person having to ask.
+echo "# toolchain: bash $BASH_VERSION | $(uname -s) $(uname -m) | ${LANG:-unset}"
+echo "#           awk: $(awk --version 2>&1 | head -1 || awk -W version 2>&1 | head -1)"
+echo "#           grep: $(grep --version 2>/dev/null | head -1 || echo 'BSD grep (no --version)')"
+echo "#           sed:  $(sed --version 2>/dev/null | head -1 || echo 'BSD sed (no --version)')"
+echo "#           date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 pass=0; fail=0
 ok()   { pass=$((pass + 1)); echo "ok   - $1"; }
 bad()  { fail=$((fail + 1)); echo "FAIL - $1" >&2; }
@@ -344,7 +354,7 @@ d=$(fixture stored7)
 cd "$d"
 bash "$S/exec-initiative" new Store > /dev/null 2>&1
 SDIR="$d/docs/executor/INIT-0001-store"
-bash "$S/exec-store-check" >/dev/null 2>&1 || bad "stored7: fresh seeded initiative failed store check"
+sc=$(bash "$S/exec-store-check" 2>&1) || bad "stored7: fresh seeded initiative failed store check: $sc"
 printf -- '\n<!-- leftover guidance -->\n' >> "$SDIR/charter.md"
 if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "stored7: HTML comment in charter passed store check"
@@ -481,7 +491,7 @@ if bash "$S/exec-store-check" >/dev/null 2>&1; then
   bad "archdia: mermaid nested inside a markdown fence counted"
 fi
 { printf '%s\n' "$ARCH"; printf '```mermaid\nflowchart TD\n  A --> B\n```\n'; } > "$SDIR/architecture/INIT-0001-ARCH-01-main.md"
-bash "$S/exec-store-check" > /dev/null 2>&1 || bad "archdia: arch doc with mermaid rejected"
+sc=$(bash "$S/exec-store-check" 2>&1) || bad "archdia: arch doc with mermaid rejected: $sc"
 ok "D8 requires a real top-level mermaid diagram in architecture"
 
 # 26. Store check D8 spec contract: numbered ### R<nn> headings, a
