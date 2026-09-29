@@ -17,7 +17,7 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-PHASES="intake discovery architecture design specification planning plan-regression execution review verification handoff"
+PHASES=$(exec_phases)   # canonical order lives in _exec-lib.sh (exec_phases)
 
 # Canonical phase order for transition validation. A phase may
 # only be entered after the previous one passed (or was explicitly

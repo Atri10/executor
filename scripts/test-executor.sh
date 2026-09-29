@@ -1072,6 +1072,181 @@ out=$(bash "$S/exec-store-check" 2>&1 || true)
 echo "$out" | grep -q 'plan-regression' || bad "storep1: execution entered without plan-regression not flagged"
 ok "store-check flags execution entered without plan-regression clearance"
 
+# ---------------------------------------------------------------------
+# Thin-controller engine: exec-step, exec-supervise, exec-report.
+# These assert the contracts the redesign exists to enforce, each of which
+# was a reproduced failure mode — not the implementation's shape.
+
+eng=$(fixture engine)
+mkdir -p "$eng/docs/executor/INIT-0001-x/plans"
+ENGPLAN="$eng/docs/executor/INIT-0001-x/plans/INIT-0001-P01.md"
+cat > "$ENGPLAN" <<'PLANEOF'
+---
+id: INIT-0001-P01
+initiative: INIT-0001
+kind: plan
+title: Engine probe
+status: active
+created_at: 2026-09-12T07:00:00Z
+updated_at: 2026-09-12T07:00:00Z
+spec: INIT-0001-SPEC-01
+---
+
+# Plan
+
+### Task 1: First — `INIT-0001-P01-T01`
+**Depends on:** `none`
+
+### Task 2: Second — `INIT-0001-P01-T02`
+**Depends on:** `INIT-0001-P01-T01`
+PLANEOF
+commit_all "$eng" plan
+cd "$eng"
+WS="$eng/.executor/INIT-0001/P01"
+bash "$S/exec-workspace" "$ENGPLAN" >/dev/null
+
+# Rewrite the dispatch log to a known state. The seed has no Last-Seen
+# column; writing one also proves the readers locate columns by name.
+engrow() { # started outcome
+  cat > "$WS/dispatches.md" <<EOF
+---
+kind: dispatches
+plan: INIT-0001-P01
+created_at: 2026-09-12T07:00:00Z
+updated_at: 2026-09-12T07:00:00Z
+---
+
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
+|---|---|---|---|---|---|---|---|---|
+| INIT-0001-P01-T01 | IMPL-P01-T01 | top | g1 | task/T01 | $1 | $2 | brief.md | $1 |
+EOF
+}
+engledger() { printf '%s\n' "$1" >> "$WS/progress.md"; }
+OLD5=$(TZ=UTC date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d)
+TODAYD=$(date -u +%Y-%m-%d)
+rm -f "$WS/state/.step-stamp"
+
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "DISPATCH INIT-0001-P01-T01"*) ok "step: a fresh run dispatches its first task" ;;
+  *) bad "step: fresh run emitted '$out', expected a DISPATCH of T01" ;;
+esac
+
+engrow "$TODAYD" running
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+[ "$out" = "WAIT" ] && ok "step: a live worker blocks new dispatches" \
+  || bad "step: open row emitted '$out', expected WAIT"
+
+# The failure this whole redesign exists to prevent: a worker that FINISHED
+# but whose row was never closed must be reported, never re-dispatched —
+# a revive over a completed artifact is a duplicate agent on one task.
+printf '# Report: done\n' > "$WS/reports/INIT-0001-P01-T01-report.md"
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "REPORT "*) ok "step: output on disk outranks every staleness clock" ;;
+  *) bad "step: finished worker emitted '$out', expected REPORT" ;;
+esac
+rm -f "$WS/reports/INIT-0001-P01-T01-report.md"
+
+# The ladder must advance and must stop. Attempt counts come from the
+# dispatch log, never a counter file a worker could delete.
+engrow "$OLD5" running
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "REVIVE INIT-0001-P01-T01" ] \
+  && ok "supervise: a first failure resumes the same agent" \
+  || bad "supervise: first failure did not emit REVIVE"
+engrow "$OLD5" revived-rv1
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "REDISPATCH INIT-0001-P01-T01" ] \
+  && ok "supervise: a resumed worker escalates to a fresh agent" \
+  || bad "supervise: second failure did not emit REDISPATCH"
+engrow "$OLD5" revived-rv2
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "ADJUDICATE INIT-0001-P01-T01" ] \
+  && ok "supervise: a spent ladder escalates to adjudication" \
+  || bad "supervise: exhausted ladder did not emit ADJUDICATE"
+
+# gate-on-commit: nothing reaches state unreviewed, and a refusal writes
+# nothing at all (a half-written ledger is worse than an unwritten one).
+engrow "$OLD5" complete
+printf '# Report: built\n' > "$WS/reports/INIT-0001-P01-T01-report.md"
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && bad "report: an unreviewed task was ledgered complete" \
+  || ok "report: an unreviewed task never reaches the ledger"
+
+cat > "$WS/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md" <<'VEOF'
+---
+kind: verdict
+task: INIT-0001-P01-T01
+round: R01
+spec_verdict: NEEDS_FIX
+quality: CHANGES_REQUESTED
+---
+VEOF
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && bad "report: a NEEDS_FIX verdict was committed" \
+  || ok "report: a NEEDS_FIX verdict blocks the commit"
+
+# A later NEEDS_FIX must not be cleared by an earlier clean round.
+cat > "$WS/reviews/verdicts/INIT-0001-P01-T01-R02-verdict.md" <<'VEOF'
+---
+kind: verdict
+task: INIT-0001-P01-T01
+round: R02
+spec_verdict: PASS
+quality: APPROVED
+---
+VEOF
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && ok "report: a clean latest verdict commits and closes the row" \
+  || bad "report: a clean verdict did not commit"
+grep -qE '^\| INIT-0001-P01-T01 \|.*\| complete \|' "$WS/dispatches.md" \
+  && ok "report: commit closes the task's dispatch row" \
+  || bad "report: commit left the dispatch row open"
+
+# A second commit is refused, not duplicated.
+before=$(grep -c 'complete' "$WS/progress.md")
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+[ "$(grep -c 'complete' "$WS/progress.md")" = "$before" ] \
+  && ok "report: a completed task cannot be committed twice" \
+  || bad "report: re-committing duplicated the ledger line"
+
+# The livelock guard: an action the actuators keep refusing must become a
+# recorded adjudication instead of a silent infinite loop.
+rm -f "$WS/state/.step-stamp"
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "ADJUDICATE loop:"*) ok "step: a no-progress loop escalates instead of spinning" ;;
+  *) bad "step: repeated unchanged emits stayed at '$out'" ;;
+esac
+engledger 'INIT-0001-P01-T02: dispatched (branch task/T02, base aaa1111)'
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "ADJUDICATE loop:"*) bad "step: a real state change did not reset the counter" ;;
+  *) ok "step: a real state change resets the no-progress counter" ;;
+esac
+
+# Unsolicited human input is the ingress a pump needs; a stop must be a
+# recorded event with a state change, not a judgment call.
+out=$(bash "$S/exec-ruling" "$ENGPLAN" INIT-0001-P01-T01 "halt" "spec assumption is wrong" "work paused" \
+        --unsolicited "stop everything — the spec assumption is wrong" --stop 2>&1 || true)
+case "$out" in
+  *"STOP INIT-0001-P01:"*) ok "ruling: a stop prints one relayable STOP line" ;;
+  *) bad "ruling: a stop printed no STOP line" ;;
+esac
+grep -q 'stop everything — the spec assumption is wrong' "$WS/rulings.md" \
+  && ok "ruling: unsolicited human words are stored verbatim" \
+  || bad "ruling: the human's words were not stored verbatim"
+grep -q '| INIT-0001-P01 | .*blocked' "$eng/.executor/INDEX.md" \
+  && ok "ruling: a stop blocks the run" \
+  || bad "ruling: a stop did not block the run"
+bash "$S/exec-ruling" "$ENGPLAN" T d w c --stop >/dev/null 2>&1 \
+  && bad "ruling: a bare --stop was accepted" \
+  || ok "ruling: --stop without --unsolicited is refused"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -98,6 +98,22 @@ exec_initiative_dir() {
   echo "$match"
 }
 
+# The same lookup, but printing nothing instead of dying when the
+# initiative does not exist. Callers that merely want to ask "is this run
+# in flight?" need this; exec_initiative_dir's exec_die calls `exit`, and
+# an `exit` inside a command substitution tears down the whole subshell —
+# a `|| true` written alongside it inside the same $( ) never runs, and
+# under `set -e` the caller dies instead of seeing an empty result.
+exec_initiative_dir_opt() {
+  local id=$1 store match
+  store=$(exec_docs_store 2>/dev/null) || return 0
+  [ -d "$store" ] || return 0
+  match=$(find "$store" -maxdepth 1 -type d -name "${id}-*" -print -quit 2>/dev/null) || return 0
+  [ -n "$match" ] || match=$(find "$store" -maxdepth 1 -type d -name "$id" -print -quit 2>/dev/null) || return 0
+  [ -n "$match" ] && echo "$match"
+  return 0
+}
+
 # Ensure the run store exists and is self-ignoring. Writing the .gitignore
 # unconditionally means no subsystem can forget it and no user has to add it
 # by hand — that omission is what made the legacy store pollute git status.
@@ -383,9 +399,10 @@ updated_at: $stamp
 *Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
 *Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
 *Branch is the task branch the agent worked on (task/<TASK-ID>), written by exec-branch task start; a sequential plan leaves it empty.*
+*Last-Seen is the liveness witness exec-step reads: the pump refreshes it each turn and the worker touches state/<TASK-ID>.heartbeat as it works. Started alone is day-granular, which cannot tell a slow worker from a dead one. Absence of the column in an older workspace is tolerated — readers locate it by name and fall back to Started.*
 
-| Task | Role | Model | Agent | Branch | Started | Outcome | Context |
-|---|---|---|---|---|---|---|---|
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
+|---|---|---|---|---|---|---|---|---|
 EOF
 }
 
@@ -693,4 +710,88 @@ exec_frontmatter_has() {
     NR > 1 && /^---[[:space:]]*$/ { exit found ? 0 : 1 }
     $0 ~ ("^" key ":") { found = 1 }
   ' "$file"
+}
+
+# ------------------------------------------------------------------
+# Worker liveness. One implementation, shared by exec-step and
+# exec-supervise: two copies of these thresholds would drift, and a drift
+# between "who decides a worker is dead" and "who acts on it" is exactly
+# the duplicate-dispatch bug the thin-controller redesign exists to kill.
+
+# The witness file a worker touches while it works.
+exec_heartbeat_file() { echo "$1/state/$2.heartbeat"; }
+
+# Touch the witness — a worker calls this between units of work so its
+# liveness is measured by the worker, not by the pump's own cadence. A
+# pump-refreshed heartbeat measures the pump and cannot tell a
+# 50-minute evidence run from a corpse.
+exec_touch_heartbeat() {
+  local dir=$1 task=$2 f
+  mkdir -p "$dir/state" 2>/dev/null || return 1
+  f=$(exec_heartbeat_file "$dir" "$task")
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$f" 2>/dev/null || return 1
+}
+
+# Seconds since the witness was last touched; empty when there is none.
+# Prints the age of a missing file as empty rather than 0 so callers can
+# tell "never beat" from "beat at epoch".
+exec_heartbeat_age() {
+  local dir=$1 task=$2 f mtime now
+  f=$(exec_heartbeat_file "$dir" "$task")
+  [ -f "$f" ] || return 0
+  # mtime, not the file's contents: a worker that truncates and rewrites
+  # the stamp must not reset the clock it is being measured against.
+  mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo "")
+  [ -n "$mtime" ] || return 0
+  now=$(date -u +%s)
+  echo $((now - mtime))
+}
+
+# Liveness of one dispatched task, from the three precedence-ordered
+# signals. Prints exactly one word:
+#
+#   zombie   output is already on disk — the work finished, the pump died
+#            before recording it. NEVER revive: a revive over a completed
+#            artifact is the duplicate-dispatch bug.
+#   alive    beating, or started recently enough to be plausibly working
+#   suspect  stale but inside the grace window — ask, do not replace
+#   dead     no witness and past the grace window
+#
+# $3 = started (YYYY-MM-DD), $4 = last-seen (may be empty).
+exec_row_liveness() {
+  local dir=$1 task=$2 started=$3 lastseen=$4
+  local hb_ttl=${EXEC_HEARTBEAT_TTL:-1800}
+  local suspect_ttl=${EXEC_SUSPECT_TTL:-7200}
+  local dead_ttl=${EXEC_DEAD_TTL:-86400}
+  local age seen seen_epoch age_s
+
+  [ -s "$dir/reports/${task}-report.md" ] && { echo zombie; return 0; }
+
+  age=$(exec_heartbeat_age "$dir" "$task")
+  if [ -n "$age" ]; then
+    [ "$age" -le "$hb_ttl" ]      && { echo alive; return 0; }
+    [ "$age" -le "$suspect_ttl" ] && { echo suspect; return 0; }
+  fi
+
+  seen=${lastseen:-$started}
+  if [ -n "$seen" ]; then
+    seen_epoch=$(date -u -j -f "%Y-%m-%d" "${seen%%T*}" +%s 2>/dev/null \
+              || date -u -d "${seen%%T*}" +%s 2>/dev/null || echo "")
+    if [ -n "$seen_epoch" ]; then
+      age_s=$(( $(date -u +%s) - seen_epoch ))
+      [ "$age_s" -le "$suspect_ttl" ] && { echo alive; return 0; }
+      [ "$age_s" -le "$dead_ttl" ]    && { echo suspect; return 0; }
+    fi
+  fi
+  echo dead
+}
+
+# The canonical phase order, one source for every consumer. It lives here
+# because two readers that disagree about the order produce a run that
+# advances and refuses in the same turn: exec-initiative validates
+# transitions against it, and exec-step folds the phase table against it to
+# emit the next action. A second hand-maintained copy is exactly the drift
+# that makes a phase log lie.
+exec_phases() {
+  echo "intake discovery architecture design specification planning plan-regression execution review verification handoff"
 }

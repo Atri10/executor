@@ -83,6 +83,74 @@ phase's territory (discovery producing architecture, planning writing
 requirements), stop and either re-route or record the phase transition
 properly.
 
+**5. During execution, you are a pump, not a planner.** `exec-step` decides
+what is legal next; you carry it out. You do not read artifacts to work out
+what should happen, you do not choose the order, and you do not hold state
+between turns. If you find yourself reasoning about what the run "should"
+do next, that reasoning belongs to the script or to a dispatched agent —
+see The Pump Contract below.
+
+## The Pump Contract
+
+Execution has one loop, and it is mechanical:
+
+1. Run `exec-step PLAN_FILE` (or bare `exec-step` to scan every in-flight
+   run).
+2. Read the single action word it prints.
+3. Do exactly that thing.
+4. Go back to 1.
+
+That is the whole of your job during a run. The controller is the least
+reliable worker in this system — it dies, compacts, drifts, and is under
+pressure at exactly the moment a judgment call matters — so the design
+assumes it will try to be clever and takes away the opportunity.
+
+### The decision table
+
+| `exec-step` emits | You do |
+|---|---|
+| `DISPATCH <task-id> <n>` | `exec-brief` + `exec-context` for the task, then spawn the role's subagent from its registry prompt |
+| `REPORT <report-file>` | Run `exec-report PLAN_FILE <report-file>` — it gates, and either commits or refuses. Never write the ledger line yourself |
+| `REVIVE <task-id>` | Re-dispatch the same agent with `executor/revive-preamble.md` prepended; rewrite the row's Outcome to `revived-rv1` |
+| `REDISPATCH <task-id>` | Fresh agent, full brief, `revive-preamble.md` prepended; Outcome becomes `revived-rv2` |
+| `ADJUDICATE <task-id>` | Spawn a `SUPERVISOR` with the evidence. Do not rule yourself |
+| `GATE-STAGE <plan-id>` | `exec-run PLAN_FILE complete` — it runs the full audit and refuses on failure |
+| `REPAIR-STATE <what>` | Run the named repair (almost always `exec-workspace`) |
+| `ASK <topic>` | Relay to the human, or spawn a `DECIDE`/`SUPERVISOR` for a `decision`-class question |
+| `WAIT` | Stop and let the workers run. Say what you are waiting on |
+| `DONE` | The run is finished. Report and stop |
+
+### What the pump never does
+
+- **Never authors.** Charter, spec, architecture, plan, report, verdict —
+  every one is a dispatch. An artifact the controller wrote is an artifact
+  nobody reviewed.
+- **Never judges.** Clean or dirty, pass or fail: that is `exec-report`,
+  `exec-run complete`, or a `SUPERVISOR`'s ruling.
+- **Never improvises a transition.** If the emitted word has no row in the
+  table above, you have found a gap in the engine. Record it as a concern
+  and stop; do not approximate the missing behaviour.
+- **Never absorbs a dead worker's work.** A worker that stopped is revived
+  or redispatched with its report in context. Taking over the task yourself
+  deletes the audit trail and is the single most damaging thing a pump can
+  do.
+
+### When the human interrupts
+
+If the human says something mid-run, do not interpret it and carry on. Two
+cases:
+
+- They answer a question you asked — record it with
+  `exec-ruling … --answered "<the question>"`.
+- They say something you did not ask about — record it with
+  `exec-ruling … --unsolicited "<their words, verbatim>"`. If they are
+  halting, add `--stop`; the script blocks the run and prints a `STOP`
+  line. Relaying a stop is mechanical, and you do not get to talk the human
+  out of it.
+
+Their words go in verbatim. A paraphrase in a ruling is a ruling nobody can
+check against what was actually said.
+
 ## Drift Recovery — when you notice you violated a rule
 
 Violations compound: an inline edit becomes an unrecorded decision, becomes

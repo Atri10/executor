@@ -8,6 +8,50 @@ project is tagged; between releases, entries are dated and `main` moves.
 ## [Unreleased]
 
 ### Added
+- 2026-09-29 — **The thin-controller engine: scripts and subagents own
+  the pipeline, the main agent only drives it.** During execution the
+  controller's whole job is now: run `exec-step`, do the one action it
+  prints, repeat. Four new scripts carry the mechanical truth:
+
+  - `exec-step` — folds a plan run (or an initiative's phase log, or
+    every in-flight run) and emits exactly one typed action:
+    `DISPATCH`, `REPORT`, `REVIVE`, `REDISPATCH`, `ADJUDICATE`,
+    `GATE-STAGE`, `REPAIR-STATE`, `PHASE-ENTER`, `PHASE-GATE`, `ASK`,
+    `WAIT`, `DONE`. It never writes state and never improvises. Every
+    emit is stamped; an action emitted repeatedly with no state change
+    escalates to `ADJUDICATE` instead of looping forever.
+  - `exec-supervise` — owns worker liveness and the revive ladder
+    (`REVIVE` → `REDISPATCH` → `ADJUDICATE`), counted from the dispatch
+    log itself rather than a counter file a worker could delete.
+  - `exec-report` — gate-on-commit. The only path a worker's result
+    takes into run state: nothing reaches the ledger without a clean
+    latest-round verdict, and a refusal writes nothing at all.
+  - `exec-step` and `exec-supervise` share one liveness implementation
+    (`exec_row_liveness` in `_exec-lib.sh`): output presence outranks
+    the worker heartbeat, which outranks row age, so a finished worker
+    is never re-dispatched and a slow one is never declared dead.
+
+  Four new dispatch roles, registered in `references/layout.md`:
+  `AUTHOR` (authors a phase artifact the controller will later gate),
+  `DECIDE` (answers a decision-class question), `SUPERVISOR` (the only
+  role permitted to classify human prose or adjudicate a spent lane),
+  and a `revive-preamble.md` fragment prepended to a re-dispatched
+  worker so it verifies on-disk state before overwriting it.
+
+  `skills/executor/SKILL.md` gains a **Pump Contract**: the decision
+  table mapping each action word to its actuator, what a pump never does
+  (author, judge, improvise a transition, absorb a dead worker's work),
+  and how to handle a human interrupting mid-run.
+
+- 2026-09-29 — **Ingress for unsolicited human input.** A human who says
+  "stop everything" or "actually, do it this way" between two tasks had
+  no mechanical path to be obeyed, which left the controller to
+  improvise — the exact unenforced-judgment failure the engine exists to
+  remove. `exec-ruling` gains `--unsolicited "<verbatim>"`, which stores
+  the human's words unparaphrased and marks the ruling as unsolicited
+  rather than asked-and-answered; `--stop` additionally blocks the run
+  and prints a single relayable `STOP` line. Mutually exclusive with
+  `--answered`, in either argument order.
 - 2026-09-28 — **A dispatch registry and a prompt per dispatched role.**
   `references/layout.md` gains a Dispatch registry: every role that
   spawns a subagent (implementer, task reviewer, re-reviewer, final
@@ -37,6 +81,14 @@ project is tagged; between releases, entries are dated and `main` moves.
   allocated by the script and its downstream phase is machine-readable.
 
 ### Changed
+- 2026-09-29 — The dispatch log schema gains a **`Last-Seen`** column.
+  `Started` is day-granular and cannot distinguish a 50-minute evidence
+  run from a dead worker. Readers locate columns by header name, so
+  workspaces seeded before the column existed still parse.
+- 2026-09-29 — The canonical phase order moves to `exec_phases()` in
+  `_exec-lib.sh`. `exec-initiative` validates transitions against it and
+  `exec-step` folds the phase log against it; two hand-maintained copies
+  would let a run advance and refuse in the same turn.
 - 2026-09-28 — **`executor-brainstorm` redesigned around full-feature
   design.** A session may start before any initiative exists (the dossier
   seeds `exec-initiative new`), and fans out to independent concept

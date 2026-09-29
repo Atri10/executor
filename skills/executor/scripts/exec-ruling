@@ -20,10 +20,23 @@
 #   --answered marks the ruling as human-answered mid-run (the ask contract):
 #   the question is recorded beside the decision so the ruling is not a
 #   silent controller pick.
+#
+#   --unsolicited "<verbatim human words>" records input the human offered
+#   WITHOUT being asked — the "actually, do it this way" that arrives
+#   between two tasks, or a correction of a ruling already made. The words
+#   are stored verbatim and never paraphrased into the decision field, so
+#   what the human actually said is recoverable after the fact.
+#
+#   --stop, with --unsolicited, additionally halts the run: the plan's
+#   registry row goes to `blocked` and the script prints a `STOP` line for
+#   the pump to relay. A stop is the one human input a pump must never
+#   reinterpret — the ingress verb exists so that halting is a mechanical
+#   consequence of a recorded event rather than a judgment call made under
+#   pressure by the agent least able to afford it.
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-[ $# -ge 5 ] && [ $# -le 7 ] || exec_die 'usage: exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>" [--answered "<question>"]'
+[ $# -ge 5 ] || exec_die 'usage: exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost if wrong>" [--answered "<q>" | --unsolicited "<verbatim>" [--stop]]'
 
 plan=$1
 task_id=$2
@@ -31,10 +44,28 @@ decision=$3
 why=$4
 cost=$5
 question=""
-if [ $# -ge 6 ]; then
-  [ "$6" = "--answered" ] || exec_die "unknown flag: $6 (expected --answered \"<question>\")"
-  [ $# -eq 7 ] || exec_die "--answered requires the question text: --answered \"<question>\""
-  question=$7
+verbatim=""
+stop_run=0
+shift 5
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --answered)
+      [ $# -ge 2 ] || exec_die "--answered requires the question text"
+      question=$2; shift 2 ;;
+    --unsolicited)
+      [ $# -ge 2 ] || exec_die "--unsolicited requires the verbatim human words"
+      verbatim=$2; shift 2 ;;
+    --stop)
+      [ -n "$verbatim" ] || exec_die "--stop only makes sense with --unsolicited — a stop is the human halting a run, not a controller decision"
+      stop_run=1; shift ;;
+    *) exec_die "unknown argument: $1" ;;
+  esac
+done
+
+# Checked after the loop, not inside it: flag order is the caller's choice,
+# and an in-loop guard only fires for one of the two orderings.
+if [ -n "$question" ] && [ -n "$verbatim" ]; then
+  exec_die "--answered and --unsolicited are mutually exclusive — an ask is answered, unsolicited input was not"
 fi
 
 [ -f "$plan" ] || exec_die "no such plan file: $plan"
@@ -65,6 +96,18 @@ store_lock "$(dirname "$rulings_file")"
     echo "**Answered by the human:** yes — decision below is theirs, recorded as a ruling"
     echo
   fi
+  if [ -n "$verbatim" ]; then
+    echo "**Unsolicited human input (mid-run, not asked for):**"
+    echo
+    echo "> $verbatim"
+    echo
+    if [ "$stop_run" = 1 ]; then
+      echo "**Disposition:** STOP — the human halted this run. Work stops at the next boundary; nothing already committed is unwound."
+    else
+      echo "**Disposition:** recorded and applied from here on."
+    fi
+    echo
+  fi
   echo "**Decided:** $decision"
   echo
   echo "**Why:** $why"
@@ -72,6 +115,14 @@ store_lock "$(dirname "$rulings_file")"
   echo "**Cost if wrong:** $cost"
 } >> "$rulings_file"
 store_unlock "$(dirname "$rulings_file")"
+
+# A stop is mechanical: the registry row goes to `blocked` and the pump
+# gets one line to relay. Nothing here decides whether the human was right
+# to stop — only that stopping is a recorded event with a state change,
+# not something the controller may talk itself out of.
+if [ "$stop_run" = 1 ] && [ -n "$plan_id" ]; then
+  "$(cd "$(dirname "$0")" && pwd)/exec-run" "$plan" blocked >/dev/null 2>&1 || true
+fi
 
 
 # 2. Mirror into .local/decisions/ using that store's sequence
@@ -117,6 +168,9 @@ review_after: null
 ${question:+**Question asked:** $question
 
 }
+${verbatim:+**Unsolicited human input (verbatim, not asked for):** $verbatim
+
+}
 **Statement:** $decision
 
 **Why it matters:** $why
@@ -135,3 +189,11 @@ store_unlock "$ldir"
 
 echo "$rulings_file"
 echo "$ldir/$fname"
+
+# The pump's contract is one machine-readable line per call. A stop is the
+# one outcome the controller must relay rather than interpret.
+
+# `&&` on the final line would make every non-stopping ruling exit 1, which
+# any caller checking $? reads as "the ruling failed".
+[ "$stop_run" = 1 ] && echo "STOP $plan_id: halted by the human — see $rulings_file"
+exit 0

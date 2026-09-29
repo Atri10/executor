@@ -306,6 +306,10 @@ every `*-prompt.md` file must be named here.
 | `SCOUT` — prior-art scout | executor-brainstorm | `SCOUT-BRN01` | `executor-brainstorm/prior-art-scout-prompt.md` | `<session>/dispatches.md` |
 | `EXPLORE` — concept explorer | executor-brainstorm | `EXPLORE-BRN01-A` (one letter per concept) | `executor-brainstorm/concept-explorer-prompt.md` | `<session>/dispatches.md` |
 | `CRITIC` — design critic | executor-brainstorm | `CRITIC-BRN01-R01` | `executor-brainstorm/design-critic-prompt.md` | `<session>/dispatches.md` |
+| `AUTHOR` — phase artifact author | executor (controller dispatches; never writes the artifact itself) | `AUTHOR-<phase>` | `executor/author-prompt.md` | `<initiative dir>/dispatches.md` |
+| `DECIDE` — decision answerer | executor | `DECIDE-<scope>` | `executor/decide-prompt.md` | `<workspace>/rulings.md` |
+| `SUPERVISOR` — per-event adjudicator | executor | `SUPERVISOR-<scope>` | `executor/supervisor-prompt.md` | `<workspace>/rulings.md` |
+| *(preamble, not a role)* — revive/redispatch instructions | executor, prepended to a re-dispatched worker | worker keeps its own identity | `executor/revive-preamble.md` | `<workspace>/dispatches.md` (ladder rung only) |
 
 The grammar: `<ROLE>-<scope>[-<qualifier>][-R<nn>]`. The scope is the plan
 segment (`P01`) for execution, review, verification, and plan regression;
@@ -332,6 +336,10 @@ Never hand-build a path. Use the scripts:
 | Review diff for a task or the branch | `../scripts/exec-review-package PLAN_FILE TASK BASE HEAD [ROUND]` (TASK = task number, or the literal `final`; ROUND defaults to `01`) |
 | Secret scan before handoff | `../scripts/exec-scan-secrets [PATH]` |
 | Plan-set regression artifacts | `../scripts/exec-plan-regression PLAN_FILE dir\|audit\|fix\|check\|init` |
+| **The pump loop — one action per turn** | `../scripts/exec-step PLAN_FILE` (or `../scripts/exec-step INIT-NNNN`, or bare to scan every in-flight run) |
+| Worker liveness and the revive ladder | `../scripts/exec-supervise PLAN_FILE [--all]` |
+| Commit a worker's result through its gate | `../scripts/exec-report PLAN_FILE REPORT_FILE [BASE_SHA] [HEAD_SHA]` |
+| Record a ruling, an unsolicited correction, or a stop | `../scripts/exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost>" [--answered "<q>" \| --unsolicited "<verbatim>" [--stop]]` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is
