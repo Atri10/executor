@@ -1200,6 +1200,31 @@ out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
 [ "$out" = "WAIT" ] && ok "step: a live worker blocks new dispatches" \
   || bad "step: open row emitted '$out', expected WAIT"
 
+# Timestamp parsing must be platform-independent. It was not: BSD's
+# `date -j -f "%Y-%m-%d" <date>` ignores the parsed date and returns roughly
+# now, while GNU's `-d` parses it — so the same dispatch row read "alive" on
+# macOS and "dead" on Ubuntu, and only the Linux run ever failed. These
+# assertions are about the SEMANTICS, so they hold on any host and any
+# timezone rather than pinning one machine's clock.
+parse=$(bash -c '. "$1/_exec-lib.sh"; exec_timestamp_epoch "$2"' _ "$S" "$TODAYD")
+now=$(date -u +%s)
+[ -n "$parse" ] && [ $(( now - parse )) -le 86400 ] \
+  && ok "timestamp: a day-granular value reads as seen within its own day" \
+  || bad "timestamp: today parsed to '$parse', more than a day from now ($now) — a bare date must anchor to the END of its day, not the start"
+
+stamp="2026-09-29T07:33:51Z"
+e1=$(bash -c '. "$1/_exec-lib.sh"; exec_timestamp_epoch "$2"' _ "$S" "$stamp")
+back=$(date -u -r "$e1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$e1" +%Y-%m-%dT%H:%M:%SZ)
+[ "$back" = "$stamp" ] \
+  && ok "timestamp: a full ISO-Z value round-trips unchanged" \
+  || bad "timestamp: '$stamp' parsed to $e1 and back as '$back' — parsing must be UTC on every platform"
+
+old="2026-09-24T07:33:51Z"
+eo=$(bash -c '. "$1/_exec-lib.sh"; exec_timestamp_epoch "$2"' _ "$S" "$old")
+[ -n "$eo" ] && [ "$eo" -lt "$e1" ] \
+  && ok "timestamp: an older witness compares strictly older" \
+  || bad "timestamp: '$old' ($eo) did not compare before '$stamp' ($e1)"
+
 # The failure this whole redesign exists to prevent: a worker that FINISHED
 # but whose row was never closed must be reported, never re-dispatched —
 # a revive over a completed artifact is a duplicate agent on one task.
@@ -1609,17 +1634,28 @@ esac
 # The critique registry is positional data. A row with the wrong field
 # count resolves to a plausible-but-wrong path, so the shape is enforced
 # where it is read rather than trusted.
-badrows=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | awk -F"|" "NF != 5 { print \$1 }"' _ "$S")
-[ -z "$badrows" ] \
-  && ok "subagent: every critique registry row has 5 fields" \
-  || bad "subagent: critique registry row(s) with wrong field count: $badrows"
+# Both of these read the registry through a sub-shell, so BOTH must fail
+# loudly when the sub-shell dies. An earlier version passed `_ "$S"` to one
+# and not the other: the second resolved to "/_exec-lib.sh", died, returned
+# an empty string, and `[ -z "" ]` reported the check as PASSED. A gate that
+# reports success when it never ran is the worst thing a test suite can
+# contain — it is a false green, invisible precisely because the suite is
+# green.
+if ! badrows=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | awk -F"|" "NF != 5 { print \$1 }"' _ "$S"); then
+  bad "subagent: could not read the critique registry to check row shape"
+elif [ -n "$badrows" ]; then
+  bad "subagent: critique registry row(s) with wrong field count: $badrows"
+else
+  ok "subagent: every critique registry row has 5 fields"
+fi
 
-# Two components sharing a summary_dir would land in one directory and
-# let one component's clearance satisfy the other's gate.
-dups=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | cut -d"|" -f4 | sort | uniq -d')
-[ -z "$dups" ] \
-  && ok "subagent: no two critique components share a clearance dir" \
-  || bad "subagent: critique components share a clearance dir: $dups"
+if ! dups=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | cut -d"|" -f4 | sort | uniq -d' _ "$S"); then
+  bad "subagent: could not read the critique registry to check for shared clearance dirs"
+elif [ -n "$dups" ]; then
+  bad "subagent: critique components share a clearance dir: $dups"
+else
+  ok "subagent: no two critique components share a clearance dir"
+fi
 
 echo
 echo "$pass passed, $fail failed"

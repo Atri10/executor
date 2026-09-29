@@ -803,8 +803,37 @@ exec_heartbeat_age() {
 #            artifact is the duplicate-dispatch bug.
 #   alive    beating, or started recently enough to be plausibly working
 #   suspect  stale but inside the grace window — ask, do not replace
-#   dead     no witness and past the grace window
 #
+# Parse an ISO-ish timestamp to a UTC epoch, identically on BSD and GNU.
+#
+# Two things were wrong before this existed, and both were invisible on
+# macOS while CI saw only the symptom:
+#
+#  1. `date -j -f "%Y-%m-%d" <date>` on BSD silently IGNORES the parsed date
+#     and returns roughly now, so a day-old row read as seconds old. GNU's
+#     `-d` parses the date correctly. The same dispatch row was therefore
+#     "alive" in one run and "dead" in the other.
+#  2. A day-granular value anchored at 00:00:00 makes a worker seen at 00:01
+#     and checked at 23:59 look nine hours stale, past the suspect window.
+#     The schema says a day-granular witness "cannot tell a slow worker from
+#     a dead one" — and a false DEAD verdict is the expensive error here,
+#     because it burns a revive rung and replaces an agent that still holds
+#     its context. So a bare date anchors to the END of its day: today's date
+#     is fresh, yesterday's is roughly a day old.
+#
+# Both platforms get a fully-specified UTC string, so neither has to guess a
+# default time, and neither returns "now" for a date it did not read.
+exec_timestamp_epoch() { # 2026-09-29 | 2026-09-29T07:33:51Z -> epoch, or empty
+  local ts=$1 dp tp
+  case "$ts" in
+    *T*) dp=${ts%%T*}; tp=${ts#*T}; tp=${tp%Z*}; tp=${tp%%.*} ;;
+    *)  dp=$ts; tp="23:59:59" ;;
+  esac
+  [ -n "$dp" ] && [ -n "$tp" ] || return 0
+  date -u -j -f "%Y-%m-%d %H:%M:%S" "$dp $tp" +%s 2>/dev/null \
+    || date -u -d "$dp $tp" +%s 2>/dev/null || true
+}
+
 # $3 = started (YYYY-MM-DD), $4 = last-seen (may be empty).
 exec_row_liveness() {
   local dir=$1 task=$2 started=$3 lastseen=$4
@@ -823,10 +852,15 @@ exec_row_liveness() {
 
   seen=${lastseen:-$started}
   if [ -n "$seen" ]; then
-    seen_epoch=$(date -u -j -f "%Y-%m-%d" "${seen%%T*}" +%s 2>/dev/null \
-              || date -u -d "${seen%%T*}" +%s 2>/dev/null || echo "")
+    seen_epoch=$(exec_timestamp_epoch "$seen")
     if [ -n "$seen_epoch" ]; then
       age_s=$(( $(date -u +%s) - seen_epoch ))
+      # A day-granular witness anchors to 23:59:59, which is still ahead of
+      # now on the day it is read. Clamp: the value cannot mean "seen in the
+      # future", and a negative age reaching a caller that compares it
+      # against a threshold is the same class of surprise as the platform
+      # divergence this replaced.
+      [ "$age_s" -lt 0 ] && age_s=0
       [ "$age_s" -le "$suspect_ttl" ] && { echo alive; return 0; }
       [ "$age_s" -le "$dead_ttl" ]    && { echo suspect; return 0; }
     fi

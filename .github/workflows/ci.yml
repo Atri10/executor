@@ -62,8 +62,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   script-smoke:
-    name: Script smoke (syntax, gates, lifecycle fixture)
-    runs-on: ubuntu-latest
+    name: Script smoke (${{ matrix.os }})
+    # Both platforms, always. The scripts ship to users on macOS and Linux,
+    # and the two awk implementations disagree: mawk (Debian/Ubuntu) is
+    # byte-oriented, BSD awk is character-oriented, and a multibyte bracket
+    # expression means two different things to them. The same class also
+    # bit `date`: BSD's `date -j -f` ignores the date it was handed, so a
+    # dispatch row read "alive" on macOS and "dead" on Linux. A Linux-only
+    # job catches that only if the author is on Linux; a macOS-only one
+    # never would have. Both is the only arrangement that cannot miss.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Every script parses

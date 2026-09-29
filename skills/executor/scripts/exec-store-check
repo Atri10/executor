@@ -96,8 +96,16 @@ fm_iso_ok() {
 # UTC seconds since epoch for an ISO-8601 Z timestamp (GNU/BSD date).
 # Callers only invoke this after fm_iso_ok, so a parse failure here is a
 # real error, not a silent 0.
+#
+# `-u` on BOTH branches, not just the GNU one. BSD's `date -j -f` parses in
+# LOCAL time unless told otherwise, so the two platforms disagreed by the
+# machine's UTC offset — 5.5 hours on a IST host — for the same timestamp.
+# Both call sites currently compare two values from this function, so the
+# error cancelled out; nothing is broken today. It is a trap for the next
+# caller who compares the result against an absolute threshold, and a
+# one-character fix now is cheaper than that bug later.
 fm_epoch() {
-  date -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
+  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
     || date -u -d "$1" +%s 2>/dev/null
 }
 

@@ -17,20 +17,8 @@ phases could reject a bad deliverable, upstream drift was structurally
 undetectable, and the pump's "never authors" rule had no mechanism behind it.
 
 
-### Fixed
-- 2026-09-29 — **CI's plan-lint control had gone stale, and its negative
-  case had gone vacuous.** The positive control was a six-line stub written
-  when the linter only checked store paths; when the task-body contract
-  landed (`Implements`, `Depends on`, `Interfaces`, `Requirements`, checkbox
-  steps, `Run`/`Expected`), the stub stopped satisfying them and the job
-  began failing on its own control. The negative case was worse: written as
-  an independent literal, it failed for seven unrelated reasons, so it would
-  have passed with the store-path contract deleted outright — a test that
-  looks green while testing nothing. The negative case is now derived from
-  the positive by a single `sed` line, and asserted to produce exactly one
-  violation naming that contract. Both directions are verified: neutering the
-  store-path check fails the step loudly, and introducing a second violation
-  is rejected as vacuous.
+
+### Added
 - 2026-09-29 — **The thin-controller engine: scripts and subagents own
   the pipeline, the main agent only drives it.** During execution the
   controller's whole job is now: run `exec-step`, do the one action it
@@ -102,6 +90,66 @@ undetectable, and the pump's "never authors" rule had no mechanism behind it.
 - 2026-09-28 — **`exec-id BRN` allocation** and `brainstorm` frontmatter
   kinds (`mode: design | decision`, `feeds:`), so a session ID is
   allocated by the script and its downstream phase is machine-readable.
+
+
+### Fixed
+- 2026-09-29 — **CI's plan-lint control had gone stale, and its negative
+  case had gone vacuous.** The positive control was a six-line stub written
+  when the linter only checked store paths; when the task-body contract
+  landed (`Implements`, `Depends on`, `Interfaces`, `Requirements`, checkbox
+  steps, `Run`/`Expected`), the stub stopped satisfying them and the job
+  began failing on its own control. The negative case was worse: written as
+  an independent literal, it failed for seven unrelated reasons, so it would
+  have passed with the store-path contract deleted outright — a test that
+  looks green while testing nothing. The negative case is now derived from
+  the positive by a single `sed` line, and asserted to produce exactly one
+  violation naming that contract. Both directions are verified: neutering the
+  store-path check fails the step loudly, and introducing a second violation
+  is rejected as vacuous.
+
+- 2026-09-29 — **Three cross-platform defects, all invisible on macOS and
+  all caught only by running the suite on Linux.** The scripts ship to users
+  on both, and two implementations of `awk` and `date` disagree in ways that
+  changed behaviour rather than failing loudly:
+
+  - **Worker liveness read differently per platform.** `date -j -f
+    "%Y-%m-%d" <date>` on BSD *ignores* the date it was handed and returns
+    roughly now, while GNU's `-d` parses it. The same dispatch row was
+    therefore "alive" in a macOS run and "dead" an hour later on Ubuntu —
+    a false DEAD verdict burns a revive rung and replaces an agent still
+    holding its context. Replaced with `exec_timestamp_epoch`, which gives
+    both platforms a fully-specified UTC string. A day-granular witness now
+    anchors to the END of its day, because the schema says such a value
+    "cannot tell a slow worker from a dead one", and negative ages clamp to
+    zero.
+  - **`validate-skills` rejected ordinary prose on Linux.** The box-drawing
+    check used a bracket expression containing multibyte characters. mawk —
+    the default awk on Debian and Ubuntu — is byte-oriented, so the set
+    degenerated into individual BYTES and an em-dash in prose matched. The
+    validator passed on macOS and failed on every Linux runner: the platform
+    nobody develops on was the only one reporting the problem. Rewritten as
+    explicit alternation, where byte and character matching agree.
+  - **`exec-store-check` parsed timestamps in local time on macOS.** BSD's
+    `date -j -f` needs `-u` to read UTC; the GNU branch already had it. Both
+    call sites compare two values from the same function so the offset
+    cancelled, and nothing was broken today — but it is a trap for the first
+    caller who compares the result against an absolute threshold, and a
+    one-character fix is cheaper than that bug later.
+
+  A fourth fix is in the test harness itself: the shared-clearance-dir check
+  passed `_ "$S"` to one sub-shell and not the other, so the second resolved
+  to `/_exec-lib.sh`, died, returned empty, and `[ -z ... ]` reported it as
+  PASSED. A gate that reports success when it never ran is the most dangerous
+  thing a suite can contain, because it is a false green that is invisible
+  precisely while the suite is green. Both registry checks now fail loudly if
+  the sub-shell cannot read the registry.
+
+  `script-smoke` now runs on a `[ubuntu-latest, macos-latest]` matrix. A
+  Linux-only job catches these only when the author is on Linux; a macOS-only
+  one never would have. Three assertions pin the parser's semantics — a
+  day-granular value reads within its own day, a full ISO-Z value round-trips
+  unchanged, and an older witness compares strictly older — so the property
+   holds on any host and in any timezone rather than on one machine's clock.
 
 ### Changed
 - 2026-09-29 — The dispatch log schema gains a **`Last-Seen`** column.

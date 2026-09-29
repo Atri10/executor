@@ -148,7 +148,19 @@ while IFS= read -r -d '' f; do
     {
       line = $0
       gsub(/`[^`]*`/, "", line)
-      if (line ~ /[├└│┌┐┘┬┴┼╭╮╯╰═║╔╗╚╝]/) {
+      # Alternation, NOT a bracket expression. mawk — the default awk on
+      # Ubuntu and Debian — is byte-oriented rather than character-oriented,
+      # so /[├└│┌…]/ does not mean "any of these characters": the multi-byte
+      # sequence degenerates into a set of individual BYTES, and any line
+      # containing ordinary UTF-8 whose bytes overlap one of them matches.
+      # An em-dash in prose was enough to fail the whole run. The validator
+      # passed on macOS and failed on every Linux runner, which is the worst
+      # split to have — the platform nobody develops on is the one that
+      # reports the problem. Written as explicit alternation each
+      # alternative is the full byte sequence of one character, so byte
+      # matching and character matching agree and both awks reject the
+      # same lines.
+      if (line ~ /├|└|│|┌|┐|┘|┬|┴|┼|╭|╮|╯|╰|═|║|╔|╗|╚|╝/) {
         printf "FAIL %s:%d: box-drawing character — draw it as a mermaid diagram or a table\n", file, NR
         bad = 1
       }
