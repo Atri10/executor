@@ -119,6 +119,43 @@ project is tagged; between releases, entries are dated and `main` moves.
   `code` component's critique catalog, and `final-reviewer-prompt.md`,
   which takes the architecture, IFCE and design stores as required inputs
   and adds an architecture-conformance check to what it reviews.
+- 2026-09-29 — **The pump now actually dispatches the author.** The pump
+  declared "Never authors … every one is a dispatch" while its `PHASE-ENTER`
+  decision-table row only said to write the Entered cell — so `AUTHOR-<phase>`
+  was a registered role that nothing ever dispatched, and the phase axis had a
+  hole exactly where the controller was supposed to carry no weight. The row
+  now dispatches the phase's `AUTHOR`, the phase-axis loop is written out, and
+  `AUTHOR` covers `verification` and `handoff` alongside the six phases it
+  already had.
+
+  The `REPAIR-STATE` action is deliberately left as a script call rather than
+  given a prompt, and SKILL.md now says why: the controller is the thing that
+  drifted the store, so it is the thing that repairs it, and a subagent reading
+  only a prompt would know less than the controller does at that moment.
+
+  Every dispatch prompt gains the edge cases it was silently leaving to
+  invention — a prompt is the only definition of what a subagent does, so an
+  undefined state is an unreviewed behaviour. Measured before: one prompt in
+  seventeen had `## Preconditions`, none had `## When You Cannot Proceed`, none
+  handled an output file left behind by an aborted prior run, and three of the
+  new `executor-critique` prompts lacked the dispatch ban the rest carry.
+
+  Two defects worth calling out. `component-reauditor-prompt.md` hardcoded
+  `R01`/`R02` throughout while its header claimed `R02+`, so a round `R03`
+  dispatch would have written R03's findings into R02's file and re-verdicted
+  R01's — the loop would have reported progress it never made. Every
+  round-bearing value is now a placeholder. And `design-critic-prompt.md`
+  required a ranking and a `RANKING:` return field while stating "you do not
+  pick the winner", pre-empting the human's choice with an unreviewable
+  judgment; it now reports what cuts each way instead of ordering the options.
+
+  A new test reads the action vocabulary out of `exec-step` and the role
+  registry out of `layout.md` rather than a hand-kept list, and fails when an
+  action has no decision-table row, a role has no prompt on disk, a critique
+  registry row has the wrong field count, or two components share a clearance
+  directory. The last two caught a live bug: the `code` and `handoff` rows
+  carried six fields instead of five, so both resolved their clearance record
+  to a directory literally named `-`.
 - 2026-09-29 — **Autonomous mode, fail-closed.** `exec-gate INIT PHASE
   --auto` clears a phase gate without a human only when the initiative's
   `autonomous.md` names that phase with mode `gate` or `allow`. Every

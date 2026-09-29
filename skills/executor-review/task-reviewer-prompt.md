@@ -97,6 +97,34 @@ Subagent (general-purpose):
     nothing. If the diff feels too large for one pass, review it in passes
     yourself and say so in the verdict.
 
+    ## Preconditions
+
+    All four hold, or the dispatch ends. Check them before you read a
+    line: everything you write is a claim about a diff and a brief, and
+    a claim about an artifact you never opened is indistinguishable
+    from a real one to the controller that clears the task on it.
+
+    1. **[DIFF_FILE] exists and covers [BASE_SHA]..[HEAD_SHA]** — the
+       commit list and stat summary inside it belong to that range.
+       Missing, unreadable, or a range that does not match the SHAs you
+       were given: `BLOCKED`, naming the path and the range. A file that
+       exists and carries no commit is a different event, and
+       `## Edge Cases` says which one that is.
+    2. **[BRIEF_FILE] exists and is the brief for [TASK_ID].** Missing,
+       empty, or headed with another task: `BLOCKED`, naming the path
+       and the task ID you actually read. Every row of section 1 is
+       measured against this file, and a requirement you supplied
+       yourself is a requirement nobody asked for.
+    3. **[ROUND_ID] names a round no verdict has been filed for, and
+       every earlier round's verdict file exists where its ID names
+       it.** A ledger line for an earlier round whose verdict file is
+       gone: `BLOCKED`, naming the round. You cannot tell a first
+       review from a review of somebody's fix when the fix round's
+       record is missing, and guessing wrong costs the loop a round.
+    4. **[VERDICT_FILE] is this round's path and holds no other round's
+       verdict.** An occupied path is audit evidence, not a file to
+       write over; `## Edge Cases` says what it means.
+
     ## Do Not Trust the Report
 
     Treat [REPORT_FILE] as unverified claims about the code. It may be
@@ -406,6 +434,94 @@ Subagent (general-purpose):
     **Reasoning:** one or two sentences, technical.
     ```
 
+    ## Edge Cases
+
+    These are the states that turn a review into an invented one. Each
+    has a defined response, and none of them is your judgment call.
+
+    **[DIFF_FILE] exists and the range carries no commit.** The
+    implementer ran and committed nothing: a graded round, not a
+    dispatch error. Every requirement this range was meant to satisfy
+    gets its MISSING row, section 2 has no strengths to record, SPEC:
+    FAIL, and the gate reasoning opens with the fact that the range is
+    empty. A reader who never reaches the table still has to be able to
+    see that nothing was reviewed because nothing was written — an empty
+    range is the shape a false PASS takes when nobody looks at it.
+
+    **A verdict file already exists at [VERDICT_FILE].** A verdict file
+    is audit evidence: the fix loop closes findings by ID from it, the
+    next re-review reads its open list, and the final review triages
+    from it. Read it first, then take one of two paths.
+    - It carries a different `round:` or a different `**Range:**`. That
+      is another round's file. Never overwrite it, never append to it,
+      and never file your findings under its name: `BLOCKED`, naming
+      the file, the round it carries, and the round you were dispatched
+      for. Only the controller can move a round's path, and a collision
+      it never sees is a round whose evidence gets written twice.
+    - It carries this round's `round:` and the same range. The earlier
+      dispatch for this round was aborted after writing: that is your
+      own round in progress, not a prior round's evidence. Finish it in
+      place, and record the supersession in section 6 so the controller
+      can tell one round rewritten from two rounds merged.
+
+    **This task was reviewed before, and you are a later round.** Name
+    the prior round and its verdict path in section 6, and set your own
+    `round:` and `id:` to [ROUND_ID] — an ID that repeats makes the
+    ledger count one round twice, and the two verdicts then disagree
+    about what was reviewed. Review the diff you were handed as a fresh
+    review of this range and carry none of the prior round's findings
+    into your own: closure of prior findings is the re-review seat's
+    job, and a finding copied onto a diff it was never read against is a
+    finding with no evidence. Raise a prior finding again only when
+    this diff shows it again, cited to this diff's `file:line`.
+
+    **The diff touches a file the brief's `Files:` list never names.** A
+    diff that exceeds its brief is a finding, not an accident to review
+    around: no requirement accounts for the extra change, and this
+    verdict file is the only place it can be recorded before the loop
+    closes. Add a row to section 1 — `EXTRA`, naming the file and what
+    changed — and grade that change under Part 2 like any other code.
+    Structural extra (a signature, a dependency direction, a shared
+    surface another task's seam runs through) is a finding on the
+    rubric's own terms; cosmetic extra is not.
+
+    **The report claims tests pass, the diff carries no test change, and
+    nothing corroborates the claim.** A claim is not evidence, and
+    re-running the suite is not how this seat resolves it. Re-read
+    [REPORT_FILE] at its stated path and record the re-read in section 6.
+    If the report's evidence does cover the changed behaviour — a test
+    that already asserts it, with output showing it green after the
+    change — accept it and name the test that covers it. If nothing
+    covers it, raise the Part 1 evidence finding verbatim at
+    **Important**: no evidence for behavior change — neither a watched
+    failing test nor a named alternative instrument. Do not escalate on
+    the strength of the claim: the claim is what is unproven, and the
+    diff is what you can prove.
+
+    **A dependency this task consumes does not exist at [HEAD_SHA].** An
+    IFCE the task implements, a signature from a file another task
+    produces, a module the brief's own code imports: when the surface
+    the work stands on is not in the branch, the requirement resting on
+    it cannot be MET, and grading it MET ships a seam nobody produced.
+    Confirm the absence with one focused check outside the diff, name
+    the risk and the check in section 6, then give the requirement a
+    `CANNOT-VERIFY` row naming the missing surface and the task that
+    produces it, and repeat it in section 4. Never invent the
+    dependency, never read the producing task's diff to settle it, and
+    never raise it as Critical — the controller holds the cross-task
+    context and promotes a confirmed gap to a finding.
+
+    **[REPORT_FILE] does not exist, or holds nothing for this round.**
+    The report is claims and the diff is the evidence, so its absence is
+    never a reason to stop — review the diff in full. Then apply the
+    Part 1 evidence check to an implementer who filed nothing: a
+    behaviour change with no report, no RED/GREEN and no named
+    instrument is that same **Important** finding, and a task that
+    changed no behaviour and filed no report is a cannot-verify item
+    ("no implementer report; nothing claims what was verified"), not a
+    pass. Never reconstruct the report from the diff and review it as
+    though it existed.
+
     ## Self-Critique Before You Return
 
     Attack your own verdict before you file it. A verdict you certify wrong
@@ -438,6 +554,29 @@ Subagent (general-purpose):
     3. The counts in your return line equal the counts in the file — run
        them, do not recall them.
 
+    ## When You Cannot Proceed
+
+    A failed precondition, an occupied verdict path, or an interruption
+    ends the dispatch before any verdict is issued. The `BLOCKED` block
+    at the end of this prompt is what you return in place of the
+    status, with the failing input named.
+
+    Never review a substitute. Not the last commit's diff, not a range
+    you rebuilt yourself, not a neighbouring task's diff, not a brief
+    you reconstructed from the plan. A verdict that silently covers
+    something other than what it names is worse than no verdict at all:
+    the controller ledgers the round and moves the loop, and the
+    fabrication surfaces rounds later as an unexplained behaviour
+    change with no finding behind it. Never narrow the review to the
+    files that happened to be available — reviewing the one readable
+    file and reporting a clean gate is a round nobody earned. Never
+    repair an input: the diff is the controller's package and the brief
+    is the implementer's contract, and editing either destroys the
+    evidence the round exists to produce. Never file a partial verdict
+    and call the round done; an unfiled verdict is a round that did not
+    happen, which the controller can act on, and a half-written one
+    reads as a graded round.
+
     ## What You Return
 
     Your final message is exactly this, and nothing else — no preamble, no
@@ -463,6 +602,29 @@ Subagent (general-purpose):
 
     Minor findings are not listed here — they are in the verdict file, and the
     controller ledgers them from it.
+
+    A failed precondition, an occupied verdict path, or an interruption
+    returns this block instead, with the failing input named:
+
+    ```
+    VERDICT: none
+    SPEC: NOT ASSESSED
+    QUALITY: NOT ASSESSED
+    FINDINGS: critical=0 important=0 minor=0
+    CANNOT_VERIFY: 0
+    NEEDS_RUNTIME: 0
+    GATE: BLOCKED
+    ```
+
+    ```
+    BLOCKED: <missing diff | unreadable brief | missing earlier-round verdict | occupied verdict path | interrupted>
+    ```
+
+    `SPEC` and `QUALITY` read `NOT ASSESSED` — never `PASS`, because this
+    review did not run, and never `FAIL`, which would send the
+    controller into a fix loop for a defect nobody found. The gate field
+    reads `BLOCKED`, which is neither PASS nor FAIL: the round cleared
+    nothing, and the `BLOCKED` line names what to re-dispatch with.
 ```
 
 **Placeholders — every one is required:**

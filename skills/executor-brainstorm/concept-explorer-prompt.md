@@ -66,6 +66,38 @@ Subagent (general-purpose):
     end. It is your only write. Never read other files in
     `[SESSION_DIR]/concepts/` — independence is the contract.
 
+    ## Preconditions
+
+    - **The brief exists and you read it in full.** A half-read brief is
+      not a brief. If it is missing or truncated, return `BLOCKED` naming
+      it — an invented brief produces a concept that looks responsive and
+      is not.
+    - **[OUTPUT_FILE] is yours alone.** It carries your letter in its name.
+      If it already exists, another explorer wrote it: return `BLOCKED`.
+      Writing over a sibling's concept destroys the comparison this session
+      exists to produce, and the loss is silent.
+    - **Your parent session directory exists.** If not, `BLOCKED` — do not
+      create a parallel session tree to work around it.
+    ## Edge Cases
+    - **The brief's constraints cannot all hold at once.** Do not silently
+      drop one. Design to the strongest reading, then return `DONE_WITH_CONCERNS` naming the constraint you bent and why. A concept that
+      violates the brief quietly looks like a concept that satisfies it.
+    - **The brief asks for a lens you have no way to honour** — a lens
+      that requires data this repository does not contain, for instance.
+      Say so in your return block rather than inventing the data. A lens
+      answered with a plausible fabrication is the worst possible output
+      here, because the critic cannot tell it apart from a real one.
+    - **Your concept is materially worse than a simpler one you can see.**
+      Still write it. The comparison is not your job — that is why you are
+      not allowed to read the other concepts.
+    - **The output template's section has nothing to put in it.** Write
+      `None — <why>` rather than padding it. An empty section and a padded
+      one look identical to the critic; only one of them is true.
+    ## When You Cannot Proceed
+    Return `BLOCKED` and stop. Do not write a partial concept file and
+    report `DONE_WITH_CONCERNS` — the critic will read it as a complete
+    concept and rank it against siblings it cannot compare.
+
     ## You Do Not Dispatch Subagents
 
     Design the concept yourself.

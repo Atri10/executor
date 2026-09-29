@@ -56,6 +56,80 @@ Subagent (general-purpose):
 
     Do the whole survey yourself.
 
+    ## Preconditions — check before you start
+
+    1. [BRIEF_FILE] exists and carries a `## Brief` section. The brief is
+       the filter that makes this a survey of what the feature can reuse
+       instead of a description of the repository. If the file or the
+       section is missing, return `BLOCKED` naming it. Do not write the
+       brief yourself, and do not infer what the feature needs from
+       [FOCUS_AREAS] — the areas are where to start, the brief is the
+       standard.
+    2. [REPO_ROOT] exists, is a repository, and is readable. A survey
+       aimed at the wrong root is a survey of something else, and
+       nothing in the output marks it. If it does not exist, return
+       `BLOCKED` naming the path. Never fall back to the nearest
+       directory that does.
+    3. [FOCUS_AREAS] is non-empty and each entry names a part of a
+       system rather than a question. With no areas named, "look past
+       them for anything the brief's constraints make relevant" has no
+       stopping condition and the survey becomes a repository tour.
+       Return `BLOCKED`.
+    4. [OUTPUT_FILE] does not already hold a finished survey for this
+       session. See The Output File.
+
+    ## Edge Cases
+
+    These are the states that end a naive scout. Each has a defined
+    response, because a map that is quietly wrong is worse than a map
+    that admits a hole: the explorers design on it without knowing.
+
+    **A focus area matches no part of the tree.** The name is wrong —
+    the service was renamed, the component never existed, the brief
+    calls it something the repository does not. That is not the same as
+    an area you searched and found empty: the first means your search
+    was aimed at a target that is not there. Do not write a Gaps row
+    saying nothing exists in that area; an explorer reading it concludes
+    the capability is absent everywhere and rebuilds it on top of a
+    typo. Record the area under Focus areas not found with the terms
+    and paths you searched and the two or three nearest real names,
+    count it in `AREAS_UNMATCHED`, and say whether any of them plausibly
+    covers the area. If none does, that is a genuine gap — put it in
+    Gaps with the same search evidence.
+
+    **A module you cite has no callers.** Unreferenced code reads as
+    reusable prior art and is not: an explorer that builds on it
+    inherits its problems along with a scheduled deletion. Record the
+    caller search with the row and put the revival in the `Would need`
+    cell — "no callers found; reviving or deleting is part of the cost",
+    not "reusable as is".
+
+    **The brief assumes a capability the repository contradicts.** That
+    is an Open question, not a Gaps row: a Gaps row says the thing does
+    not exist, this says it exists and does something else. Name what
+    the brief assumes and what the code does, with `path:line`.
+
+    ## When You Cannot Proceed
+
+    You have one refusal channel: the return block, with `PRIOR_ART:
+    BLOCKED` and a `REASON:` naming the file and its state. Everything
+    else you take as far as you can and say where you stopped.
+
+    - Never invent the input. A missing brief, a missing repository, or
+      an empty focus-area list is a stop, not a gap to fill with the
+      most plausible thing this feature probably needs.
+    - Never narrow the survey on your own authority and call it
+      proportionate.
+    - **You run out of room before the survey is done.** Name every
+      focus area you did not reach, every path you did not open, and
+      every convention you saw once and could not confirm, and count
+      them in `UNREACHED`. A short map with no unreached list reads as a
+      complete map, and that is how a design session ends up grounded in
+      a survey that stopped halfway.
+    - Never rank, recommend, or evaluate a concept. None exists yet,
+      and a scout that weighs options has become a second controller
+      the human cannot see.
+
     ## What to Find
 
     Work through each focus area, then look past them for anything the
@@ -83,7 +157,9 @@ Subagent (general-purpose):
        knowledge, not verified this session".
     5. **Gaps.** What the feature needs that does not exist. Every "does
        not exist" states the search you performed — the terms and paths —
-       so a reader can tell "absent" from "not looked for".
+       so a reader can tell "absent" from "not looked for". A focus area
+       whose name matched nothing is not a gap; it is an unresolved
+       area, reported on its own.
     6. **Open questions for the controller.** Facts the brief assumes that
        the repository contradicts or cannot confirm.
 
@@ -105,8 +181,11 @@ Subagent (general-purpose):
     2. Does every Gaps entry state the search that failed to find it?
     3. Does any sentence recommend a concept or rank approaches? Rewrite
        it as a fact, or delete it.
-    4. Did you cover every focus area in [FOCUS_AREAS]? An area with
-       nothing found says so, with the search.
+    4. Does every area in [FOCUS_AREAS] appear in exactly one of three
+       places — resolved into Reusable or Integration touchpoints,
+       declared empty in Gaps with its search, or listed under Focus
+       areas not found? An area in none of the three was dropped, and a
+       dropped area reads as a feature that needs nothing.
     5. Is any convention backed by only one instance? Find more or mark it
        "single instance".
 
@@ -153,6 +232,14 @@ Subagent (general-purpose):
     | Design | Source | Why relevant |
     |---|---|---|
 
+    ## Focus areas not found
+
+    An area named in [FOCUS_AREAS] that matched no part of
+    [REPO_ROOT]. `None.` if every area resolved.
+
+    | Area | What you searched | Nearest real names |
+    |---|---|---|
+
     ## Gaps
 
     | Needed | Search performed | Result |
@@ -162,6 +249,17 @@ Subagent (general-purpose):
 
     Numbered. `None.` if none.
     ```
+
+    **If [OUTPUT_FILE] already exists**, a scout for this session died
+    before it finished. Read it, then write your complete survey over
+    it — findings are re-derived here, not inherited from the abandoned
+    attempt — and put that attempt's `created_at:` in `SUPERSEDES:`
+    below. If the file on disk carries the front-matter above, this
+    same `session:`, and every section filled in, the survey is
+    finished: return `BLOCKED` naming it. A session has one map and
+    every concept is designed on it; a second scout's map silently
+    overwriting the first leaves those concepts grounded in evidence
+    nothing points to any more.
 
     ## What You Return
 
@@ -174,6 +272,10 @@ Subagent (general-purpose):
     TOUCHPOINTS: <n>
     GAPS: <n>
     OPEN_QUESTIONS: <n>
+    AREAS_UNMATCHED: <n of the areas whose name matched no path>
+    UNREACHED: <n of the areas you ran out of room to cover>
+    REASON: <on BLOCKED only: the file and its state>
+    SUPERSEDES: <the abandoned attempt's created_at, or `—`>
     ```
 ```
 
@@ -198,4 +300,10 @@ evaluate concepts — it runs before any exist.
 
 1. Read the Open questions and resolve each with the human, or record it
    in the brief's constraints.
-2. Pass [OUTPUT_FILE] to every concept explorer.
+2. Every area under Focus areas not found is a naming problem in
+   [FOCUS_AREAS], not a fact about the repository: rename it or drop it
+   before any explorer runs, so nobody designs against a name the tree
+   does not use.
+3. Pass [OUTPUT_FILE] to every concept explorer, and tell them which
+   areas the survey did not reach — an explorer that trusts a short map
+   invents prior art to fill it.

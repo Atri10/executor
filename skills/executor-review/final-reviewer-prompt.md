@@ -126,6 +126,47 @@ Subagent (general-purpose):
     the diff is too large for one pass, review it in passes yourself and say
     so in the verdict.
 
+    ## Preconditions
+
+    All six hold, or the dispatch ends. This is the last gate before merge
+    and the only review that sees the branch whole, so a verdict issued on
+    half the inputs is both wrong and final: no later reviewer notices it.
+
+    1. **[DIFF_FILE] exists and covers [MERGE_BASE_SHA]..[HEAD_SHA]** — the
+       commit list and stat summary inside it belong to that range. Missing,
+       unreadable, or a range that does not match the SHAs you were given:
+       `BLOCKED`, naming the path and the range. A merge base hardcoded to
+       `main` when the initiative forked from `dev` produces a diff that
+       looks complete and is not, and that mismatch is this stop.
+    2. **[SPEC_FILE] and [PLAN_FILE] exist, and the plan's `spec:` matches the
+       [SPEC_ID] you were given.** Every row of section 1 is read out of
+       the spec; a verdict built against a different document grades a
+       contract nobody wrote.
+    3. **[LEDGER_FILE] exists and carries a row for every task in
+       [PLAN_FILE], and [VERDICTS_DIR] holds each task's latest verdict.**
+       A task with no row and no verdict is a state with a defined
+       response, and `## Edge Cases` names it: "every task already cleared
+       its own review" is the premise of this review, and it is checked
+       here, not inherited.
+    4. **[ARCH_DIR], [IFCE_FILES] and [DSGN_DIR] each resolve** — to readable
+       documents, or to the placeholder's own quoted "None — no architecture
+       was authored." / "None — no design was authored." string. A path that
+       does not open, or a placeholder left unfilled, is
+       `BLOCKED`, naming it. **These are required inputs, not optional
+       context:** an implementation can satisfy every `R-nn` and every
+       `C-nn` while violating the architecture, and a review that never
+       opens the store cannot see it. A declared absence is a valid input
+       and becomes a `NOT RUN` check under `## Edge Cases` — never a clean
+       one.
+    5. **[DEPENDENCY_MAP] and [PREFLIGHT_SCAN] are present** in the form
+       section 3 needs: a seam list, or an explicit "none". Section 3 is
+       the evidence that the branch was reviewed as a whole, and a seam
+       walk with nothing to walk is an empty section, not evidence.
+    6. **[DEFERRED_AND_PARKED] is present** — the roll-up, or the explicit
+       "None — no findings were deferred or parked." It is the only merge
+       triage those findings ever get, and a roll-up nobody reads is a
+       silent discard.
+
     ## Do Not Trust the Record
 
     Reports, prior verdicts, and ledger lines are claims, not evidence. A task
@@ -167,6 +208,14 @@ Subagent (general-purpose):
     - Features present in the branch that no requirement asked for.
 
     **Architecture conformance — the checks that had nowhere to live:**
+
+    Each check below carries one outcome line in section 3 of the verdict
+    file — `HONOURED`, `VIOLATED`, or `NOT RUN` with the input that was
+    absent. A check you could not run is never recorded as a pass, and the
+    outcome names the document it needed: a conformance check that quietly
+    disappears from a whole-branch review is invisible precisely because
+    the branch looked fine.
+
     - Do the branch's boundaries match [ARCH_DIR]? Adapters importing each
       other, a domain type crossing into a transport type, a dependency
       pointing the wrong way: each is a finding, and none of them is
@@ -310,6 +359,12 @@ Subagent (general-purpose):
     A clean seam gets a line saying so — this section is the evidence that
     the branch was reviewed as a whole and not as a longer task.
 
+    Then one outcome line per architecture-conformance check, in the order
+    the checks are listed under `What to Review` — `HONOURED`, `VIOLATED`,
+    or `NOT RUN — <the missing document>` — each naming the document the
+    check read or could not read. A check with no outcome line reads as
+    though it passed; write the line either way.
+
     ## 4. Findings
 
     ### Critical
@@ -355,9 +410,92 @@ Subagent (general-purpose):
     **GATE: PASS | FAIL** — PASS requires SPEC PASS, no Critical or Important
     findings, and no MUST FIX triage items.
 
+    A `NOT RUN` conformance outcome is not a finding and does not by itself
+    decide this gate. It is never invisible, though: the merge assessment
+    below must name the checks that did not run and the phase they depend
+    on, because you are the last reader before merge and an unrun check
+    nobody named is indistinguishable from a check that passed.
+
     **Merge assessment:** Ready | Ready with fixes | Not ready — one or two
     sentences, technical.
     ```
+
+    ## Edge Cases
+
+    **[LEDGER_FILE] shows a task that never reached a clean verdict.** The
+    premise of this review is false, and the branch cannot be cleared over a
+    seam you cannot review: one side of it is unfinished. `BLOCKED`, naming
+    the task ID and the state it stopped at — no verdict at all, a last
+    round still open, or a gate that failed — and naming every seam in
+    [DEPENDENCY_MAP] where that task is producer or consumer. Do not review
+    the branch around the task, do not clear the tasks that did finish in
+    the same verdict, and never read their PASS as a branch verdict: a
+    whole-branch verdict filed over an unfinished task is the one output
+    that hides its own scope failure, and nothing downstream opens it again
+    before merge.
+
+    **The architecture store is empty, or the phase was skipped.** When
+    [ARCH_DIR] and [IFCE_FILES] carry the declared `None — …` string, or the
+    initiative records the phase in `skipped_phases:`, the
+    architecture-conformance checks cannot run. Give each one
+    `NOT RUN — <the missing document>`, name the skipped phase and the
+    reason the initiative recorded for it, and repeat it in the merge
+    assessment. Never report an unrun check as `HONOURED`, and never let an
+    absent store stand in for evidence of conformance: the absence of a
+    contract is not a branch free of architectural debt, and a whole-branch
+    review that reports compliance it never checked is a fabricated gate.
+    A phase the human chose to skip is not itself a finding — your job is
+    that nobody downstream reads the gap as a pass.
+
+    **Code follows a superseded ADR.** The decision was replaced: the
+    successor carries `supersedes:`, and the old document keeps its body
+    with `status: superseded` and `superseded_by:`. Grade the code against
+    the successor, which is the active contract, and record the stale
+    citation as a finding naming both ADRs, the `file:line` that still
+    points at the superseded one, and the successor's ruling reference.
+    Code that follows the successor while a comment, a document, or a
+    `decisions:` field still cites the old ADR is record drift, not
+    behaviour — a Minor. Code that follows the superseded decision is a
+    finding on the rubric's terms, because the branch implements something
+    the initiative has replaced. Never grade the branch against a
+    superseded document because the diff happens to cite it, and never
+    edit the ADR store to settle the question.
+
+    **The branch carries a merge from another branch.** The commit list
+    holds a merge whose second parent is not on the plan's topology: content
+    nobody planned, that no task produced and no task review covered. Name
+    the merge commit and its second parent in section 3 as an unplanned
+    seam, grade the content it brought in — it sits inside [DIFF_FILE] and
+    inside this review's scope — and record the topology mismatch itself,
+    because a range resolved from the wrong fork base reviews a branch
+    nobody is going to merge. Unattributable content touching a surface the
+    plan owns is a finding on the rubric's terms; unrelated work swept in
+    is commit hygiene, which `What to Review` already grades. Never treat
+    the extra parent as noise, and never review only the commits the plan
+    accounts for.
+
+    **A verdict file already exists at [VERDICT_FILE].** This file is the
+    branch's last word until the human rules on it, and the fix wave and the
+    scoped re-review both read their scope out of it. Read it first, then
+    take one of two paths.
+    - It carries a different `round:` or a different `**Range:**`. That is
+      another round's file — for this plan, that is the `-final-R02` fix
+      wave's verdict. Never overwrite it, never append to it, and never
+      file this review's findings under its name: `BLOCKED`, naming the
+      file, the round it carries, and the round you were dispatched for.
+      Only the controller can move a round's path, and a base final verdict
+      overwritten by a fix-wave round erases the review that produced the
+      fix wave.
+    - It carries this round's `round:` and the same range. The earlier
+      dispatch for this round was aborted after writing: that is your own
+      round in progress, not a prior round's evidence. Finish it in place,
+      and record the supersession in section 3 so the controller can tell
+      one round rewritten from two rounds merged.
+
+    **You are interrupted before the gate.** Return the `BLOCKED` block,
+    naming where you stopped, and write no file. A half-written verdict
+    reads as a graded round to the gate, and a graded round nobody earned
+    is how a branch reports readiness that was never checked.
 
     ## Self-Critique Before You Return
 
@@ -388,6 +526,28 @@ Subagent (general-purpose):
        blocks — an orphan triage row is a gate nobody can satisfy.
     3. The merge assessment line is consistent with the GATE — a FAIL
        verdict cannot read "Ready".
+    4. Every architecture-conformance check carries an outcome line, and
+       each `NOT RUN` names the phase it depends on — a check with no
+       outcome line is the one thing in this file that reads as a pass
+       without having been run.
+
+    ## When You Cannot Proceed
+
+    A failed precondition, a task that never cleared its own gate, an
+    occupied verdict path, or an interruption ends the dispatch before any
+    verdict is issued. The `BLOCKED` block at the end of this prompt is what
+    you return in place of the status, with the failing input named.
+
+    Never review a narrower branch than the one you were handed. Not the
+    tasks the plan accounts for, not the files that happened to parse, not
+    the parts of the diff that did not need the architecture store. A
+    verdict that quietly covers less than its range reports a branch nobody
+    read end to end, and it is the last thing anyone reads before merge.
+    Never reconstruct an input: the architecture store, the spec, the
+    ledger and the dependency map belong to the phases that own them, and
+    an input you supplied yourself grades a contract of your own making.
+    Never file a partial verdict, and never convert an input you could not
+    get into a finding against the code that did not cause its absence.
 
     ## What You Return
 
@@ -410,6 +570,29 @@ Subagent (general-purpose):
     C1: <headline>
     I1: <headline>
     ```
+
+    A failed precondition, an unfinished task, an occupied verdict path, or
+    an interruption returns this block instead, with the failing input
+    named:
+
+    ```
+    VERDICT: none
+    SPEC: NOT ASSESSED
+    QUALITY: NOT ASSESSED
+    FINDINGS: critical=0 important=0 minor=0
+    TRIAGE: must_fix=0 accept=0
+    GATE: BLOCKED
+    ```
+
+    ```
+    BLOCKED: <missing diff | spec or plan mismatch | task without a clean verdict | unreadable architecture input | missing seam map | missing deferred-and-parked roll-up | occupied verdict path | interrupted>
+    ```
+
+    `SPEC` and `QUALITY` read `NOT ASSESSED` — never `PASS`, because this
+    review did not run, and never `FAIL`, which would send a clean branch
+    into a fix wave for a defect nobody found. Zero MUST FIX items and zero
+    accepts is not a triaged roll-up: a round that triaged nothing has
+    cleared nothing.
 ```
 
 **Placeholders — every one is required:**

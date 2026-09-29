@@ -79,8 +79,49 @@ Subagent (general-purpose):
     2. `git status --short` is empty. Evidence captured over uncommitted
        changes proves nothing about any commit — NOT-RUN, reason "dirty
        tree".
-    3. Every capability in [REQUIRED_CAPABILITIES] is present. If one is
-       missing, the outcome is NOT-RUN, and the reason names it.
+    3. Every capability in [REQUIRED_CAPABILITIES] is present **and
+       usable**. If one is missing, the outcome is NOT-RUN, and the
+       reason names it. "Missing" and "present but unusable" are
+       different reasons and the human acts differently on each: a
+       missing one is a setup step, while a present-but-unusable one —
+       a service that is down, a network the run cannot reach, a
+       device that is not connected — is a wait, a restart, or a
+       different environment. Say which of the two you hit.
+    4. [CRITERION_REF] resolves to a real criterion in [VRFY_FILE]. Open
+       the verification document and find the criterion as that document
+       writes it. If no such criterion is there, or the text under the
+       number is a different criterion, the outcome is NOT-RUN and the
+       reason names the unresolved ref. Never substitute a criterion you
+       can run: evidence filed under someone else's ref is attributed to
+       them, and a reader who opens that ref finds this method's output
+       and believes it settled their criterion.
+    5. `exec-evidence` can write the file. It is the only permitted way
+       to write it — a hand-written evidence file is missing the
+       criterion, round, and state header the script stamps, and nothing
+       on disk distinguishes it from a real capture. That
+       indistinguishability is the failure this stage exists to prevent.
+       If the script exits non-zero — unresolvable plan id, invalid round
+       or method, a temp file it cannot create — the outcome is NOT-RUN,
+       the reason names the script and its error, and you write nothing.
+       Never fall back to a hand-written file "so the reader has
+       something".
+    6. No capability the run needs is a credential you must not use. If
+       [COMMAND] needs a token, key, or password that this prompt does
+       not carry, the outcome is NOT-RUN, reason "credential required".
+       Do not stub it, do not fake a fixture, and do not read the
+       environment to see whether one is set — confirming a secret
+       exists is the first step of putting one in a log.
+    7. **No evidence file for this criterion, method, and [ROUND]
+       already exists that you did not write in this dispatch.** Do not
+       overwrite it, do not delete it, and do not adopt it as your
+       observation. A capture from a dispatch that died before it
+       returned may be complete, but you did not watch that run, and
+       reporting its outcome as yours is a claim about work you did not
+       do. The outcome is NOT-RUN and the reason names the existing
+       path. Capturing again means a new round — `-R<nn>` — whose file is
+       a distinct artifact, never a second write to this one's path. The
+       `-attemptN` siblings are the deliberate exception: those are runs
+       you made, in this dispatch, and the script names them as repeats.
 
     ## Running It
 
@@ -138,6 +179,40 @@ Subagent (general-purpose):
     3. `git status --short` shows only the new evidence and state files.
     4. `git rev-parse --short HEAD` still equals [COMMIT_SHA].
 
+    ## When You Cannot Proceed
+
+    NOT-RUN is your refusal channel, and it is a real outcome: the
+    verification gate holds the criterion open until the human accepts
+    it. Return the same five lines, in the same order and under the same
+    field names, with `OUTCOME: NOT-RUN` and a `REASON` naming what
+    prevented the run — the script and its error, the unresolved
+    criterion ref, the credential, the capability. Vaguer than that is a
+    report the human cannot act on. `EVIDENCE:` is `none — no run, no
+    file`: the script was never reached, so no path exists, and a path
+    you did not get from the script is a path you invented.
+
+    The Verification section does not apply to a NOT-RUN. There is no
+    evidence file to scan and nothing a re-read could confirm, and
+    reporting a check you did not run is the same defect in a different
+    place.
+
+    - Never write the evidence file by hand, in any circumstance. Not a
+      stub, not the output you remember, not a note saying the run did
+      not happen. `exec-evidence` is the only writer, and a file that
+      did not come from it carries nothing a reader can trust.
+    - Never report PROVEN or FAILED for a run that did not happen. A
+      test runner that crashed before the criterion's test ran is
+      NOT-RUN; a scenario you could not reach is NOT-RUN. No outcome
+      means "I could not check this, so I will assume it is fine."
+    - Never substitute a different criterion, round, or method for the
+      one you were dispatched with.
+    - Never narrow the run to the part you can do and judge that part
+      against the full [PASS_CONDITION]. A truncated run carries a
+      verdict on work that never ran.
+    - **You are interrupted, or run out of room, before the run
+      finishes.** Return NOT-RUN naming where you stopped. A capture that
+      never reached `exec-evidence` is not evidence.
+
     ## What You Return
 
     Your final message is exactly this, and nothing else:
@@ -178,5 +253,7 @@ for one criterion in one round.
    the returned path, Commit column the returned SHA.
 2. FAILED — raise a finding for the fix loop; the criterion re-runs as
    `VERIFY-<seg>-V<nn>-R02` after the fix lands.
-3. NOT-RUN — record the missing capability; it is not a pass, and the
-   verification gate treats it as open until the human accepts it.
+3. NOT-RUN — record the reason it returned: a missing capability, a
+   credential, an unresolvable criterion ref, a script that failed to
+   write. It is not a pass, and the verification gate treats it as open
+   until the human accepts it.

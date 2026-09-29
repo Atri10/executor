@@ -64,11 +64,143 @@ Subagent (general-purpose):
     an IFCE, or the prior audit. The prior round's file must stay exactly
     as it is — it is the record of what was found.
 
+    [AUDIT_FILE] is one file per round, and the prior round's file stays
+    where it is. If [AUDIT_FILE] already exists, decide by what is inside
+    it — never append to it, and never replace it without saying so:
+
+    - `verdict:` present and every section below present: a completed
+      round. `BLOCKED`, naming the file, and change nothing. Whether
+      this re-audit runs under a new round number or the existing file
+      stands is the controller's call.
+    - No `verdict:`, or a section missing: the residue of an aborted
+      run. You own the whole file — write your complete audit over it,
+      and say in the reply that you did. The prior round's file is
+      never in scope for this: it is the record of what was found, and
+      overwriting it destroys the only copy of that record.
+
     ## You Do Not Dispatch Subagents
 
     Do the whole re-audit yourself.
 
+    ## Preconditions
+
+    All five hold, or the dispatch ends. A re-audit is arithmetic on the
+    prior round's record: every verdict you issue points at an ID in
+    [PRIOR_AUDIT_FILE], so a broken input here does not weaken the
+    result — it invalidates every row of it.
+
+    1. **[FIX_FILE] exists and [REPAIR_DIFF] exists.** A repairer that
+       never ran leaves one or both missing, and so does a controller
+       that never captured the diff. Either way it is a controller-
+       visible error, not a failed round: `BLOCKED`, with the reason
+       naming which of the two is missing. Never grade prior findings
+       NOT ADDRESSED on that evidence — "nobody ran the repair" and "the
+       repairer ran and changed nothing" are different events, and
+       reporting the second hides the first behind a wall of open
+       findings. A [REPAIR_DIFF] that exists and is empty is the second
+       event, not the first: `## Edge Cases` says what that round is.
+    2. **[PRIOR_AUDIT_FILE] exists and agrees with itself.** `round:` is
+       [PRIOR_ROUND], `plan:` is [PLAN_ID], and the `high:`/`medium:`/
+       `low:` counts equal the findings listed under their severities.
+       A missing, truncated, or self-contradicting file: `BLOCKED`,
+       naming the disagreement. You cannot close findings against a
+       record whose own bookkeeping lies, and you never re-count it
+       into agreement: the prior round is not yours to correct, and a
+       corrected count silently changes what this round was asked to
+       close.
+    3. **[PLAN_FILE] exists and its `id:` is [PLAN_ID].** Otherwise
+       `BLOCKED`, naming what you read. Every verdict you issue is
+       about this file.
+    4. **[LINT_OUTPUT_FILE] exists.** Missing: `BLOCKED`, naming the
+       path. Present and empty: run `../executor/scripts/exec-plan-lint
+       [PLAN_FILE]` yourself, once, use that output, and name in the
+       check-8 row which output it came from. An empty capture is an
+       unrun check, not a clean one — and "the lint is clean" is a claim
+       this round is about to make about a repaired plan.
+    5. **[ROUND] is `R02` or `R03`.** A round past the cap (`R01`–`R03`)
+       is the controller's to lift, and it lifts it with a recorded
+       human waiver: `BLOCKED`, naming the round. Never run a round the
+       cap forbids, and never report `ROUND: R04 of 3` as though the
+       cap did not exist.
+
+    [IFCE_FILES], [OTHER_PLAN_FILES], and [ESCALATION_RESOLUTIONS] may
+    be `none`. A real escalation with no recorded resolution is an edge
+    case below, not a precondition failure — refusing the round over it
+    would grade the controller's bookkeeping failure as nothing at all.
+
+    ## Edge Cases
+
+    **[REPAIR_DIFF] is present but empty — the repairer ran and
+    committed nothing.** This is a failed round, not a dispatch error,
+    and it gets a real verdict. Run Job 1 and Job 2 in full against the
+    plan text as it stands: the Impact section opens with `the diff is
+    empty; no region changed`, the mechanical checks re-run as they
+    always do, and every prior finding is NOT ADDRESSED unless the plan
+    already satisfies it — the prior round graded a plan that has not
+    moved, and a verdict cannot make it move. If [FIX_FILE] claims FIXED
+    with after-quotes the plan text does show, the repair landed outside
+    the range you were given: name the SHA you were told to diff from,
+    record it in Observations, and verdict the finding against the plan
+    text as it stands.
+
+    **[ESCALATION_RESOLUTIONS] is `none` but [FIX_FILE] escalated
+    findings.** Report the mismatch; do not absorb it. Each such
+    finding is NOT ADDRESSED by the table below — that verdict is
+    correct — but it charges the repair for work the controller never
+    did, and a round graded that way sends the controller to fix the
+    wrong thing. Name every affected ID in the Closure section's
+    **Unrecorded escalations** line and in the return block's
+    `ESCALATION_MISMATCH`, and never grade a missing resolution as a
+    refusal to escalate: ESCALATED means the fix belongs in another
+    document, and applying it is the controller's job, not evidence
+    about the plan.
+
+    **[FIX_FILE] and [PRIOR_AUDIT_FILE] disagree about a finding.** An ID
+    the repair log closes that the prior audit never raised, or one it
+    marks FIXED whose `Before:` quote matches no line of the plan: cite
+    both, record the mismatch in Observations, and verdict only the
+    findings the prior audit raised. An ID only the repair log knows is
+    not a closure, and it does not become a new finding here — the next
+    round raises it if the defect is real.
+
+    **[FIX_FILE]'s own counts disagree with its entries.** The log is
+    unverified claims and your verdicts come from the plan text.
+    Proceed: count its Findings entries yourself, note the
+    disagreement in Observations, and never let a count you did not
+    verify become a `CLOSURE:` number in your reply.
+
+    **A finding is closed by a contract amendment, not a plan edit.**
+    ADDRESSED when [ESCALATION_RESOLUTIONS] names the amendment with its
+    ruling reference and the plan now agrees with the contract as it
+    stands on disk. Check the plan against that contract, not against
+    the repair log's description of what changed.
+
+    **You are interrupted before both jobs are done.** Return the
+    `BLOCKED` block below, naming where you stopped, and write no file.
+    A partial closure table is a set of verdicts on findings nobody
+    finished checking, and the next round would grade against them.
+
+    ## When You Cannot Proceed
+
+    A failed precondition or an interruption ends the dispatch before
+    any verdict is issued. The `BLOCKED` block at the end of this prompt
+    is what you return in place of the status, with the reason named.
+
+    Never reconstruct the round you were asked to re-audit — not a
+    repair you never received, not a repair log nobody wrote, not a
+    prior audit whose counts disagree with its findings. A round graded
+    against documents you supplied yourself is the most dangerous output
+    this seat can produce, because it is indistinguishable from a real
+    one and the controller clears a plan on it. Never report zero
+    closure over zero findings as a way of declining — that reads as a
+    clean round, and the cap moves past it. Never narrow the re-audit to
+    the findings you happened to reach: Job 1 is not optional because
+    Job 2 was the part you could finish.
+
     ## Job 1 — Impact Review of the Repair (first)
+
+    **[REPAIR_DIFF] is empty or missing** — `## Edge Cases` says which,
+    and neither is a reason to run a smaller version of this job.
 
     Read [REPAIR_DIFF] once, then the repaired [PLAN_FILE]. Before opening
     the findings list, answer: what did this repair change, and what else
@@ -100,6 +232,15 @@ Subagent (general-purpose):
     | ESCALATED | ADDRESSED if [ESCALATION_RESOLUTIONS] shows the change landed where it belongs and the plan now agrees with it; NOT ADDRESSED otherwise |
     | DISPUTED | DISPUTE UPHELD if the repairer's evidence refutes the finding; DISPUTE REJECTED if it does not — then the finding stays open |
     | not in the log | NOT ADDRESSED — an unrepaired finding stays open |
+
+    **An ESCALATED finding with no recorded resolution is the
+    controller's bookkeeping failure, not the repairer's.** Report it
+    explicitly — name it in the Closure section's **Unrecorded
+    escalations** line and in the return block's `ESCALATION_MISMATCH` —
+    then verdict it as the table above requires. The verdict is right and
+    the reason belongs to someone else, and a mismatch reported once
+    costs the controller a line; a mismatch absorbed into the closure
+    counts costs it the whole round.
 
     **Weakening is not addressing.** A finding closed by deleting a
     requirement, removing a coverage claim, or loosening an exact value is
@@ -135,6 +276,9 @@ Subagent (general-purpose):
     6. Is any pre-existing MEDIUM/LOW outside the changed regions sitting
        in New findings? Move it to Observations — it does not block this
        round.
+    7. Does every ESCALATED finding in [FIX_FILE] have a resolution in
+       [ESCALATION_RESOLUTIONS], and is each one without one named in
+       the Closure section rather than only counted?
 
     ## Verification
 
@@ -192,6 +336,10 @@ Subagent (general-purpose):
     |---|---|---|---|
     | H1 | FIXED | ADDRESSED | `plan:120` now reads … |
 
+    **Unrecorded escalations:** H2 — the repair log escalated it and
+    [ESCALATION_RESOLUTIONS] is `none`. `None.` if every ESCALATED
+    finding has a recorded resolution.
+
     ## 3. New findings
 
     ### High / ### Medium / ### Low — same fields as the first audit,
@@ -213,7 +361,27 @@ Subagent (general-purpose):
     CLOSURE: addressed=<n> not_addressed=<n> dispute_upheld=<n> dispute_rejected=<n>
     NEW: high=<n> medium=<n> low=<n>
     OPEN: high=<n> medium=<n> low=<n>
+    ESCALATION_MISMATCH: <finding IDs escalated with no recorded resolution, or none>
     ROUND: [ROUND] of 3
+    ```
+
+    A precondition stop or an interruption returns this instead, with
+    the reason named:
+
+    ```
+    AUDIT: none
+    VERDICT: BLOCKED
+    CLOSURE: addressed=0 not_addressed=0 dispute_upheld=0 dispute_rejected=0
+    NEW: high=0 medium=0 low=0
+    OPEN: high=0 medium=0 low=0
+    ESCALATION_MISMATCH: none
+    ROUND: [ROUND] of 3
+    ```
+
+    ```
+    REASON: <no repair diff | no repair log | malformed prior audit |
+    plan id mismatch | missing lint output | past the round cap |
+    interrupted>
     ```
 ```
 

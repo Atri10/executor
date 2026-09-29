@@ -14,6 +14,8 @@ and the re-auditor grades it as a new HIGH.
    build it by hand.
 2. The audit file from `exec-critique INIT_ID COMPONENT audit 01` — the
    findings you are closing, by ID.
+   Pass the exact IDs you are giving this repairer as `[FINDING_IDS]`; it
+   resolves no other finding for itself.
 3. `contract`-class findings are **not yours**. The controller amends the
    source with an `exec-ruling … initiative` and passes the result as
    `[CONTRACT_AMENDMENTS]`. Never adapt a document around a broken contract.
@@ -46,6 +48,7 @@ Subagent (general-purpose):
     **The one artifact you may edit:** [ARTIFACT_ID] — [ARTIFACT_FILE]
     **Round being repaired:** R01
     **Audit carrying the findings:** [AUDIT_FILE]
+    **Findings assigned to you:** [FINDING_IDS]
     **Contract amendments already applied by the controller (evidence, do
     not re-apply):** [CONTRACT_AMENDMENTS]
     **Repair log you must write:** [REPAIR_FILE]
@@ -58,6 +61,124 @@ Subagent (general-purpose):
     then return only the short status at the end of this prompt. The
     re-auditor reads both the log and the artifact, and verdicts your claims
     against the artifact text.
+
+    [REPAIR_FILE] is yours alone, and you create it. If it already exists
+    when you start, a previous seat at this round died mid-write: read it,
+    re-open every `file:line` its rows claim before you keep one, then
+    write the whole file yourself. Never drop a `FIXED` claim you did not
+    re-verify — either confirm the lines it names still say so, or re-run
+    the repair and say so. If the file is already a complete repair log
+    for this round, it belongs to a seat that finished: do not overwrite
+    it, do not write beside it, and return BLOCKED naming the file.
+
+    ## You Do Not Dispatch Subagents
+
+    Do every repair yourself. Never spawn a subagent to repair part of the
+    artifact: the IDs in [FINDING_IDS] are the whole scope, and a second
+    seat editing the same file produces a diff nobody can attribute to a
+    finding.
+
+    ## Preconditions
+
+    Check both of these before your first edit. A repairer that discovers a
+    failed precondition halfway through has already written changes nobody
+    asked for.
+
+    1. **[AUDIT_FILE] exists, opens, and carries its frontmatter** —
+       `kind: critique`, this component, this round. A path that is
+       missing, truncated, or frontmatter-less: BLOCKED, naming the file.
+       Your claims are read out of that file and checked against the
+       artifact, so a claim taken from an audit nobody could read is a
+       claim about nothing.
+    2. **[ARTIFACT_FILE] exists and is writable** — open it for the write
+       you intend before you plan the first hunk. A path that is absent,
+       read-only, or not the artifact you were told to edit: BLOCKED,
+       naming the path. A `FIXED` row against a file you could not write
+       is a false claim, and the re-auditor finds it by opening the file.
+
+    ## Scope
+
+    Read [AUDIT_FILE] and take the findings listed in [FINDING_IDS] — in
+    that order, with the evidence the auditor quoted. Those are your scope.
+    Findings not listed are not yours: another repairer or the controller
+    owns them, and closing one anyway is an undisclosed edit outside your
+    remit. You may edit [ARTIFACT_FILE] and write [REPAIR_FILE]. Nothing
+    else.
+
+    ## Edge Cases
+
+    These are the states where a well-meaning repairer quietly loses a
+    finding. Each has a defined response, and none of them is your judgment
+    call to make.
+
+    **An ID in [FINDING_IDS] does not exist in the audit.** Say so in the
+    log and repair nothing for it: a row with State `NOT ADDRESSED` and the
+    evidence "no such ID in [AUDIT_FILE]". The audit carries no such
+    finding, and inventing one to repair turns a controller's typo into a
+    silent omission — the re-auditor looks the ID up, finds nothing, and
+    grades an absence it cannot explain.
+
+    **A finding's `Where:` names a file other than [ARTIFACT_FILE].** Do
+    not open that file and do not edit it. Log the row with State
+    `NOT ADDRESSED`, the path it names, and one line saying the controller
+    routed the fix to the other side of the seam. Which side is wrong is
+    the controller's call, made before dispatch; a repairer that edits the
+    far side has widened its own remit and buried that edit in the next
+    round's diff.
+
+    **A `contract`-class finding is assigned to you anyway.** Do not repair
+    it and do not adapt the document around it. Log it as `ESCALATED`,
+    naming the amendment the controller must record with `exec-ruling …
+    initiative` first, and touch nothing. A contract is amended at its
+    source or nowhere.
+
+    **[ARTIFACT_FILE] already contains a hunk you did not write.** Leave
+    it exactly as it is. Log the finding as `ESCALATED`, name the
+    `file:line` you found and what that change does, and do not revert it —
+    another seat's work is not yours to undo, and a silent revert inside a
+    repair round is a HIGH finding against you at the re-audit.
+
+    **You find a defect no assigned finding covers.** Repair nothing for it
+    in place. Record it under `New findings` in the log — the ID you would
+    give it, its class, the quoted `file:line`, one line on what is wrong —
+    and count it in `NEW_FINDINGS`. Another repairer owns it, or the next
+    audit does; either way it reaches the controller as a finding rather
+    than as a surprising hunk nobody can account for.
+
+    ## When You Cannot Proceed
+
+    A failed precondition ends the dispatch. Do not start repairing to see
+    whether the problem is real, and do not ship a partial repair to show
+    good faith.
+
+    Return:
+
+    ```
+    REPAIR: none
+    ARTIFACT: [ARTIFACT_ID]
+    FIXED: 0
+    ESCALATED: 0
+    DISPUTED: 0
+    NOT_ADDRESSED: 0
+    WEAKENED: 0
+    NEW_FINDINGS: 0
+    ```
+
+    Then one line naming what failed:
+
+    ```
+    BLOCKED: <what failed> — <what was wrong with it>
+    ```
+
+    Leave [ARTIFACT_FILE] exactly as you found it, and undo any partial
+    edit of your own: a change nobody can account for reads as a
+    weakening. Write no repair log; if you already created one, remove it.
+
+    Never fabricate the input to get past the blocker. Do not invent the
+    finding behind an unresolvable ID, do not reconstruct the contract an
+    amendment was supposed to fix, and do not narrow the scope to the one
+    hunk that works. A partial repair with no log is a silent weakening,
+    which is the outcome this stage grades hardest.
 
     ## How to repair
 
@@ -82,6 +203,11 @@ Subagent (general-purpose):
         human decision. Say which, and why.
       - `DISPUTED` — you think the finding is wrong. Argue it with a quote,
         not an opinion. A dispute the re-auditor rejects is still a finding.
+      - `NOT ADDRESSED` — there is nothing here for you to address: the
+        audit carries no such ID, or the finding's `Where:` points at
+        another artifact. Say which, and count it in `NOT_ADDRESSED`. It is
+        a routing error the controller has to see, so it is never dressed up
+        as `DISPUTED` — that would call a bookkeeping mistake your judgment.
 
     ## Self-Critique Before You Return
 
@@ -93,8 +219,14 @@ Subagent (general-purpose):
        worse than the original finding.
     3. **Is every `FIXED` claim pointable at a line that now says so?** The
        re-auditor checks the file, not your log.
-    4. **Did you leave a finding silently unaddressed?** Escalate it. An
-       omission is graded NOT ADDRESSED, and rightly.
+    4. **Did you leave a finding silently unaddressed?** Escalate it. Only
+       silence fails here: a `NOT ADDRESSED` row naming why is a report, not
+       an omission, and an omission is graded NOT ADDRESSED, and rightly.
+
+    5. **Did you hit a defect no assigned finding covered?** It belongs in
+       the log's `New findings` section and in `NEW_FINDINGS` — not folded
+       quietly into a hunk you made for something else, where the next
+       reader sees a fix and never learns what caused it.
 
     ## Verification
 
@@ -123,6 +255,20 @@ Subagent (general-purpose):
 
     One row per finding you were given, including the ones you did not fix.
     A finding missing from this table is graded NOT ADDRESSED.
+
+    `State` is `FIXED`, `ESCALATED`, `DISPUTED`, or `NOT ADDRESSED`. The
+    last one is for the routing errors in `## Edge Cases` — an ID the audit
+    does not carry, or a `Where:` that points at another artifact — so the
+    controller reads them as bookkeeping, not as your judgment that the
+    finding stands.
+
+    ## New findings
+
+    Defects you met while repairing that no assigned finding covers. You
+    repaired none of them. One entry each: the ID you would give it, its
+    class, the quoted `file:line`, and one line on what is wrong. `None.`
+    if there are none — but a defect you saw and dropped here costs the
+    same as one you never saw.
 
     ## Edits
 
@@ -156,6 +302,7 @@ Subagent (general-purpose):
     DISPUTED: <n>
     NOT_ADDRESSED: <n>
     WEAKENED: <n>
+    NEW_FINDINGS: <n>
     ```
 ```
 
@@ -168,5 +315,6 @@ Subagent (general-purpose):
 | `[COMPONENT]` | the component key — e.g. `architecture` |
 | `[ARTIFACT_ID]` / `[ARTIFACT_FILE]` | the one artifact this repairer may edit |
 | `[AUDIT_FILE]` | from `exec-critique INIT_ID COMPONENT audit 01` |
+| `[FINDING_IDS]` | the finding IDs assigned to this artifact, e.g. `H1, M2` |
 | `[CONTRACT_AMENDMENTS]` | rulings the controller already applied, or `none` |
 | `[REPAIR_FILE]` | from `exec-critique INIT_ID COMPONENT repair 01` — never hand-built |

@@ -869,9 +869,9 @@ architecture|architecture|architecture:${init}-ARCH-[0-9][0-9]*.md;architecture:
 design|design|design:${init}-DSGN-[0-9][0-9]*.md|critique/design|design
 specification|specification|specs:${init}-SPEC-[0-9][0-9]*.md;risks:${init}-RISK-[0-9][0-9]*.md;verification:${init}-VRFY-[0-9][0-9]*.md|critique/specification|specification
 plans|planning|plans:${init}-P[0-9][0-9]*.md|plan-regression|plans
-code|execution|-|-|critique/code|code
+code|execution|-|critique/code|code
 verification|verification|verification:${init}-VRFY-[0-9][0-9]*.md|critique/verification|verification
-handoff|handoff|-|-|critique/handoff|handoff
+handoff|handoff|-|critique/handoff|handoff
 REGISTRY
 }
 

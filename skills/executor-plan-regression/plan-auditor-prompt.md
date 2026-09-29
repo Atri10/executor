@@ -63,11 +63,130 @@ Subagent (general-purpose):
     IFCE, or any other plan — a defect you notice is a finding, and the
     repair is someone else's job.
 
+    [AUDIT_FILE] is one file per round. If it already exists, decide by
+    what is inside it — never append to it, and never replace it
+    without saying so. It is the record of a round, and the counts in
+    its frontmatter are what the controller reads:
+
+    - `verdict:` present and every section below present: a completed
+      round. `BLOCKED`, naming the file, and change nothing. Whether
+      this audit re-runs under a new round number or the existing file
+      stands is the controller's call, not a deletion you make.
+    - No `verdict:`, or a section missing: the residue of an aborted
+      run — no counts, no record, nothing to preserve. You own the whole
+      file. Write your complete audit over it, and say in the reply that
+      you did.
+
     ## You Do Not Dispatch Subagents
 
     Do the whole audit yourself. Never spawn a subagent to check part of
     the set; every audit seat this process needs is already assigned, and
     a duplicate one's output counts for nothing.
+
+    ## Preconditions
+
+    All four hold, or the dispatch ends. Check them before the first
+    check runs: an audit is a claim about documents you opened, and a
+    claim built on an input you never opened is not a weaker finding —
+    it is a fabricated one.
+
+    1. **[PLAN_FILE] and every file in [OTHER_PLAN_FILES] exists and is
+       non-empty.** A missing or empty member: `BLOCKED`, naming the
+       path. Checks 2, 4, 6, and 7 are cross-plan by definition, so a
+       missing peer does not shrink the audit — it removes the reason
+       this seat reads the whole set, and the Coverage and Seam tables
+       you build from half a set still look complete.
+    2. **[SPEC_FILE] exists, is non-empty, and declares its requirement
+       set.** Otherwise `BLOCKED`, naming the file. Check 1 measures
+       claims against requirements; with no requirements read, every
+       row is either uncovered or invented, and a Coverage table over a
+       spec you did not open says nothing about the plan.
+    3. **[LINT_OUTPUT_FILE] exists.** Missing: `BLOCKED`, naming the
+       path. Present and empty: run `../executor/scripts/exec-plan-lint
+       [PLAN_FILE]` yourself, once, and use that output — and name in
+       the check-8 row which output the row came from. An empty capture
+       is an unrun check, not a clean one.
+    4. **[AUDIT_FILE]'s parent directory exists.** A path whose parent
+       is missing is a controller error: `BLOCKED`. Never create the
+       directory, and never hand-build a different audit path.
+
+    `none` is a real value for [IFCE_FILES] and [OTHER_PLAN_FILES] — a
+    single-plan initiative with no contracts is a set, not a missing
+    input. Only an absent, unreadable, or empty file fails a
+    precondition.
+
+    ## Edge Cases
+
+    These are the states that turn an audit into an invented one. Each
+    has a defined response, and none of them is your judgment call.
+
+    **The set is too large to audit in one pass.** Checks 1, 2, 4, and 7
+    read the whole set, and a union you stopped collecting halfway is
+    indistinguishable from a set with no defects in it. Work in this
+    order, and stop at the first tier you cannot finish:
+
+    1. Every requirement in the spec gets a Coverage row. Coverage is
+       never the tier you drop — an unmeasured requirement is the
+       failure this phase exists to catch.
+    2. The target's own `## Assumes` and task `Consumes:` (check 2), its
+       ordering and dependencies (check 4), and its lint output
+       (check 8).
+    3. Checks 3, 5, 6, 7, and 9, region by region.
+
+    Declare the ceiling in both places the controller reads it: the
+    Checks row of every check you did not reach reads `not reached — <
+    what stopped you>`, and the return block reports `CHECKS_RUN: <n>/9`
+    with the `NOT_REACHED` line naming them. `verdict:` is `FAIL`
+    whenever any check was not reached — a PASS is a claim that nine
+    checks ran. Never report 9/9 over work you did not do.
+
+    **[LINT_OUTPUT_FILE] carries violations for other plans.** The lint
+    was captured over the plans directory, not over your target. Those
+    violations belong to the plan that owns them: record them in
+    Observations, quoting the file each came from, and never raise them
+    against [PLAN_FILE]. A violation in the target is a check-8 finding
+    whatever else the file contains.
+
+    **You are interrupted, or run short of room, before the nine checks
+    are done.** Do not return a status block describing work you did
+    not finish. Return the `BLOCKED` block below naming where you
+    stopped — a partial audit that does not record its own gap is
+    indistinguishable from a complete one.
+
+    ## When You Cannot Proceed
+
+    A failed precondition, a check you cannot run, or an interruption
+    ends the dispatch. Write **no** file — not a stub, not a partial
+    audit — and return this instead of the status block below:
+
+    ```
+    AUDIT: none
+    VERDICT: BLOCKED
+    FINDINGS: high=0 medium=0 low=0
+    CLASSES: plan=0 cross-plan=0 contract=0
+    UNCOVERED: 0
+    UNRESOLVED_SEAMS: 0
+    CHECKS_RUN: 0/9
+    NOT_REACHED: all
+    ```
+
+    Then one line naming the input that was not true:
+
+    ```
+    BLOCKED: <what failed> — <what was wrong with it>
+    ```
+
+    A half-written audit file is worse than no file: `exec-plan-regression
+    check` reads `verdict:` from the latest round on disk, so a stub
+    carrying `PASS` gates a plan nobody audited, and a stub carrying
+    `FAIL` charges the plan with a defect you never established.
+
+    Never reconstruct a missing input from memory, from another plan's
+    audit, or from what the plan probably says — a document you
+    inferred is indistinguishable in the file from one you read. Never
+    shrink the set, drop a check, or write `None.` under a section you
+    did not reach: declare the gap instead. Never soften a finding you
+    did establish because the round is getting expensive.
 
     ## What You Are Judging
 
@@ -98,6 +217,9 @@ Subagent (general-purpose):
        requirement no plan claims is HIGH. A claim naming a requirement
        that does not exist is HIGH. A requirement the target claims but
        none of its tasks implements is HIGH.
+       The union spans every plan, so it grows with the set — when the
+       set outgrows the audit, the ceiling and the `NOT_REACHED`
+       declaration are in `## Edge Cases`.
     2. **Cross-plan Assumes/Produces closure.** Build a Seam table: every
        item in the target's `## Assumes` and every task `Consumes:` →
        the `Produces:` (plan:task) or IFCE section that provides it, or
@@ -280,8 +402,12 @@ Subagent (general-purpose):
     CLASSES: plan=<n> cross-plan=<n> contract=<n>
     UNCOVERED: <n requirements>
     UNRESOLVED_SEAMS: <n>
-    CHECKS_RUN: 9/9
+    CHECKS_RUN: <n>/9
+    NOT_REACHED: <checks not reached, or none>
     ```
+
+    A blocked or interrupted run returns the `BLOCKED` block from `##
+    When You Cannot Proceed` instead of this one.
 
     Then one line per HIGH finding, at most 100 characters, prefixed with
     its ID:

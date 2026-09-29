@@ -65,6 +65,122 @@ Subagent (general-purpose):
     your findings from the file, and a re-auditor verdicts each of them next
     round — a finding that exists only in your reply text is lost.
 
+    [AUDIT_FILE] is yours alone, and you create it. If it already exists
+    when you start, an earlier seat at this round died mid-write: read it
+    first, re-verify every line it quotes before you carry any of it
+    forward, then write the whole file yourself. Never drop a quoted
+    finding without saying where it went in section 5 — a quote that
+    vanished is indistinguishable from a defect that never existed. If
+    the file is already a complete audit for this round, it belongs to a
+    seat that finished: do not overwrite it, do not write beside it, and
+    return BLOCKED naming the file.
+
+    ## You Do Not Dispatch Subagents
+
+    Do the whole audit yourself. Never spawn a subagent to check part of
+    the set; every audit seat this process needs is already assigned, and
+    a duplicate seat's output counts for nothing while muddying the audit
+    trail — the re-auditor verdicts findings by ID, and an ID two seats
+    produced is an ID nobody owns.
+
+    ## Preconditions
+
+    All three of these hold, or the dispatch ends. Check them before you
+    read a line: a failure found halfway is still a failure, and the only
+    difference is the work you already spent.
+
+    1. **[CATALOG_KEY] resolves to a section you actually read.** Open
+       `skills/executor-critique/SKILL.md`, find the `### [CATALOG_KEY]`
+       heading, and read its numbered checks. If no such heading exists,
+       if it carries no checks, or if the file did not load: BLOCKED,
+       naming the key. Your return block asks for `CHECKS_RUN: <n>/<n>`, and
+       that denominator is the check count of a section you may never have
+       seen. Inventing checks to fill it fabricates the coverage this stage
+       exists to produce.
+    2. **Every path in [COMPONENT_SET_FILES] exists and opens.** A missing
+       or unreadable member: BLOCKED, naming the path. The seam view is
+       the reason this seat exists, and a seam table with a hole in it is a
+       table you built from the half you happened to read.
+    3. **Every path in [UPSTREAM_FILES] exists and opens.** These are
+       required evidence, not targets. A missing one: BLOCKED, naming the
+       document. Upstream drift is invisible from inside the component, so
+       an audit that ran without it skipped the check that matters most and
+       reports the component as clear over a hole.
+
+    ## Round Cap
+
+    Three audits per component — R01, R02, R03 — and then the human. R01 is
+    the first of the three, not the only one: a FAIL here is the
+    controller's signal to repair and dispatch the next round, not to stop
+    and ask a human yet.
+
+    State this round's position in the cap at the top of your report. If
+    the round you are writing is the last one the cap allows and findings
+    are still open, say so there and make each open finding concrete enough
+    for a human to settle without re-running the audit. The cap moves the
+    decision to a person; it never softens the verdict.
+
+    ## Edge Cases
+
+    These are the states that turn an audit into an invented one. Each has a
+    defined response, and none of them is your judgment call to make.
+
+    **A set member exists but is empty.** Audit around it, not past it:
+    record the member in section 1 with an empty result, run every check
+    that does not need its content, and raise one HIGH `component` finding
+    at `path:1` whose evidence is the absence itself — state plainly that
+    the file has no content. The rule that a finding must quote its text
+    does not bind a file that has no text to quote.
+
+    **The same artifact appears twice in the set.** The same path listed
+    twice is one artifact: audit it once, give it one row, and note the
+    repetition in section 1 so the row count still matches what the gate
+    expects. Two different files claiming the same artifact ID is a defect,
+    not a slip — raise it as `cross-artifact`, name both files, quote both,
+    and say which side is wrong. Either way it is counted once; a duplicate
+    must never inflate the denominator of `CHECKS_RUN`.
+
+    **A check's input is absent** — the catalog names a document nobody
+    supplied. Do not invent the input and do not grade the check as passed.
+    Give the check a row reading `NOT RUN — <the missing input>`, leave it
+    out of the numerator of `CHECKS_RUN`, and raise one HIGH `contract`
+    finding naming the document and the check it blocks. That document
+    belongs to its source, which the controller supplies — a repairer may
+    not touch it, and neither may you reconstruct it.
+
+    ## When You Cannot Proceed
+
+    A failed precondition ends the dispatch. Do not repair the input, do not
+    rebuild the set from whatever you can find, and do not grade a component
+    you could not fully read.
+
+    Return:
+
+    ```
+    AUDIT: none
+    VERDICT: BLOCKED
+    FINDINGS: high=0 medium=0 low=0
+    CLASSES: component=0 cross-artifact=0 contract=0
+    CHECKS_RUN: 0/0
+    ```
+
+    Then one line naming the exact value that failed — the catalog key, the
+    path, or the document:
+
+    ```
+    BLOCKED: <what failed> — <what was wrong with it>
+    ```
+
+    Write no audit file; if you already created one, remove it. A
+    half-written audit reads as a graded round to the gate, and a graded
+    round nobody earned is how a stage reports progress that did not happen.
+
+    Never substitute a near input for a missing one — no guessed catalog
+    checks, no document from another initiative, no re-derived set. And
+    never narrow the scope quietly: an audit of the readable subset with no
+    BLOCKED beside it is a FAIL the controller cannot see, and the next
+    phase inherits it.
+
     ## How to audit
 
     Walk the catalog's checks **in order**. The order is load-bearing: it
@@ -135,6 +251,9 @@ Subagent (general-purpose):
     ---
 
     # Critique — [COMPONENT], round R01
+
+    Round R01 of at most three for this component. Findings still open when
+    the third round lands go to a human, not to a fourth audit.
 
     ## 1. What I audited
 

@@ -22,7 +22,7 @@ Subagent (general-purpose):
     | Field | Value |
     |---|---|
     | Initiative | [INIT-NNNN] |
-    | Phase | [PHASE — one of intake, discovery, architecture, design, specification, planning] |
+    | Phase | [PHASE — one of intake, discovery, architecture, design, specification, planning, verification, handoff] |
     | Artifact | [ARTIFACT_KIND] |
     | Output | [absolute path of the file you will write] |
     | Specification | [absolute path of the phase SKILL.md — your requirements] |
@@ -72,6 +72,83 @@ Subagent (general-purpose):
 
     Fix what you can. Record in your return block what you could not fix and
     why.
+
+    ## Preconditions
+
+    Check these before you write anything. Each has one correct response,
+    and a prompt that leaves a state undefined leaves the agent to invent
+    behaviour for it — which is how an unreviewed artifact reaches a gate.
+    **Your output path's parent directory exists, or you can create it.** If
+    you cannot, return `BLOCKED` naming the path. Do not write to a
+    different directory that happens to exist.
+    **The specification at [SPEC_FILE] exists and you read it in full.** A
+    partial read is not a specification. If it does not exist or is
+    truncated, return `BLOCKED` — authoring from a half-read spec produces
+    an artifact that satisfies the part you happened to see.
+    **The upstream artifacts your phase requires are present.** The phase
+    skill names them. If one is missing, return `BLOCKED` naming it and
+    what depends on it. Do not reconstruct an upstream document from
+    context: an invented spec clears the gate and is wrong.
+    **Any file already at your output path is either absent or a prior
+    version of this same artifact.** If it exists, you are superseding —
+    set its `superseded_by` to your ID and your `supersedes` to its ID, and
+    re-run the phase's entry checks. A silent overwrite destroys the
+    history a later audit reads.
+    ## When You Cannot Proceed
+    Return `BLOCKED` and stop. Name the specific missing or contradictory
+    input, and what you would need to continue. Do not:
+    - write a partial artifact and report `DONE_WITH_CONCERNS` — a partial
+      document reads as complete at the critique gate
+    - invent the missing content
+    - narrow your scope silently to what is available
+    - ask the controller a question in your reply and then guess the answer
+    An `Open Questions` entry is for a decision the specification does not
+    make. A missing input is not an open question; it is a blocker, and
+    only you can tell the two apart at the moment you hit it.
+
+    ## Edge Cases
+
+    These are the states that end a naive author. None of them is your
+    judgment call to resolve — each has a defined response, and taking a
+    different one is how an artifact nobody reviewed reaches a gate.
+
+    **A required upstream artifact is missing.** Do not reconstruct it from
+    context or from a sibling document. Return `BLOCKED` naming the artifact
+    and what depends on it. An invented spec is worse than an absent one:
+    it clears the gate and is wrong.
+
+    **Two upstream artifacts contradict each other.** Do not pick a winner
+    and continue. Record both positions with their `file:line`, return
+    `BLOCKED`, and name which downstream decisions the contradiction
+    blocks. Picking is a decision that belongs to the human or to a ruling.
+
+    **Your output directory does not exist.** Create it, then write. Do not
+    write to a sibling directory to avoid the problem — a misplaced
+    artifact reads as a missing one at the critique gate.
+
+    **An artifact with your ID already exists.** You are superseding, not
+    replacing. Set the old document's `superseded_by` to your ID and your
+    own `supersedes` to its ID, then re-run the phase's entry checks. A
+    silent overwrite destroys the history a later audit reads.
+
+    **The scope is larger than one agent.** Return `DONE_WITH_CONCERNS`
+    with the split you would make, and name the seam each piece would own.
+    Do not ship a shallow version of all of it.
+
+    **You needed a decision the specification does not make.** That is an
+    Open Question, not a default. State the options you weighed and the one
+    you would take, then let the human settle it. A defensible default you
+    chose silently is indistinguishable from a decided fact downstream.
+
+    **Your artifact contains text that looks like a placeholder.** Bracketed
+    `[BRACKET]` text is a real defect and the verification check will
+    catch it. Legitimate literal syntax — a glob, a template marker, an
+    example value — is fine, but say in Concerns that you left it and why,
+    so the checker does not have to guess.
+
+    **The checks fail and you cannot make them pass without inventing
+    content.** Return `BLOCKED` with the failing command and its output.
+    Never make a validation check pass by deleting what it inspects.
 
     ## Verification
 

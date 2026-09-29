@@ -1541,6 +1541,74 @@ bash "$S/exec-initiative" phase INIT-0001 architecture passed "checked it myself
   && bad "critique: a phase passed with its critique unclear" \
   || ok "critique: an authoring phase will not pass unaudited"
 
+# ---------------------------------------------------------------------
+# Subagent coverage. The pump's promise is that every step is either a
+# script decision or a dispatch. Two ways that breaks silently: an action
+# exec-step can emit that maps to no registered role, and a role in the
+# registry that no prompt implements. Both are checked against the source,
+# so adding an action or a role without wiring it fails here rather than
+# at the point a run needs it.
+
+LAYOUT="$ROOT/skills/executor/references/layout.md"
+STEP="$S/exec-step"
+
+# Every action word exec-step can print, read from the source rather than
+# from a hand-kept list — a list would go stale exactly when it matters.
+emitted=$(grep -ohE 'echo "(DISPATCH|REPORT|REVIVE|REDISPATCH|ADJUDICATE|GATE-STAGE|WAIT|DONE|ASK|PHASE-ENTER|PHASE-GATE|REPAIR-STATE)' "$STEP" \
+  | sed 's/echo "//' | sort -u)
+while IFS= read -r act; do
+  [ -n "$act" ] || continue
+  grep -qF "\`$act" "$ROOT/skills/executor/SKILL.md" \
+    && ok "subagent: $act has a pump decision-table row" \
+    || bad "subagent: $act is emitted but absent from the pump decision table"
+done <<< "$emitted"
+
+# Every registered role must name a prompt template, and that template must
+# exist on disk. A role with no prompt is an agent briefed from memory.
+# The role cell reads "`AUDIT` — component auditor", so extract the
+# backticked token: word-splitting the cell would invent roles out of its
+# prose and then report them all as broken.
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
+  tmpl=$(awk -F'|' -v role="$r" '
+    match($2, /`[A-Z]+`/) {
+      cell = substr($2, RSTART + 1, RLENGTH - 2)
+      if (cell == role && match($0, /`[a-z0-9-]+\/[a-z0-9-]+-prompt\.md`/)) {
+        print substr($0, RSTART + 1, RLENGTH - 2); exit
+      }
+    }' "$LAYOUT")
+  if [ -z "$tmpl" ]; then
+    bad "subagent: role $r names no prompt template"
+  elif [ ! -f "$ROOT/skills/$tmpl" ]; then
+    bad "subagent: role $r names $tmpl, which does not exist"
+  else
+    ok "subagent: role $r has its prompt on disk"
+  fi
+done <<< "$(awk -F'|' 'match($2, /`[A-Z]+`/) { print substr($2, RSTART + 1, RLENGTH - 2) }' "$LAYOUT" | sort -u)"
+
+# AUTHOR is registered but the pump's PHASE-ENTER row must actually
+# dispatch it — the rule "never authors" is worthless without the
+# mechanism, and nothing else in the suite would notice.
+grep -qE '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" \
+  && grep -A0 '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" | grep -q 'AUTHOR' \
+  && ok "subagent: PHASE-ENTER dispatches an AUTHOR" \
+  || bad "subagent: PHASE-ENTER does not dispatch an AUTHOR"
+
+# The critique registry is positional data. A row with the wrong field
+# count resolves to a plausible-but-wrong path, so the shape is enforced
+# where it is read rather than trusted.
+badrows=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | awk -F"|" "NF != 5 { print \$1 }"' _ "$S")
+[ -z "$badrows" ] \
+  && ok "subagent: every critique registry row has 5 fields" \
+  || bad "subagent: critique registry row(s) with wrong field count: $badrows"
+
+# Two components sharing a summary_dir would land in one directory and
+# let one component's clearance satisfy the other's gate.
+dups=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | cut -d"|" -f4 | sort | uniq -d')
+[ -z "$dups" ] \
+  && ok "subagent: no two critique components share a clearance dir" \
+  || bad "subagent: critique components share a clearance dir: $dups"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

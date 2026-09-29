@@ -49,10 +49,22 @@ round_arg=${4:-01}
 # name the component has no business clearing it.
 row=$(exec_critique_component "$component" "$init_id")
 
+
 phase=$(printf '%s' "$row" | cut -d'|' -f2)
 set_spec=$(printf '%s' "$row" | cut -d'|' -f3)
 summary_sub=$(printf '%s' "$row" | cut -d'|' -f4)
 catalog=$(printf '%s' "$row" | cut -d'|' -f5)
+
+# The registry is positional data, and a row with one field too many reads
+# as plausible-but-wrong: summary_dir silently becomes `-` and two
+# components land in the same directory named after it. Counting the
+# fields is cheaper than debugging that.
+fields=$(printf '%s\n' "$row" | awk -F'|' '{ print NF }')
+[ "$fields" -eq 5 ] \
+  || exec_die "critique registry row for '$component' has $fields fields, expected 5 (component|phase|set_spec|summary_dir|catalog) — fix the row in _exec-lib.sh"
+case "$summary_sub" in
+  ""|-) exec_die "critique registry row for '$component' has no summary_dir — every component needs a home for its clearance record" ;;
+esac
 
 idir=$(exec_initiative_dir "$init_id")
 run_dir=$(exec_initiative_run_dir "$init_id-$component")

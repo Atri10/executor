@@ -105,6 +105,19 @@ reliable worker in this system — it dies, compacts, drifts, and is under
 pressure at exactly the moment a judgment call matters — so the design
 assumes it will try to be clever and takes away the opportunity.
 
+The same loop runs on the phase axis, and it is the same shape:
+
+1. `exec-step INIT-NNNN` emits `PHASE-ENTER <phase>`.
+2. You write the Entered cell, then **dispatch that phase's `AUTHOR`**.
+3. The author writes the artifact and returns. You do not.
+4. The phase's own critique stage runs (`AUDIT` → `REPAIR` → `AUDIT`).
+5. `exec-step` emits `PHASE-GATE`. The human gates it, or `exec-gate --auto`
+   does, and `exec-initiative` refuses unless both the artifact gate and
+   the critique are clear.
+
+Every arrow in that list is a dispatch or a script. There is no step where
+you do the work, and that is the property the whole design is buying.
+
 ### The decision table
 
 | `exec-step` emits | You do |
@@ -119,8 +132,29 @@ assumes it will try to be clever and takes away the opportunity.
 | `ASK <topic>` | Relay to the human, or spawn a `DECIDE`/`SUPERVISOR` for a `decision`-class question |
 | `WAIT` | Stop and let the workers run. Say what you are waiting on |
 | `DONE` | The run is finished. Report and stop |
-| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered` |
+| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered`, then **dispatch the phase's `AUTHOR` subagent** with `executor/author-prompt.md` and the phase skill's `SKILL.md` as its specification. Authoring the artifact yourself is the one thing this table exists to stop |
 | `PHASE-GATE <init> <phase>` | Ask the human to gate the phase. If autonomous mode is declared for it, `exec-gate <init> <phase> --auto`; if that refuses, present the artifact — a refusal is the answer, not an obstacle to work around |
+
+
+**What "subagent-driven" means here, precisely.** Every step is either a
+dispatch or a script call — never you doing the work. The two look similar
+from the outside and are not:
+
+- A **dispatch** is intellectual work: authoring, auditing, implementing,
+  reviewing, adjudicating. It goes to a named role with a registered
+  prompt, and its output is an artifact someone else will read.
+- A **script call** is a transition: `exec-initiative phase … entered`,
+  `exec-workspace`, `exec-branch merge`. You invoke it, it writes state,
+  and there is no judgment anywhere in the path.
+
+`REPAIR-STATE` is the second kind. The controller is the thing that drifted
+ the store, so the controller is the thing that repairs it — and the repair
+is a script call, not a decision. Giving it a subagent prompt would add a
+layer that can only be less informed than the thing it replaced.
+
+The test: *would a subagent reading only its prompt know more than you do
+right now?* If yes, dispatch. If the prompt would just be a transcript of
+the command you are about to type, run the command.
 
 ### What the pump never does
 

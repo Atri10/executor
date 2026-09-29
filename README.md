@@ -93,10 +93,81 @@ frontmatter description.
 | `executor-verification` | Verification | Evidence-backed proof each requirement holds |
 | `executor-handoff` | Handoff | Human decision menu: merge, PR, or keep the branch |
 | `executor-brainstorm` | Cross-phase | Recorded divergent ideation sessions; visual companion optional |
+| `executor-critique` | Every phase (gate) | Per-component audit, repair, re-audit; gates the phase that produced the artifacts |
 
 **Phases compress, they never vanish.** A small initiative can produce a
 charter and a spec in one exchange and skip discovery — but skipping is a
 stated decision recorded in the charter, not an omission.
+
+### The shape of a run
+
+The controller runs one loop and holds no judgment: it runs `exec-step`,
+reads the single action word it prints, does that, and goes back. Every
+arrow below is either a script decision or a dispatched subagent. There is
+no step where the controller does the work.
+
+```mermaid
+flowchart TD
+    start(["exec-step INIT-NNNN"]) --> enter{"PHASE-ENTER phase"}
+    enter --> author["dispatch AUTHOR phase"]
+    author --> artifact["artifact on disk"]
+    artifact --> check["exec-critique check"]
+    check -->|"not clear"| loop["AUDIT then REPAIR then re-AUDIT"]
+    loop --> check
+    check -->|"clean or waived"| gate{"PHASE-GATE phase"}
+    gate -->|"human gates it"| next["next phase"]
+    gate -->|"autonomous declared"| auto["exec-gate --auto"]
+    auto -->|"refused"| gate
+    auto -->|"auto-passed"| next
+    next --> start
+    start -->|"every phase resolved"| done(["DONE"])
+```
+
+The phase order, and which of them carry a critique gate. Every authoring
+phase does; the two critique phases audit the others.
+
+```mermaid
+flowchart LR
+    I["intake"] --> D["discovery"]
+    D --> A["architecture"]
+    A --> G["design"]
+    G --> S["specification"]
+    S --> P["planning"]
+    P --> PR["plan-regression"]
+    PR --> E["execution"]
+    E --> R["review"]
+    R --> V["verification"]
+    V --> H["handoff"]
+
+    classDef gated fill:#1f3a5f,stroke:#4a90d9,color:#fff
+    classDef critic fill:#3d2f1f,stroke:#d9a04a,color:#fff
+    class I,D,A,G,S,P,E,V,H gated
+    class PR,R critic
+```
+
+### The task loop inside execution
+
+Each plan's tasks run as a loop, and a task result reaches run state only
+through a gate. A worker that stops is escalated through a fixed ladder
+before anyone is replaced.
+
+```mermaid
+flowchart TD
+    step(["exec-step PLAN_FILE"]) --> act{"action"}
+    act -->|"DISPATCH"| brief["exec-brief then exec-context"]
+    brief --> impl["dispatch IMPL"]
+    impl --> worker[("worker runs on its own branch")]
+    worker -->|"done"| rep["dispatch REPORT writer"]
+    rep --> commit["exec-report gates and commits"]
+    act -->|"GATE-STAGE"| audit["exec-run complete"]
+    audit -->|"refused on failure"| act
+    act -->|"WAIT"| idle[("stop, workers keep running")]
+    act -->|"REVIVE"| revive["same agent plus revive-preamble"]
+    revive --> worker
+    act -->|"ADJUDICATE"| sup["dispatch SUPERVISOR"]
+    sup --> act
+    act -->|"DONE"| fin(["plan complete"])
+```
 
 ## Feature highlights
 
