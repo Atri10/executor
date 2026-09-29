@@ -73,8 +73,9 @@ Subagent (general-purpose):
     listed finding.
 
     If an ID in [OPEN_FINDING_IDS] does not exist in the prior verdict, or the
-    prior verdict is unreadable, say so in your Verdict section and verdict
-    nothing you could not read. Do not invent the finding from the fix diff.
+    prior verdict is unreadable, `## Preconditions` says what to do. The short
+    form: name what you could not read, verdict nothing you could not read,
+    and never invent the finding from the fix diff.
 
     ## The Fix
 
@@ -97,6 +98,38 @@ Subagent (general-purpose):
     process already provides every review seat the work gets; a reviewer you
     spawn duplicates one of them at full cost, and its verdict counts for
     nothing.
+
+    ## Preconditions
+
+    All five hold, or the dispatch ends. A re-review is arithmetic on the
+    prior round's record: every verdict you issue points at an ID in
+    [PRIOR_VERDICT_FILE], so a broken input here does not weaken the result —
+    it invalidates every row of it.
+
+    1. **[DIFF_FILE] exists and covers [FIX_BASE_SHA]..[HEAD_SHA].** Missing
+       or unreadable: `BLOCKED`, naming the path. An existing file whose range
+       carries no commit is the second event, not the first: nobody fixed
+       anything, and `## Edge Cases` says what that round is.
+    2. **[PRIOR_VERDICT_FILE] exists, is readable, and its Findings section
+       carries every ID in [OPEN_FINDING_IDS] with a headline and a
+       file:line.** An unreadable or truncated file: `BLOCKED`, naming the
+       path. A readable file missing an ID: `BLOCKED` too, naming each
+       unresolvable ID — a closure table keyed on findings you had to invent
+       is a table of somebody else's review, and the next round would grade
+       against it.
+    3. **[BRIEF_FILE] exists and still describes [TASK_ID].** It is the
+       reference the prior findings were written against, so a brief that
+       moved between rounds is a fact to report, not a standard to silently
+       re-point. Missing or unreadable: `BLOCKED`, naming the path.
+    4. **[REPORT_FILE] exists and its last section is this round's fix
+       report.** A fix report that never landed means the round you were
+       sent to verify did not happen: `BLOCKED`, naming the report and the
+       round. A report that landed and describes no change at all is the
+       empty-fix-range case in `## Edge Cases`.
+    5. **[VERDICT_FILE] is this round's path and holds no other round's
+       verdict.** An occupied path is another round's audit evidence, and
+       the Edge Cases section below says what it means and what, if
+       anything, you may write.
 
     ## Scope — Two Jobs
 
@@ -253,6 +286,106 @@ Subagent (general-purpose):
     **Reasoning:** one or two sentences, technical.
     ```
 
+    ## Edge Cases
+
+    **[PRIOR_ROUND_ID] ended NEEDS_FIXES and the fix range carries no commit
+    against any open finding.** Nobody fixed anything, or the attempt
+    committed nothing: a failed fix round, not a re-review with nothing to
+    say. Verdict each finding NOT ADDRESSED with its evidence line reading
+    `no commit in [FIX_BASE_SHA]..[HEAD_SHA] touches this finding`, and open
+    the gate reasoning with the fact that the range is empty. What the
+    controller does next differs between the two cases — a NOT ADDRESSED
+    verdict against a real fix is closed as a fix attempt, the same verdict
+    against an empty range is bookkeeping nobody actioned — and reporting
+    them identically spends a round to learn nothing. Re-raise nothing
+    else: there is no new code, so impact review has no object, and
+    restating the prior round's prose is a second opinion, not a review.
+
+    **[FIX_BASE_SHA] is not the head [PRIOR_ROUND_ID] saw.** The worker was
+    REDISPATCHED rather than revived, so this range starts from somewhere the
+    first review never assumed. Verify the base once against the SHAs you
+    were given — reading a commit out of the repository is not the range
+    rebuild the diff forbids — and record in section 4 both the range end
+    the prior verdict names and the base this round was given, so the
+    controller can see the two differ. Then grade as this round's own work:
+    section 1 verdicts each finding against the implementation at
+    [HEAD_SHA], which is what closure means, and section 2 grades everything
+    the range contains, including the redispatch's own commits, which no
+    earlier review has seen. A base you cannot establish at all is
+    precondition 1: `BLOCKED`, naming it.
+
+    **A verdict file already exists at [VERDICT_FILE].** Your own file
+    carries the open-finding list forward: the next fix implementer reads
+    the still-open IDs from it, and the next round reads its own from
+    there. Read it first, then take one of two paths.
+    - It carries a different `round:` or a different `**Range:**`. That is
+      another round's file, and the prior verdict you are verifying may
+      itself live at that path. Never overwrite it, never append to it, and
+      never file this round's verdicts under its name: `BLOCKED`, naming the
+      file, the round it carries, and the round you were dispatched for.
+      Only the controller can move a round's path.
+    - It carries this round's `round:` and the same range. The earlier
+      dispatch for this round was aborted after writing: that is your own
+      round in progress, not a prior round's evidence. Finish it in place,
+      and record the supersession in section 4 so the controller can tell
+      one round rewritten from two rounds merged.
+
+    **You are interrupted between impact review and closure.** Return the
+    `BLOCKED` block, naming where you stopped, and write no file. A
+    half-written closure table is a set of verdicts on findings nobody
+    finished checking, and the next round would grade against it.
+
+    ## Self-Critique Before You Return
+
+    Attack your own re-review before you file it. This is a closure gate —
+    a wrong PASS merges a defect, a wrong FAIL burns a round.
+
+    1. **Did you run the impact review before closure?** For every fix
+       touching shared code — a signature, a type, a contract, a file other
+       tasks read — you traced the consumers it affects. A fix that broke a
+       caller is new breakage, not a closed finding.
+    2. **Is each ADDRESSED judgment tied to the root cause** — did the fix
+       change the condition that produced the defect, not just guard one
+       call path or catch-and-continue?
+    3. **Did you re-review the fix diff, not the original task?** New
+       breakage comes from the fix diff; re-raising a settled finding
+       re-runs work already judged.
+    4. **Is pre-existing breakage reported as a finding, not attributed to
+       this fix?** A defect older than the fix diff is a new finding for
+       the controller, not a FAIL reason here.
+    5. **Are the still-open IDs exactly the ones your verdict file lists?**
+       The controller parks by ID — an ID you name in prose but omit from
+       the file is never closed.
+
+    ## Verification
+
+    Before you return, confirm the artifacts you produced:
+
+    1. The verdict file at [VERDICT_FILE] exists and every listed finding
+       carries a verdict of ADDRESSED, NOT ADDRESSED, or OUT_OF_SCOPE.
+    2. The ADDRESSED/NOT-ADDRESSED counts in your return line match the
+       file — count them, do not recall them.
+    3. On a PASS, your message carries the five status lines and nothing
+       after them.
+
+    ## When You Cannot Proceed
+
+    A failed precondition, an occupied verdict path, or an interruption
+    ends the dispatch before any verdict is issued. The `BLOCKED` block at the
+    end of this prompt is what you return in place of the status, with the
+    failing input named.
+
+    Never reconstruct the round you were asked to re-audit. Not the prior
+    verdict you could not read, not a finding reconstructed from the fix
+    diff, not a fix report nobody wrote, not a base you guessed. A closure
+    graded against documents you supplied yourself is the most dangerous
+    output this seat can produce, because it is indistinguishable from a
+    real one and the controller closes findings on it by ID. Never report
+    zero open findings over zero readings as a way of declining — that reads
+    as a clean round, and the cap moves past it. Never narrow the re-review
+    to the findings you happened to reach: impact review is not optional
+    because closure was the part you could finish.
+
     ## What You Return
 
     Your final message is exactly this, and nothing else:
@@ -274,6 +407,25 @@ Subagent (general-purpose):
     ```
 
     On a PASS, return the five status lines and nothing after them.
+
+    A failed precondition, an occupied verdict path, or an interruption
+    returns this block instead, with the failing input named:
+
+    ```
+    VERDICT: none
+    ADDRESSED: 0/0
+    NEW_BREAKAGE: critical=0 important=0 minor=0
+    OUT_OF_SCOPE: 0
+    GATE: BLOCKED
+    ```
+
+    ```
+    BLOCKED: <missing fix diff | unreadable prior verdict | unresolvable finding IDs | missing brief | missing fix report | occupied verdict path | interrupted>
+    ```
+
+    `ADDRESSED: 0/0` is not a clean round: the denominator is the count of
+    findings you were given, and a round that graded none of them has
+    established nothing. `GATE: BLOCKED` is neither PASS nor FAIL.
 ```
 
 **Placeholders — every one is required:**

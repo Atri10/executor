@@ -83,6 +83,153 @@ phase's territory (discovery producing architecture, planning writing
 requirements), stop and either re-route or record the phase transition
 properly.
 
+**5. During execution, you are a pump, not a planner.** `exec-step` decides
+what is legal next; you carry it out. You do not read artifacts to work out
+what should happen, you do not choose the order, and you do not hold state
+between turns. If you find yourself reasoning about what the run "should"
+do next, that reasoning belongs to the script or to a dispatched agent —
+see The Pump Contract below.
+
+## The Pump Contract
+
+Execution has one loop, and it is mechanical:
+
+1. Run `exec-step PLAN_FILE` (or bare `exec-step` to scan every in-flight
+   run).
+2. Read the single action word it prints.
+3. Do exactly that thing.
+4. Go back to 1.
+
+That is the whole of your job during a run. The controller is the least
+reliable worker in this system — it dies, compacts, drifts, and is under
+pressure at exactly the moment a judgment call matters — so the design
+assumes it will try to be clever and takes away the opportunity.
+
+The same loop runs on the phase axis, and it is the same shape:
+
+1. `exec-step INIT-NNNN` emits `PHASE-ENTER <phase>`.
+2. You write the Entered cell, then **dispatch that phase's `AUTHOR`**.
+3. The author writes the artifact and returns. You do not.
+4. The phase's own critique stage runs (`AUDIT` → `REPAIR` → `AUDIT`).
+5. `exec-step` emits `PHASE-GATE`. The human gates it, or `exec-gate --auto`
+   does, and `exec-initiative` refuses unless both the artifact gate and
+   the critique are clear.
+
+Every arrow in that list is a dispatch or a script. There is no step where
+you do the work, and that is the property the whole design is buying.
+
+### The decision table
+
+| `exec-step` emits | You do |
+|---|---|
+| `DISPATCH <task-id> <n>` | `exec-brief` + `exec-context` for the task, then spawn the role's subagent from its registry prompt |
+| `REPORT <report-file>` | Run `exec-report PLAN_FILE <report-file>` — it gates, and either commits or refuses. Never write the ledger line yourself |
+| `REVIVE <task-id>` | Re-dispatch the same agent with `executor/revive-preamble.md` prepended; rewrite the row's Outcome to `revived-rv1` |
+| `REDISPATCH <task-id>` | Fresh agent, full brief, `revive-preamble.md` prepended; Outcome becomes `revived-rv2` |
+| `ADJUDICATE <task-id>` | Spawn a `SUPERVISOR` with the evidence. Do not rule yourself |
+| `GATE-STAGE <plan-id>` | `exec-run PLAN_FILE complete` — it runs the full audit and refuses on failure |
+| `REPAIR-STATE <what>` | Run the named repair (almost always `exec-workspace`) |
+| `ASK <topic>` | Relay to the human, or spawn a `DECIDE`/`SUPERVISOR` for a `decision`-class question |
+| `WAIT` | Stop and let the workers run. Say what you are waiting on |
+| `DONE` | The run is finished. Report and stop |
+| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered`, then **dispatch the phase's `AUTHOR` subagent** with `executor/author-prompt.md` and the phase skill's `SKILL.md` as its specification. Authoring the artifact yourself is the one thing this table exists to stop |
+| `PHASE-GATE <init> <phase>` | Ask the human to gate the phase. If autonomous mode is declared for it, `exec-gate <init> <phase> --auto`; if that refuses, present the artifact — a refusal is the answer, not an obstacle to work around |
+
+
+**What "subagent-driven" means here, precisely.** Every step is either a
+dispatch or a script call — never you doing the work. The two look similar
+from the outside and are not:
+
+- A **dispatch** is intellectual work: authoring, auditing, implementing,
+  reviewing, adjudicating. It goes to a named role with a registered
+  prompt, and its output is an artifact someone else will read.
+- A **script call** is a transition: `exec-initiative phase … entered`,
+  `exec-workspace`, `exec-branch merge`. You invoke it, it writes state,
+  and there is no judgment anywhere in the path.
+
+`REPAIR-STATE` is the second kind. The controller is the thing that drifted
+ the store, so the controller is the thing that repairs it — and the repair
+is a script call, not a decision. Giving it a subagent prompt would add a
+layer that can only be less informed than the thing it replaced.
+
+The test: *would a subagent reading only its prompt know more than you do
+right now?* If yes, dispatch. If the prompt would just be a transcript of
+the command you are about to type, run the command.
+
+### What the pump never does
+
+- **Never authors.** Charter, spec, architecture, plan, report, verdict —
+  every one is a dispatch. An artifact the controller wrote is an artifact
+  nobody reviewed.
+- **Never judges.** Clean or dirty, pass or fail: that is `exec-report`,
+  `exec-run complete`, or a `SUPERVISOR`'s ruling.
+- **Never improvises a transition.** If the emitted word has no row in the
+  table above, you have found a gap in the engine. Record it as a concern
+  and stop; do not approximate the missing behaviour.
+- **Never absorbs a dead worker's work.** A worker that stopped is revived
+  or redispatched with its report in context. Taking over the task yourself
+  deletes the audit trail and is the single most damaging thing a pump can
+  do.
+- **Never passes a phase gate yourself.** Not with
+  `exec-initiative phase … passed`, and not by editing the phase log. Every
+  authoring phase is gated twice over: by the component's artifact gate, and
+  by an independent critique of that component —
+  `exec-critique INIT_ID COMPONENT check`, which `exec-initiative` runs on
+  your behalf. When either refuses, the correct next move is to dispatch the
+  audit or present the artifact to the human — never to find another route
+  to the same state.
+
+  A gate the human did not clear goes through `exec-gate --auto`, which
+  refuses unless the initiative's `autonomous.md` permits it. You may
+  recommend a human waiver of an open finding; you may never grant one, and
+  a waiver the human did not state is not a waiver.
+
+### Autonomous mode
+
+An initiative may run unattended for the phases its `autonomous.md` names.
+The file lives at the initiative's root and is a table, one row per phase:
+
+```markdown
+| Phase | Mode | Why |
+|---|---|---|
+| intake | deny | the charter is the human's to approve |
+| execution | allow | every stage is gated; workers are dispatched, not self-approved |
+```
+
+`deny` never clears unattended. `gate` clears when the phase's own
+structural gate passes. `allow` is the same for a gate a script can verify,
+and additionally permitted for a pick-class phase **only** when a scored
+verdict is already on disk — a script can count files, it cannot choose
+between designs.
+
+The policy fails closed. A missing file, `enabled: false`, an unlisted
+phase, or a mode spelled anything else all read as `deny`. If you find
+yourself wanting to widen it mid-run, that is a change for the human to
+make, not you.
+
+An auto-pass is recorded as `**auto-passed**`, never as a bare date. Keep
+it that way: the difference between "a person looked at this" and "the
+policy cleared this" is the difference a reader needs six weeks later. A
+human who disagrees overturns it with
+`exec-initiative phase <init> superseded <phase> "<why>"`, which reopens
+the phase.
+
+### When the human interrupts
+
+If the human says something mid-run, do not interpret it and carry on. Two
+cases:
+
+- They answer a question you asked — record it with
+  `exec-ruling … --answered "<the question>"`.
+- They say something you did not ask about — record it with
+  `exec-ruling … --unsolicited "<their words, verbatim>"`. If they are
+  halting, add `--stop`; the script blocks the run and prints a `STOP`
+  line. Relaying a stop is mechanical, and you do not get to talk the human
+  out of it.
+
+Their words go in verbatim. A paraphrase in a ruling is a ruling nobody can
+check against what was actually said.
+
 ## Drift Recovery — when you notice you violated a rule
 
 Violations compound: an inline edit becomes an unrecorded decision, becomes
@@ -265,11 +412,11 @@ output, and a gate that must pass before the next phase starts.
 | Phase | Skill | Output | Gate |
 |---|---|---|---|
 | Intake | `executor-initiative` | Initiative folder, charter | Human approves the charter's problem statement and success criteria |
-| Discovery | `executor-discovery` | Research, options comparison | Human picks an approach |
+| Discovery | `executor-discovery` | Research, options comparison, the feature's design session | Human picks an approach |
 | Architecture | `executor-architecture` | Architecture, ADRs, interfaces | Human approves the structure |
 | Design | `executor-architecture` | Component designs | Human approves, or waives for simple initiatives |
-| Specification | `executor-spec` | Spec, risks, verification strategy | Human reviews the written spec |
-| Planning | `executor-planning` | One or more plans with tasks | Plan set drafted |
+| Specification | `executor-spec` | Spec, risks, verification strategy | Entry: a decided brainstorm session feeding specification. Exit: human reviews the written spec |
+| Planning | `executor-planning` | One or more plans with in-depth tasks | Entry: a decided decomposition session feeding planning. Exit: plan set drafted and linted |
 | Plan regression | `executor-plan-regression` | Plan-set audit reports, repairs, gate summary | Every plan clean or human-waived; human then picks an execution mode |
 | Execution | `executor-execution` | Commits, reports, ledger | Every task reviewed and complete |
 | Review | `executor-review` | Verdicts, findings, rulings | Final whole-branch review clean |
@@ -312,11 +459,15 @@ happened.
 
 ```mermaid
 flowchart TB
+    BR["Brainstorm, design session"] -->|"adopted at intake"| I
     I["Intake, charter"] --> DI["Discovery, research, options"]
-    DI --> AR["Architecture, ADRs, interfaces"]
+    DI -->|"design session"| BRD["Brainstorm, decided"]
+    BRD --> AR["Architecture, ADRs, interfaces"]
     AR --> DE["Design, components"]
     DE --> SP["Specification, spec, risks, verification"]
-    SP --> PL["Planning, plans, tasks"]
+    BRD -->|"feeds specification"| SP
+    SP --> BRP["Brainstorm, decomposition decided"]
+    BRP -->|"feeds planning"| PL["Planning, plans, tasks"]
     PL --> RG["Plan regression, plan-set audit"]
     RG --> EX["Execution, dispatch loop"]
     RG -->|"findings"| PL
@@ -327,11 +478,22 @@ flowchart TB
     VF -->|"gap found"| EX
 ```
 
+**Every phase critiques and verifies its own output before its gate.**
+Each phase skill carries a `## Self-Critique` section — an adversarial
+pass over the artifacts it just wrote — and a `## Verification` section —
+the commands that prove them, run in this session with their output
+cited. A gate claimed before both ran is not claimed. Every subagent a
+phase dispatches is briefed from its dedicated prompt template in the
+[dispatch registry](references/layout.md#dispatch-registry), and each
+template carries the same two sections for the agent's own output.
+
 ## Routing
 
 | You need to… | Skill |
 |---|---|
 | Start a body of work, allocate an initiative | `executor-initiative` |
+| Design a new feature or use case from a rough idea | `executor-brainstorm` (before any initiative exists, or at discovery) |
+| Decide one open design question, or how a spec splits into plans | `executor-brainstorm` (decision mode) |
 | Understand the problem, compare approaches | `executor-discovery` |
 | Decide structure, record a decision, define interfaces | `executor-architecture` |
 | Write the requirements contract | `executor-spec` |
@@ -433,6 +595,38 @@ gate crossed in the same message that presented it, no invented state when
 the indexes disagreed with memory, no phase transition without the script.
 The whole discipline is: ground first, work one phase, end turns at gates,
 record through scripts.
+
+## Self-Critique
+
+Before routing, and again before claiming any gate, run this against what
+you are about to do:
+
+1. **Is this the right phase?** Name the phase from the initiative's
+   `INDEX.md` phase log, not from memory. A plan written while the log says
+   specification is work past a gate nobody passed.
+2. **Is the next entry gated?** Specification and planning need a decided
+   brainstorm session feeding them. If none exists, the route is
+   `executor-brainstorm`, not the phase skill.
+3. **Did the phase skill's own Self-Critique and Verification run** — and
+   is their output in this session, not recalled from an earlier one?
+4. **Is every subagent about to be dispatched briefed from its registered
+   prompt template**, every placeholder filled, and its model named?
+5. **Is anything in the message past the gate?** A gate presentation ends
+   the turn; work after it is unapproved.
+
+## Verification
+
+Run these at the start of every session and before every gate:
+
+1. `git branch --show-current; git rev-parse HEAD; git status --short` —
+   the repository state the session starts from.
+2. Read `docs/executor/INDEX.md` and the initiative's `INDEX.md` — the
+   phase and gate state come from disk.
+3. `scripts/exec-store-check` — the thinking store is consistent; a
+   finding is repaired before new work, not after.
+4. In a run: `scripts/exec-run PLAN check` — the registry row agrees with
+   the ledger.
+5. Before any handoff: `scripts/exec-scan-secrets` — exit 0.
 
 ## Common Rationalizations
 

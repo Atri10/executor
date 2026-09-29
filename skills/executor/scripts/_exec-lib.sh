@@ -98,6 +98,70 @@ exec_initiative_dir() {
   echo "$match"
 }
 
+# The same lookup, but printing nothing instead of dying when the
+# initiative does not exist. Callers that merely want to ask "is this run
+# in flight?" need this; exec_initiative_dir's exec_die calls `exit`, and
+# an `exit` inside a command substitution tears down the whole subshell —
+# a `|| true` written alongside it inside the same $( ) never runs, and
+# under `set -e` the caller dies instead of seeing an empty result.
+exec_initiative_dir_opt() {
+  local id=$1 store match
+  store=$(exec_docs_store 2>/dev/null) || return 0
+  [ -d "$store" ] || return 0
+  match=$(find "$store" -maxdepth 1 -type d -name "${id}-*" -print -quit 2>/dev/null) || return 0
+  [ -n "$match" ] || match=$(find "$store" -maxdepth 1 -type d -name "$id" -print -quit 2>/dev/null) || return 0
+  [ -n "$match" ] && echo "$match"
+  return 0
+}
+
+# ------------------------------------------------------------------
+# Autonomous policy: which phase gates may be cleared without a human.
+#
+# The file is `autonomous.md` at the initiative's root:
+#
+#   ---
+#   kind: autonomous
+#   initiative: INIT-0001
+#   enabled: true
+#   ---
+#
+#   | Phase | Mode | Why |
+#   |---|---|---|
+#   | intake | deny | the charter is the human's to approve |
+#   | execution | allow | every stage is gated; workers are dispatched, not self-approved |
+#
+# Modes are `deny`, `gate`, `allow`. Anything else — a missing file, a
+# missing row, an unparseable mode, or `enabled: false` — reads as `deny`.
+# That default is the whole point: a policy that fails open turns a typo in
+# a table cell into an unattended phase gate, which is the one failure this
+# file exists to make impossible.
+exec_autonomous_mode() {
+  local dir=${1:-} phase=${2:-}
+  local f="$dir/autonomous.md"
+  [ -n "$dir" ] && [ -f "$f" ] || { echo "no policy"; return 0; }
+  exec_frontmatter "$f" enabled 2>/dev/null | grep -q '^true$' || { echo "disabled"; return 0; }
+  local mode
+  mode=$(awk -F'|' -v ph="$phase" '
+    /^\|[ \t]*Phase[ \t]*\|/ {
+      for (i = 2; i <= NF; i++) {
+        c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c == "Phase") pi = i
+        else if (c == "Mode") mi = i
+      }
+      next
+    }
+    pi && $0 ~ ("^\\|[ \t]*" ph "[ \t]*\\|") {
+      m = $mi; gsub(/^[ \t]+|[ \t]+$/, "", m)
+      print m; exit
+    }
+  ' "$f" 2>/dev/null)
+  case "${mode:-}" in
+    deny|gate|allow) echo "$mode" ;;
+    # An unlisted or unrecognized phase is denied, never guessed at.
+    *) echo "deny" ;;
+  esac
+}
+
 # Ensure the run store exists and is self-ignoring. Writing the .gitignore
 # unconditionally means no subsystem can forget it and no user has to add it
 # by hand — that omission is what made the legacy store pollute git status.
@@ -383,9 +447,10 @@ updated_at: $stamp
 *Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
 *Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
 *Branch is the task branch the agent worked on (task/<TASK-ID>), written by exec-branch task start; a sequential plan leaves it empty.*
+*Last-Seen is the liveness witness exec-step reads: the pump refreshes it each turn and the worker touches state/<TASK-ID>.heartbeat as it works. Started alone is day-granular, which cannot tell a slow worker from a dead one. Absence of the column in an older workspace is tolerated — readers locate it by name and fall back to Started.*
 
-| Task | Role | Model | Agent | Branch | Started | Outcome | Context |
-|---|---|---|---|---|---|---|---|
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
+|---|---|---|---|---|---|---|---|---|
 EOF
 }
 
@@ -693,4 +758,164 @@ exec_frontmatter_has() {
     NR > 1 && /^---[[:space:]]*$/ { exit found ? 0 : 1 }
     $0 ~ ("^" key ":") { found = 1 }
   ' "$file"
+}
+
+# ------------------------------------------------------------------
+# Worker liveness. One implementation, shared by exec-step and
+# exec-supervise: two copies of these thresholds would drift, and a drift
+# between "who decides a worker is dead" and "who acts on it" is exactly
+# the duplicate-dispatch bug the thin-controller redesign exists to kill.
+
+# The witness file a worker touches while it works.
+exec_heartbeat_file() { echo "$1/state/$2.heartbeat"; }
+
+# Touch the witness — a worker calls this between units of work so its
+# liveness is measured by the worker, not by the pump's own cadence. A
+# pump-refreshed heartbeat measures the pump and cannot tell a
+# 50-minute evidence run from a corpse.
+exec_touch_heartbeat() {
+  local dir=$1 task=$2 f
+  mkdir -p "$dir/state" 2>/dev/null || return 1
+  f=$(exec_heartbeat_file "$dir" "$task")
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$f" 2>/dev/null || return 1
+}
+
+# Seconds since the witness was last touched; empty when there is none.
+# Prints the age of a missing file as empty rather than 0 so callers can
+# tell "never beat" from "beat at epoch".
+exec_heartbeat_age() {
+  local dir=$1 task=$2 f mtime now
+  f=$(exec_heartbeat_file "$dir" "$task")
+  [ -f "$f" ] || return 0
+  # mtime, not the file's contents: a worker that truncates and rewrites
+  # the stamp must not reset the clock it is being measured against.
+  mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo "")
+  [ -n "$mtime" ] || return 0
+  now=$(date -u +%s)
+  echo $((now - mtime))
+}
+
+# Liveness of one dispatched task, from the three precedence-ordered
+# signals. Prints exactly one word:
+#
+#   zombie   output is already on disk — the work finished, the pump died
+#            before recording it. NEVER revive: a revive over a completed
+#            artifact is the duplicate-dispatch bug.
+#   alive    beating, or started recently enough to be plausibly working
+#   suspect  stale but inside the grace window — ask, do not replace
+#   dead     no witness and past the grace window
+#
+# $3 = started (YYYY-MM-DD), $4 = last-seen (may be empty).
+exec_row_liveness() {
+  local dir=$1 task=$2 started=$3 lastseen=$4
+  local hb_ttl=${EXEC_HEARTBEAT_TTL:-1800}
+  local suspect_ttl=${EXEC_SUSPECT_TTL:-7200}
+  local dead_ttl=${EXEC_DEAD_TTL:-86400}
+  local age seen seen_epoch age_s
+
+  [ -s "$dir/reports/${task}-report.md" ] && { echo zombie; return 0; }
+
+  age=$(exec_heartbeat_age "$dir" "$task")
+  if [ -n "$age" ]; then
+    [ "$age" -le "$hb_ttl" ]      && { echo alive; return 0; }
+    [ "$age" -le "$suspect_ttl" ] && { echo suspect; return 0; }
+  fi
+
+  seen=${lastseen:-$started}
+  if [ -n "$seen" ]; then
+    seen_epoch=$(date -u -j -f "%Y-%m-%d" "${seen%%T*}" +%s 2>/dev/null \
+              || date -u -d "${seen%%T*}" +%s 2>/dev/null || echo "")
+    if [ -n "$seen_epoch" ]; then
+      age_s=$(( $(date -u +%s) - seen_epoch ))
+      [ "$age_s" -le "$suspect_ttl" ] && { echo alive; return 0; }
+      [ "$age_s" -le "$dead_ttl" ]    && { echo suspect; return 0; }
+    fi
+  fi
+  echo dead
+}
+
+# The canonical phase order, one source for every consumer. It lives here
+# because two readers that disagree about the order produce a run that
+# advances and refuses in the same turn: exec-initiative validates
+# transitions against it, and exec-step folds the phase table against it to
+# emit the next action. A second hand-maintained copy is exactly the drift
+# that makes a phase log lie.
+exec_phases() {
+  echo "intake discovery architecture design specification planning plan-regression execution review verification handoff"
+}
+
+# The critique component registry: one row per AUTHORING phase, mapping it
+# to the artifact set a critique stage audits and where that stage's
+# clearance record lives. Every consumer reads this table — the gate in
+# exec-initiative, the generic checker in exec-critique, and the skill's
+# check catalogs — so adding a component is a row here, not new code.
+#
+#   component | phase | set_spec | summary_dir | catalog
+#
+# set_spec    — `;`-separated `dir:glob` pairs, resolved under the thinking
+#               store's initiative dir. An empty dir (`:charter.md`) is the
+#               initiative root. `-` when the component has no document set.
+#               The set is what each artifact is judged AGAINST, which is
+#               why an empty set is never a clean set.
+# summary_dir — under the initiative's execution dir. `plans` keeps the
+#               pre-existing plan-regression/ home so the shipped skill,
+#               its artifacts, and its readers all stay valid.
+# catalog     — the check catalog key; the critique skill owns its contents.
+exec_critique_components() {
+  cat <<'REGISTRY'
+charter|intake|:charter.md|critique/charter|charter
+discovery|discovery|discovery:${init}-RSCH-[0-9][0-9]*.md;discovery:${init}-OPTS-[0-9][0-9]*.md|critique/discovery|discovery
+architecture|architecture|architecture:${init}-ARCH-[0-9][0-9]*.md;architecture:${init}-ADR-[0-9][0-9]*.md;architecture:${init}-IFCE-[0-9][0-9]*.md|critique/architecture|architecture
+design|design|design:${init}-DSGN-[0-9][0-9]*.md|critique/design|design
+specification|specification|specs:${init}-SPEC-[0-9][0-9]*.md;risks:${init}-RISK-[0-9][0-9]*.md;verification:${init}-VRFY-[0-9][0-9]*.md|critique/specification|specification
+plans|planning|plans:${init}-P[0-9][0-9]*.md|plan-regression|plans
+code|execution|-|critique/code|code
+verification|verification|verification:${init}-VRFY-[0-9][0-9]*.md|critique/verification|verification
+handoff|handoff|-|critique/handoff|handoff
+REGISTRY
+}
+
+# One registry row for COMPONENT, or exit 2. An unregistered component is
+# a typo, and a typo must fail closed: a critique stage the engine cannot
+# identify is a gate nobody can evaluate.
+exec_critique_component() {
+  local want=$1 init=${2:-} row
+  row=$(exec_critique_components | awk -F'|' -v c="$want" '$1 == c { print; exit }') || true
+  [ -n "$row" ] || exec_die "unknown critique component '$want' — known: $(exec_critique_components | cut -d'|' -f1 | tr '\n' ' ')"
+  # ${init} is a placeholder, not a shell expansion: the row is data, and
+  # expanding it here keeps every consumer from re-deriving the globs with
+  # its own idea of the initiative id.
+  printf '%s\n' "$row" | sed "s/\${init}/$init/g"
+}
+
+# The component that gates PHASE, or empty when the phase is not an
+# authoring phase. Resolved from the registry rather than a second table so
+# a phase cannot gain a critique without the two agreeing.
+exec_critique_component_for_phase() {
+  local phase=$1
+  exec_critique_components | awk -F'|' -v p="$phase" '$2 == p { print $1; exit }'
+}
+
+# The set of artifacts COMPONENT audits, one path per line. Derived from
+# disk, never from the registry: a document that was renamed or deleted
+# must leave the set, and a clearance row naming it must then read stale.
+exec_critique_set() {
+  local id=$1 component=$2 row base pair dir glob set_spec
+  # The id is what expands the registry's ${init} placeholder; without it
+  # the globs stay literal and the set silently resolves to nothing.
+  row=$(exec_critique_component "$component" "$id")
+  set_spec=$(printf '%s' "$row" | cut -d'|' -f3)
+  [ "$set_spec" != "-" ] || return 0
+  base=$(exec_initiative_dir "$id")
+  while IFS= read -r pair; do
+    [ -n "$pair" ] || continue
+    dir=${pair%%:*}
+    glob=${pair#*:}
+    [ "$dir" = "$pair" ] && glob=""   # no colon: not a pair, skip
+    [ -n "$glob" ] || continue
+    find "$base/$dir" -maxdepth 1 -name "$glob" 2>/dev/null | sort
+  # The trailing newline is load-bearing: `printf '%s'` emits none, `read`
+  # then returns nonzero at EOF, and a while-read loop drops the last (for a
+  # single-dir component, the only) item on the floor.
+  done < <(printf '%s\n' "$set_spec" | tr ';' '\n')
 }

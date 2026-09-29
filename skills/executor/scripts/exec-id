@@ -12,13 +12,13 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-[ $# -eq 2 ] || exec_die "usage: exec-id INIT-NNNN KIND   (KIND: CHTR RSCH OPTS ARCH ADR IFCE DSGN SPEC RISK VRFY P)"
+[ $# -eq 2 ] || exec_die "usage: exec-id INIT-NNNN KIND   (KIND: CHTR RSCH OPTS ARCH ADR IFCE DSGN SPEC RISK VRFY BRN P)"
 
 id=$1
 kind=$(echo "$2" | tr '[:lower:]' '[:upper:]')
 
 case "$kind" in
-  CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY|P) ;;
+  CHTR|RSCH|OPTS|ARCH|ADR|IFCE|DSGN|SPEC|RISK|VRFY|BRN|P) ;;
   *) exec_die "unknown kind: $kind" ;;
 esac
 

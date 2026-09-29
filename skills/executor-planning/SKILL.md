@@ -41,6 +41,15 @@ row for `specification` has a gate date). No approved spec → stop; route to
 `executor-spec`. No interface document and the work spans components → stop;
 route to `executor-architecture`. Planning does not invent structure.
 
+**Brainstorm the decomposition first — required.** `exec-initiative phase
+<INIT> planning entered` refuses until a decided brainstorm session feeds
+planning: an `executor-brainstorm` decision session (`feeds: [planning]`,
+`status: active`) that compared at least three ways to split the spec into
+plans and tasks — by component, by user-visible slice, by risk-first
+spike — and recorded the human's pick. The design session's `## Handoff`
+(MVP slice and increments) is its main input. The plan set follows the
+decided split; a plan that splits differently cites a new session.
+
 **The citation rule is absolute.** Every ID in a plan begins with this
 plan's own initiative. A task needing something from `INIT-0002` states the
 requirement in its own words; the dependency lives only in the charter /
@@ -511,11 +520,12 @@ A placeholder is not a shortcut you pay for later. It is a question the
 implementer answers at 2 a.m. with the worst plausible guess, which the
 reviewer then rejects, which costs one full dispatch round.
 
-## Self-Review
+## Self-Critique
 
-After the plan is complete, read it against the spec with fresh eyes. This is
-a checklist you run yourself — not a subagent dispatch. Fix findings inline;
-no re-review needed.
+After the plan is complete, read it against the spec with fresh eyes — an
+adversarial pass you run yourself, not a subagent dispatch. Fix findings
+inline. Items 8 and 10 are the mechanical ones; they run again, with cited
+output, under Verification.
 
 **1. Spec coverage.** Walk the spec's requirement IDs in order — `R01`,
 `R02`, … — and name the task that implements each. Write the mapping down;
@@ -582,15 +592,57 @@ heading ordinal and the ID disagree.
 task's last step. If it contains a plan-level section, move that section
 above the first task heading.
 
-**10. Mechanical lint.** Run `../executor/scripts/exec-plan-lint PLAN_FILE` before the
-gate; exit 0 or fix. It catches what reading re-derives every time: literal
-store paths written into tasks (artifact locations are resolved by
-`exec-workspace`/`exec-evidence`, never named in a plan — a guessed path
-breaks the moment the workspace moves and every ID-resolving tool then
-disagrees with the plan), task headings missing their ID tokens, missing
-frontmatter, and the sketch-vs-code cap (≤40-line implementation fences,
-≤60% code per task body — a plan carrying implementations is a defect, not
-a shortcut).
+**10. Mechanical lint.** `exec-plan-lint` catches what reading re-derives
+every time: literal store paths written into tasks (artifact locations are
+resolved by `exec-workspace`/`exec-evidence`, never named in a plan — a
+guessed path breaks the moment the workspace moves and every ID-resolving
+tool then disagrees with the plan), task headings missing their ID tokens,
+missing frontmatter, the task-depth contract below, and the sketch-vs-code
+cap (≤40-line implementation fences, ≤60% code per task body — a plan
+carrying implementations is a defect, not a shortcut).
+
+**11. The fresh-implementer test.** For each task, ask: could an
+implementer who reads only this brief — no plan, no conversation, no spec
+— finish the task without asking a single question? Every question you
+can imagine them asking is a missing line: an unstated file, an implicit
+signature, an expected output nobody wrote. Add it.
+
+**12. Decomposition fidelity.** Does the plan set follow the split the
+decided planning session chose? A plan that silently re-splits the work
+discards the human's decision.
+
+### The task-depth contract
+
+Every `### Task N:` carries all of these; `exec-plan-lint` fails a task
+missing any one:
+
+| Field | Why it is required | Lint failure |
+|---|---|---|
+| `**Implements:**` with a requirement ID | the reviewer grades the task against it | "no **Implements:** line naming a requirement ID" |
+| `**Depends on:**` a task ID or `none` | the controller orders dispatch from it | "no **Depends on:** line" |
+| `**Files:**` with a Create/Modify/Test/Delete entry | the implementer writes only listed files | "no **Files:** list" |
+| `**Interfaces:**` (Consumes/Produces, or `none`) | an implicit seam is one the next task guesses | "no **Interfaces:** block" |
+| `**Requirements:**` | invariants and exact values bind only when written | "no **Requirements:** block" |
+| At least three `- [ ]` steps | failing test, implementation, passing test at minimum | "has N checkbox step(s)" |
+| A `Run:` line followed by `Expected:` | every task proves itself with a command and its output | "no 'Run:' line followed by an 'Expected:' line" |
+
+Fields inside a fenced code block do not count — an example is not a
+contract.
+
+## Verification
+
+Run these in this session, and cite their output in the gate
+presentation. The planning gate is claimed only after all of them pass:
+
+1. `../executor/scripts/exec-plan-lint PLAN_FILE` for every plan — exit 0.
+2. The ID extraction loop from item 8 — every task prints its own ID and
+   none errors.
+3. `../executor/scripts/exec-store-check` — no finding for this
+   initiative, including B2/B3 for the decomposition session.
+4. The Coverage table from item 1 has a row for every requirement ID in
+   the spec — count them against the spec's `### R<nn>` headings.
+5. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>/plans`
+   — exit 0.
 
 ## Rulings Do Not Apply Here
 

@@ -84,7 +84,7 @@ Every PR runs five checks; all must pass before merge:
 |---|---|
 | **ShellCheck** (`--severity=warning`) | Every `exec-*` script parses and is warning-clean — these run inside users' agents with git and filesystem access |
 | **Prompt-injection lint** | Skill markdown is *executed as instruction by agents*; the linter blocks override directives, concealment, exfiltration endpoints, fetch-and-execute, and credential literals |
-| **Skill validation** | Frontmatter present, `name`/`description` set, description carries a "Use when" trigger, fences balanced, no duplicate skill names |
+| **Skill validation** | Frontmatter + `Use when` trigger, balanced fences, no duplicate names; every `SKILL.md` carries `## Self-Critique` and `## Verification`; every dispatch role in `references/layout.md` has a registered prompt template carrying the required markers; no `*-prompt.md` exists unregistered; no ASCII-art diagrams |
 | **Secret scan** | The Executor's own `exec-scan-secrets` over the repo, plus gitleaks over full history |
 | **Script smoke** | Usage paths work; the plan-lint and run-audit gates actually fire on known violations |
 

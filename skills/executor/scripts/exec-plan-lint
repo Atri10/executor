@@ -234,6 +234,51 @@ while IFS=: read -r lineno text; do
   esac
 done < <(body_lines_with 'docs/executor/')
 
+# --- 3. Task depth -----------------------------------------------------------
+# A task is dispatched to a fresh implementer who reads only its brief, so
+# the brief must carry everything that implementer needs without asking:
+# what it implements, what it waits on, which files it may touch, the
+# seams it consumes and produces, the requirements it is graded against,
+# a stepwise path, and at least one command whose expected output proves
+# the step. Fenced lines are stripped first — an example inside a code
+# block never satisfies a field.
+unfenced() {
+  awk '{
+    line = $0
+    indent = 0
+    while (substr(line, indent + 1, 1) == " ") indent++
+    stripped = substr(line, indent + 1)
+    if (match(stripped, /^(`{3,}|~{3,})/)) {
+      len = RLENGTH; ch = substr(stripped, 1, 1)
+      if (!infence) { infence = 1; flen = len; fch = ch }
+      else if (ch == fch && len >= flen) { infence = 0 }
+      next
+    }
+    if (!infence) print
+  }'
+}
+while IFS= read -r hnum; do
+  [ -n "$hnum" ] || continue
+  tbody=$(exec_task_body "$plan" "$hnum" 2>/dev/null | unfenced || true)
+  label="Task $hnum"
+  printf '%s\n' "$tbody" | grep -qE '^\*\*Implements:\*\*.*R[0-9]+' \
+    || fail "$label has no **Implements:** line naming a requirement ID — the reviewer grades a task against the requirements it implements"
+  printf '%s\n' "$tbody" | grep -qE '^\*\*Depends on:\*\*[[:space:]]*(`?INIT-[0-9]{4}-P[0-9]{2}-T[0-9]{2}|none)' \
+    || fail "$label has no **Depends on:** line (a task ID, or 'none') — the controller orders dispatch from it"
+  printf '%s\n' "$tbody" | grep -qE '^\*\*Files:\*\*' \
+    && printf '%s\n' "$tbody" | grep -qE '^[[:space:]]*- (Create|Modify|Test|Delete):' \
+    || fail "$label has no **Files:** list with a Create/Modify/Test/Delete entry — the implementer writes only the files listed"
+  printf '%s\n' "$tbody" | grep -qE '^\*\*Interfaces:\*\*' \
+    || fail "$label has no **Interfaces:** block (Consumes/Produces, or 'none') — a seam left implicit is a seam the next task guesses"
+  printf '%s\n' "$tbody" | grep -qE '^\*\*Requirements:\*\*' \
+    || fail "$label has no **Requirements:** block — invariants and exact values bind only when written down"
+  nsteps=$(printf '%s\n' "$tbody" | grep -cE '^[[:space:]]*- \[ \]' || true)
+  [ "${nsteps:-0}" -ge 3 ] \
+    || fail "$label has ${nsteps:-0} checkbox step(s) — at least 3 are required (failing test, implementation, passing test)"
+  printf '%s\n' "$tbody" | awk '/^Run:/ { run = 1; next } run && /^Expected:/ { ok = 1 } END { exit !ok }' \
+    || fail "$label has no 'Run:' line followed by an 'Expected:' line — every task names a command and the output that proves it"
+done < <(printf '%s\n' "$collected_headings" | sed -n 's/^### Task \([0-9][0-9]*\):.*/\1/p')
+
 # --- 4. Sketch cap -----------------------------------------------------------
 # Plans sketch; implementations live in interface and design docs. Two
 # limits, fence-aware over the body (post-frontmatter, CRLF-normalized —

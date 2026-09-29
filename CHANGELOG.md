@@ -4,6 +4,214 @@ All notable changes to The Executor are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). As of 0.1.0 the
 project is tagged; between releases, entries are dated and `main` moves.
 
+
+## [Unreleased]
+
+## [0.6.0] — 2026-09-29
+
+The controller no longer carries the work. The pipeline is two axes of
+script-driven state with dispatched subagents at every step that needs
+judgment, a critique gate on every authoring phase, and a fail-closed path
+for unattended runs. The three defects this closes: only two of eleven
+phases could reject a bad deliverable, upstream drift was structurally
+undetectable, and the pump's "never authors" rule had no mechanism behind it.
+
+### Added
+- 2026-09-29 — **The thin-controller engine: scripts and subagents own
+  the pipeline, the main agent only drives it.** During execution the
+  controller's whole job is now: run `exec-step`, do the one action it
+  prints, repeat. Four new scripts carry the mechanical truth:
+
+  - `exec-step` — folds a plan run (or an initiative's phase log, or
+    every in-flight run) and emits exactly one typed action:
+    `DISPATCH`, `REPORT`, `REVIVE`, `REDISPATCH`, `ADJUDICATE`,
+    `GATE-STAGE`, `REPAIR-STATE`, `PHASE-ENTER`, `PHASE-GATE`, `ASK`,
+    `WAIT`, `DONE`. It never writes state and never improvises. Every
+    emit is stamped; an action emitted repeatedly with no state change
+    escalates to `ADJUDICATE` instead of looping forever.
+  - `exec-supervise` — owns worker liveness and the revive ladder
+    (`REVIVE` → `REDISPATCH` → `ADJUDICATE`), counted from the dispatch
+    log itself rather than a counter file a worker could delete.
+  - `exec-report` — gate-on-commit. The only path a worker's result
+    takes into run state: nothing reaches the ledger without a clean
+    latest-round verdict, and a refusal writes nothing at all.
+  - `exec-step` and `exec-supervise` share one liveness implementation
+    (`exec_row_liveness` in `_exec-lib.sh`): output presence outranks
+    the worker heartbeat, which outranks row age, so a finished worker
+    is never re-dispatched and a slow one is never declared dead.
+
+  Four new dispatch roles, registered in `references/layout.md`:
+  `AUTHOR` (authors a phase artifact the controller will later gate),
+  `DECIDE` (answers a decision-class question), `SUPERVISOR` (the only
+  role permitted to classify human prose or adjudicate a spent lane),
+  and a `revive-preamble.md` fragment prepended to a re-dispatched
+  worker so it verifies on-disk state before overwriting it.
+
+  `skills/executor/SKILL.md` gains a **Pump Contract**: the decision
+  table mapping each action word to its actuator, what a pump never does
+  (author, judge, improvise a transition, absorb a dead worker's work),
+  and how to handle a human interrupting mid-run.
+
+- 2026-09-29 — **Ingress for unsolicited human input.** A human who says
+  "stop everything" or "actually, do it this way" between two tasks had
+  no mechanical path to be obeyed, which left the controller to
+  improvise — the exact unenforced-judgment failure the engine exists to
+  remove. `exec-ruling` gains `--unsolicited "<verbatim>"`, which stores
+  the human's words unparaphrased and marks the ruling as unsolicited
+  rather than asked-and-answered; `--stop` additionally blocks the run
+  and prints a single relayable `STOP` line. Mutually exclusive with
+  `--answered`, in either argument order.
+- 2026-09-28 — **A dispatch registry and a prompt per dispatched role.**
+  `references/layout.md` gains a Dispatch registry: every role that
+  spawns a subagent (implementer, task reviewer, re-reviewer, final
+  reviewer, plan auditor, plan repairer, plan re-auditor, evidence
+  runner, prior-art scout, concept explorer, design critic) is listed
+  with its identity grammar, its prompt template, and the dispatch log it
+  writes to. New prompt files under the owning skill: the three
+  plan-regression prompts, `evidence-runner-prompt.md`, and the three
+  brainstorm prompts. `validate-skills.sh` fails on a dispatch role with
+  no registered prompt, a prompt missing any of the required markers
+  (`Subagent`, `agent_identity`, `model:`, `## Identity`,
+  `## Self-Critique Before You Return`, `## Verification`,
+  `## What You Return`, `**Placeholders`), or a `*-prompt.md` file no
+  registry entry names.
+- 2026-09-28 — **Self-Critique and Verification on every phase skill and
+  every dispatch template.** Each `skills/*/SKILL.md` now carries a
+  `## Self-Critique` section (an adversarial pass over the artifact the
+  phase just produced) and a `## Verification` section (the commands that
+  prove it, run in-session with output cited at the gate). The router,
+  `executor-initiative`, `executor-discovery`, `executor-architecture`,
+  `executor-spec`, `executor-planning`, `executor-execution`,
+  `executor-review`, `executor-verification`, and `executor-handoff` all
+  gained both; the four existing dispatch prompts gained the in-prompt
+  versions.
+- 2026-09-28 — **`exec-id BRN` allocation** and `brainstorm` frontmatter
+  kinds (`mode: design | decision`, `feeds:`), so a session ID is
+  allocated by the script and its downstream phase is machine-readable.
+
+### Changed
+- 2026-09-29 — The dispatch log schema gains a **`Last-Seen`** column.
+  `Started` is day-granular and cannot distinguish a 50-minute evidence
+  run from a dead worker. Readers locate columns by header name, so
+  workspaces seeded before the column existed still parse.
+- 2026-09-29 — The canonical phase order moves to `exec_phases()` in
+  `_exec-lib.sh`. `exec-initiative` validates transitions against it and
+  `exec-step` folds the phase log against it; two hand-maintained copies
+  would let a run advance and refuse in the same turn.
+- 2026-09-29 — **Every authoring phase now passes a critique gate.**
+  Previously only 2 of 11 phases could reject a bad deliverable:
+  `plan-regression` and `review`. `design` and `verification` had no
+  artifact gate at all, and architecture and specification ran adversarial
+  *self*-critiques whose own skills refused the word critic. New
+  `executor-critique` skill and `exec-critique` script generalize the
+  plan-regression contract to all nine authoring components (`charter`,
+  `discovery`, `architecture`, `design`, `specification`, `plans`, `code`,
+  `verification`, `handoff`). The phase→component→catalog mapping is a
+  registry row in `_exec-lib.sh`, so adding a component is data, not a
+  fork. `exec-initiative phase … passed` now refuses unless the
+  component's critique is `clean|waived`; the clearance is recorded in the
+  phase log's Notes cell, since the critique gets no row of its own.
+
+  The gate is hardened where `exec-plan-regression` was soft, which was the
+  point of generalizing rather than forking: `verdict: PASS` beside a
+  non-zero `high`/`medium` is refused instead of believed, the three-round
+  cap is enforced by the script (`audit 04` exits 2 with a message), and a
+  waiver needs both a note in the row and an initiative ruling naming it.
+  `plans` resolves to the existing `plan-regression/` home and reads the
+  same `summary.md`, so the shipped skill and its artifacts stay valid —
+  one gate, two front doors, not two gates that can disagree.
+
+  This also closes a structural hole: **upstream drift was undetectable.**
+  No reviewer prompt in `executor-review` opened the architecture store,
+  so an implementation satisfying every `R-nn` and `C-nn` while violating
+  the ARCH passed every gate in the system. Two seats now catch it: the
+  `code` component's critique catalog, and `final-reviewer-prompt.md`,
+  which takes the architecture, IFCE and design stores as required inputs
+  and adds an architecture-conformance check to what it reviews.
+- 2026-09-29 — **The pump now actually dispatches the author.** The pump
+  declared "Never authors … every one is a dispatch" while its `PHASE-ENTER`
+  decision-table row only said to write the Entered cell — so `AUTHOR-<phase>`
+  was a registered role that nothing ever dispatched, and the phase axis had a
+  hole exactly where the controller was supposed to carry no weight. The row
+  now dispatches the phase's `AUTHOR`, the phase-axis loop is written out, and
+  `AUTHOR` covers `verification` and `handoff` alongside the six phases it
+  already had.
+
+  The `REPAIR-STATE` action is deliberately left as a script call rather than
+  given a prompt, and SKILL.md now says why: the controller is the thing that
+  drifted the store, so it is the thing that repairs it, and a subagent reading
+  only a prompt would know less than the controller does at that moment.
+
+  Every dispatch prompt gains the edge cases it was silently leaving to
+  invention — a prompt is the only definition of what a subagent does, so an
+  undefined state is an unreviewed behaviour. Measured before: one prompt in
+  seventeen had `## Preconditions`, none had `## When You Cannot Proceed`, none
+  handled an output file left behind by an aborted prior run, and three of the
+  new `executor-critique` prompts lacked the dispatch ban the rest carry.
+
+  Two defects worth calling out. `component-reauditor-prompt.md` hardcoded
+  `R01`/`R02` throughout while its header claimed `R02+`, so a round `R03`
+  dispatch would have written R03's findings into R02's file and re-verdicted
+  R01's — the loop would have reported progress it never made. Every
+  round-bearing value is now a placeholder. And `design-critic-prompt.md`
+  required a ranking and a `RANKING:` return field while stating "you do not
+  pick the winner", pre-empting the human's choice with an unreviewable
+  judgment; it now reports what cuts each way instead of ordering the options.
+
+  A new test reads the action vocabulary out of `exec-step` and the role
+  registry out of `layout.md` rather than a hand-kept list, and fails when an
+  action has no decision-table row, a role has no prompt on disk, a critique
+  registry row has the wrong field count, or two components share a clearance
+  directory. The last two caught a live bug: the `code` and `handoff` rows
+  carried six fields instead of five, so both resolved their clearance record
+  to a directory literally named `-`.
+- 2026-09-29 — **Autonomous mode, fail-closed.** `exec-gate INIT PHASE
+  --auto` clears a phase gate without a human only when the initiative's
+  `autonomous.md` names that phase with mode `gate` or `allow`. Every
+  ambiguity resolves to `deny`: no policy file, `enabled: false`, an
+  unlisted phase, or an unrecognized mode. An auto-pass is recorded as
+  `**auto-passed** <date>` — a visibly different result from a human
+  `passed`, not a synonym — and it must satisfy the same artifact gate a
+  human pass does. A pick-class phase (`design`, `specification`) in
+  `allow` mode additionally requires a scored verdict already on disk:
+  a script can count files, it cannot choose between designs.
+
+  The event grammar gains `auto-passed` and `superseded`. `superseded` is
+  the deliberate inverse of the "already passed" refusal — only a phase
+  that actually finished can be overturned, it requires a stated reason,
+  and it clears the Entered date so the phase reopens. Without it, a human
+  who disagreed with an autonomous pass had no move but to hand-edit the
+  phase log, which is the one thing the log exists to prevent.
+  `exec-step` treats `**auto-passed**` as finished and `**superseded**`
+  as reopened, so the pump advances and re-enters correctly.
+- 2026-09-28 — **`executor-brainstorm` redesigned around full-feature
+  design.** A session may start before any initiative exists (the dossier
+  seeds `exec-initiative new`), and fans out to independent concept
+  explorers plus a prior-art scout and a red-team critic. `mode`
+  distinguishes a full `design` session from a single-question `decision`
+  session; `exec-store-check` B2 is mode-aware and B3 requires a
+  Documents-table row for every session ID.
+- 2026-09-28 — **`executor-plan-regression` runs in numbered rounds.**
+  Audit and repair files are round-suffixed (`regression-P02-R01.md`,
+  `fix-P02-R01.md`); a re-audit is always a fresh auditor, never the
+  repairer, and `check` requires the *latest* audit's `verdict: PASS` for
+  a `clean` row. Legacy unsuffixed files read as round 1.
+- 2026-09-28 — **Specification and planning are gated on a decided
+  brainstorm session.** `exec-initiative phase <INIT> specification
+  entered` refuses without a session whose `feeds:` names specification;
+  `planning entered` refuses without one naming planning. A discovery
+  skip note records that discovery needed no ideation — it does not
+  satisfy the spec/plan gates.
+- 2026-09-28 — **No ASCII-art diagrams anywhere.** `validate-skills.sh`
+  rejects box-drawing characters used as diagram edges in skill markdown;
+  the layout trees and the test-quality gate table moved to Mermaid.
+
+### Fixed
+- 2026-09-28 — **Prompt registry was unenforced.** Plan regression
+  dispatched auditors with no template and overwrote round-1 findings;
+  verification dispatched `VERIFY` runners with no prompt. Both are now
+  registered templates and round-safe file naming.
+
 ## [0.5.1] — 2026-09-26
 
 ### Fixed

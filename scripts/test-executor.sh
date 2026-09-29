@@ -35,6 +35,45 @@ commit_all() { git -C "$1" add -A && git -C "$1" commit -qm "${2:-fixture}"; }
 # document's frontmatter status. regdoc IDIR ID KIND STATUS RELPATH
 regdoc() { printf '| %s | %s | t | %s | `%s` |\n' "$2" "$3" "$4" "$5" >> "$1/INDEX.md"; }
 
+# Seed a CLEARED critique for COMPONENT so a fixture can pass its phase.
+# Every authoring phase is gated by an independent audit, so any fixture
+# that drives a phase to `passed` has to produce that audit's evidence —
+# writing the phase row directly would be testing the one path the gate
+# exists to prevent. clear_critique INIT_ID COMPONENT
+clear_critique() {
+  local id=$1 component=$2 sum d afile key
+  sum=$(bash "$S/exec-critique" "$id" "$component" init 2>/dev/null) || return 1
+  d=$(dirname "$sum")
+  afile="$d/critique-$component-R01.md"
+  printf -- '---\nkind: critique\ncomponent: %s\nround: R01\nverdict: PASS\nhigh: 0\nmedium: 0\nlow: 0\n---\n\n## Findings\n\nNone.\n' \
+    "$component" > "$afile"
+  # One clean row per artifact in the registered set. A document component
+  # whose set is empty is a fixture bug, not a run-axis component — say so
+  # rather than seeding a run-axis row that the coverage pass will
+  # (correctly) report as stale three lines later.
+  local keys set_spec
+  set_spec=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_component "$2" "$3" | cut -d"|" -f3' \
+    _ "$S" "$id" "$component" 2>/dev/null || true)
+  keys=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_set "$2" "$3"' _ "$S" "$id" "$component" 2>/dev/null || true)
+  if [ "$set_spec" = "-" ]; then
+    # Run-axis components audit no directory; their unit is the run itself.
+    printf '| %s-run | clean | critique-%s-R01.md | | fixture seed, run axis |\n' \
+      "$id" "$component" >> "$sum"
+  elif [ -z "$keys" ]; then
+    echo "fixture bug: $component has a registered set but no artifacts — author one, or drop the seed" >&2
+    return 1
+  else
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      key=$(bash -c '. "$1/_exec-lib.sh"
+        k=$(exec_frontmatter "$2" id 2>/dev/null || true)
+        [ -n "$k" ] || { k=$(basename "$2"); k=${k%.md}; }
+        printf "%s\n" "$k"' _ "$S" "$f")
+      printf '| %s | clean | critique-%s-R01.md | | fixture seed |\n' "$key" "$component" >> "$sum"
+    done <<< "$keys"
+  fi
+}
+
 FM=$'---
 id: INIT-0001-P01
 initiative: INIT-0001
@@ -51,6 +90,9 @@ execution_mode: inline
 '
 TASK=$'### Task 1: Probe — `INIT-0001-P01-T01`
 
+**Implements:** `INIT-0001-SPEC-01-R01`
+**Depends on:** none
+
 **Files:**
 - Modify: `api.ts`
 
@@ -59,6 +101,13 @@ TASK=$'### Task 1: Probe — `INIT-0001-P01-T01`
 
 **Requirements:**
 - INIT-0001-SPEC-01-R01
+
+- [ ] **Step 1: Write the failing test**
+- [ ] **Step 2: Implement**
+- [ ] **Step 3: Run the test and see it pass**
+
+Run: `bun test`
+Expected: PASS
 '
 
 # 1. Context carries all interfaces and constraints (no silent clipping).
@@ -170,6 +219,10 @@ bash "$S/exec-initiative" new Probe > /dev/null 2>&1
 if bash "$S/exec-initiative" phase INIT-0001 handoff passed "probe" >/dev/null 2>&1; then
   bad "phase: direct handoff accepted"
 fi
+printf -- '# Goal\n\nfixture charter body\n' > "$d/docs/executor/INIT-0001-probe/charter.md"
+# Only intake is passed here; discovery is entered, not passed, so it needs
+# no critique seed.
+clear_critique INIT-0001 charter
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "phase: legal intake pass refused"
 bash "$S/exec-initiative" phase INIT-0001 discovery entered "start" > /dev/null 2>&1 || bad "phase: legal discovery enter refused"
 ok "phase transition gates enforced"
@@ -337,7 +390,7 @@ ok "fenced task examples do not inflate the expected set"
 # real one still fails with the correct (file-absolute) line number.
 d=$(fixture fencedpath)
 cd "$d"
-printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n\n```markdown\n- Create: docs/executor/INIT-0002/x.md\n```\n' > "$d/plan.md"
+{ printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n'; printf '%s\n' "$TASK"; printf '```markdown\n- Create: docs/executor/INIT-0002/x.md\n```\n'; } > "$d/plan.md"
 bash "$S/exec-plan-lint" "$d/plan.md" > /dev/null 2>&1 || bad "fencedpath: fenced store-path example failed lint"
 printf -- '---\nid: INIT-0001-P01\nspec: INIT-0001-S01\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Create: docs/executor/INIT-0002/x.md\n' > "$d/plan.md"
 out=$(bash "$S/exec-plan-lint" "$d/plan.md" 2>&1) && bad "fencedpath: real store-path mutation passed lint"
@@ -674,12 +727,17 @@ d=$(fixture artgate)
 cd "$d"
 bash "$S/exec-initiative" new Gate > /dev/null 2>&1
 IDIR="$d/docs/executor/INIT-0001-gate"
+clear_critique INIT-0001 charter
+# discovery's critique is seeded AFTER its artifact exists (line 727):
+# seeding against an empty set would produce a run-axis row that the
+# coverage pass then correctly reports as stale.
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "artgate: intake pass refused"
 bash "$S/exec-initiative" phase INIT-0001 discovery entered "go" > /dev/null 2>&1 || bad "artgate: discovery enter refused"
 if bash "$S/exec-initiative" phase INIT-0001 discovery passed "done" >/dev/null 2>&1; then
   bad "artgate: discovery passed with no RSCH/OPTS artifact"
 fi
 printf -- '---\nid: INIT-0001-RSCH-01\ninitiative: INIT-0001\nkind: research\nstatus: draft\ntitle: r\ncreated_at: 2026-09-12T07:00:00Z\nupdated_at: 2026-09-12T07:00:00Z\nsupersedes: null\nsuperseded_by: null\nquestion: q\nsources: []\nconfidence: low\n---\n\nfinding\n' > "$IDIR/discovery/INIT-0001-RSCH-01-r.md"
+clear_critique INIT-0001 discovery
 bash "$S/exec-initiative" phase INIT-0001 discovery passed "done" > /dev/null 2>&1 || bad "artgate: discovery pass refused with artifact present"
 bash "$S/exec-initiative" phase INIT-0001 architecture entered "go" > /dev/null 2>&1 || bad "artgate: architecture enter refused"
 if bash "$S/exec-initiative" phase INIT-0001 architecture skipped >/dev/null 2>&1; then
@@ -698,10 +756,19 @@ IDIR="$d/docs/executor/INIT-0001-regress"
 mkdir -p "$IDIR/plans"
 printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-probe.md"
 printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+clear_critique INIT-0001 charter
+clear_critique INIT-0001 plans
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "planreg: intake pass refused"
 for ph in discovery architecture design specification; do
   bash "$S/exec-initiative" phase INIT-0001 "$ph" skipped "fixture: not needed" > /dev/null 2>&1 || bad "planreg: $ph skip refused"
 done
+# Brainstorming is required before planning: entry refused with no decided
+# session feeding planning, accepted once one exists.
+if bash "$S/exec-initiative" phase INIT-0001 planning entered "go" >/dev/null 2>&1; then
+  bad "planreg: planning entered with no decided brainstorm session feeding planning"
+fi
+mkdir -p "$IDIR/brainstorm/sessions/20260928T000000Z-split"
+printf -- '---\nkind: brainstorm\nid: null\ninitiative: INIT-0001\nmode: decision\nquestion: How does the spec split into plans?\nfeeds: [planning]\nstatus: active\ndecided: one-plan\ncreated_at: 2026-09-28T00:00:00Z\nupdated_at: 2026-09-28T00:00:00Z\n---\n\n## Options\n### A — one-plan\n### B — two-plans\n### C — per-component\n\n## Adversarial pass\nB doubles review cost.\n\n## Outcome\nA.\n' > "$IDIR/brainstorm/sessions/20260928T000000Z-split/session.md"
 bash "$S/exec-initiative" phase INIT-0001 planning entered "go" > /dev/null 2>&1 || bad "planreg: planning enter refused"
 bash "$S/exec-initiative" phase INIT-0001 planning passed "1 plan" > /dev/null 2>&1 || bad "planreg: planning pass refused"
 bash "$S/exec-initiative" phase INIT-0001 plan-regression entered "go" > /dev/null 2>&1 || bad "planreg: plan-regression enter refused"
@@ -716,9 +783,17 @@ bash "$S/exec-plan-regression" "$d/plan.md" init > /dev/null 2>&1 || bad "planre
 if bash "$S/exec-plan-regression" "$d/plan.md" check >/dev/null 2>&1; then
   bad "planreg: check passed with no audit row"
 fi
-AUDIT=$(bash "$S/exec-plan-regression" "$d/plan.md" audit)
-printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: 1\n---\nPASS — 0 defects\n' > "$AUDIT"
-printf '| INIT-0001-P01 | clean | regression-P01.md | — | 0 defects |\n' >> "$d/.executor/INIT-0001/plan-regression/summary.md"
+AUDIT=$(bash "$S/exec-plan-regression" "$d/plan.md" audit 01)
+case "$AUDIT" in */regression-P01-R01.md) ;; *) bad "planreg: audit path not round-suffixed ($AUDIT)";; esac
+printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: R01\nverdict: FAIL\nhigh: 1\nmedium: 0\nlow: 0\n---\n' > "$AUDIT"
+printf '| INIT-0001-P01 | clean | regression-P01-R01.md | — | 1 defect |\n' >> "$d/.executor/INIT-0001/plan-regression/summary.md"
+if bash "$S/exec-plan-regression" "$d/plan.md" check >/dev/null 2>&1; then
+  bad "planreg: check passed a clean row whose latest audit is FAIL"
+fi
+AUDIT2=$(bash "$S/exec-plan-regression" "$d/plan.md" audit 02)
+printf -- '---\nkind: regression\nplan: INIT-0001-P01\nround: R02\nverdict: PASS\nhigh: 0\nmedium: 0\nlow: 0\n---\n' > "$AUDIT2"
+[ -f "$AUDIT" ] || bad "planreg: round-2 audit overwrote round 1"
+[ "$(bash "$S/exec-plan-regression" "$d/plan.md" latest)" = "$AUDIT2" ] || bad "planreg: latest does not name the round-2 audit"
 bash "$S/exec-plan-regression" "$d/plan.md" check > /dev/null 2>&1 || bad "planreg: check refused a clean set"
 bash "$S/exec-initiative" phase INIT-0001 plan-regression passed "1 plan clean" > /dev/null 2>&1 || bad "planreg: phase pass refused with clean summary"
 bash "$S/exec-run" "$d/plan.md" start > /dev/null 2>&1 || bad "planreg: run refused after clearance"
@@ -786,22 +861,14 @@ ok "task branches fork from the tip, merge on a clean verdict, and the topology 
 d=$(fixture seqflag)
 cd "$d"
 SEQ_FM=$(printf '%s' "$FM" | sed -e 's/^tasks: 1$/tasks: 2/' -e 's/^execution_mode: inline$/execution_mode: inline\nsequential: true/')
-TASK2=$'### Task 2: Second — `INIT-0001-P01-T02`
-
-**Files:**
-- Modify: `b.ts`
-'
+# Both variants are the full task fixture renumbered; they differ only in
+# the dependency line, so the sequential rule is the only thing under test.
+TASK2=$(printf '%s' "$TASK" | sed -e 's/Task 1: Probe — `INIT-0001-P01-T01`/Task 2: Second — `INIT-0001-P01-T02`/')
+TASK2_CHAINED=$(printf '%s' "$TASK2" | sed -e 's/^\*\*Depends on:\*\* none$/**Depends on:** `INIT-0001-P01-T01`/')
 printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2" > "$d/seq.md"
 if bash "$S/exec-plan-lint" "$d/seq.md" >/dev/null 2>&1; then
   bad "seqflag: sequential: true linted clean with no dependency chain"
 fi
-TASK2_CHAINED=$'### Task 2: Second — `INIT-0001-P01-T02`
-
-**Depends on:** `INIT-0001-P01-T01`
-
-**Files:**
-- Modify: `b.ts`
-'
 printf '%s\n%s\n%s\n' "$SEQ_FM" "$TASK" "$TASK2_CHAINED" > "$d/seq.md"
 bash "$S/exec-plan-lint" "$d/seq.md" > /dev/null 2>&1 \
   || bad "seqflag: a justified sequential plan was refused"
@@ -900,6 +967,647 @@ case "$out" in *"gamma body"*) ;; *) bad "reqgram: heading form R03 not extracte
 out=$( . "$S/_exec-lib.sh"; exec_requirement_body "$d/spec.md" R01 )
 [ -z "$out" ] || bad "reqgram: R011 matched a lookup for R01"
 ok "requirement extraction covers paragraph and heading grammars"
+
+# 38. Brainstorm entry gates: `specification entered` and `planning
+# entered` refuse until a decided (status: active) session's feeds: names
+# the phase. A draft session, or one feeding a different phase, does not
+# count. The phase ladder is walked with minimal deliverables so the gate
+# under test is the brainstorm check, not an ordering failure.
+d=$(fixture entrygate)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+SDIR="$IDIR/brainstorm/sessions/s1"
+mkdir -p "$SDIR" "$IDIR/discovery" "$IDIR/architecture" "$IDIR/design" "$IDIR/specs" "$IDIR/risks" "$IDIR/verification" "$IDIR/plans"
+printf -- '---\nid: INIT-0001-RSCH-01\n---\n\nx\n' > "$IDIR/discovery/INIT-0001-RSCH-01-r.md"
+printf -- '---\nid: INIT-0001-ARCH-01\n---\n\nx\n' > "$IDIR/architecture/INIT-0001-ARCH-01-a.md"
+printf -- '---\nid: INIT-0001-DSGN-01\n---\n\nx\n' > "$IDIR/design/INIT-0001-DSGN-01-d.md"
+printf -- '# Goal\n\nfixture charter body\n' > "$IDIR/charter.md"
+clear_critique INIT-0001 charter
+clear_critique INIT-0001 discovery
+clear_critique INIT-0001 architecture
+clear_critique INIT-0001 design
+# specification's seed waits until its artifacts exist, below the brainstorm
+# entry-gate checks — seeding an empty set would be a fixture bug.
+bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 discovery entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 discovery passed "picked" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 architecture entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 architecture passed "ok" >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 design entered >/dev/null 2>&1
+bash "$S/exec-initiative" phase INIT-0001 design passed "waived" >/dev/null 2>&1
+
+# No session at all -> specification refuses.
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered with no brainstorm session"
+fi
+# A draft session does not count.
+printf -- '---\nkind: brainstorm\nstatus: draft\nfeeds: [specification]\ndecided: null\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered on a draft session"
+fi
+# An active session feeding only planning does not open specification.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [planning]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1; then
+  bad "entrygate: specification entered on a session feeding planning"
+fi
+# An active session feeding specification opens the gate.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1 \
+  || bad "entrygate: decided specification session refused"
+
+# Now satisfy specification's artifacts and pass it, then gate planning.
+printf -- '---\nid: INIT-0001-SPEC-01\n---\n\nx\n' > "$IDIR/specs/INIT-0001-SPEC-01-s.md"
+printf -- '---\nid: INIT-0001-RISK-01\n---\n\nx\n' > "$IDIR/risks/INIT-0001-RISK-01-r.md"
+printf -- '---\nid: INIT-0001-VRFY-01\n---\n\nx\n' > "$IDIR/verification/INIT-0001-VRFY-01-v.md"
+clear_critique INIT-0001 specification
+bash "$S/exec-initiative" phase INIT-0001 specification passed "ok" >/dev/null 2>&1 \
+  || bad "entrygate: specification passed refused with artifacts present"
+
+# The specification session does not feed planning -> planning refuses.
+if bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1; then
+  bad "entrygate: planning entered on a specification-only session"
+fi
+# A session feeding planning opens the gate.
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification, planning]\ndecided: A\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1 \
+  || bad "entrygate: decided planning session refused"
+ok "brainstorm sessions gate specification and planning entry"
+
+# 39. exec-id allocates BRN ids and increments past existing ones — a
+# session already carrying INIT-0001-BRN-01 in its frontmatter must make
+# the next allocation 02, so concurrent sessions never share an id.
+d=$(fixture brnid)
+cd "$d"
+bash "$S/exec-initiative" new Brn > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-brn"
+first=$(bash "$S/exec-id" INIT-0001 BRN)
+[ "$first" = "INIT-0001-BRN-01" ] || bad "brnid: first allocation was '$first'"
+mkdir -p "$IDIR/brainstorm/sessions/s1"
+printf -- '---\nkind: brainstorm\nid: INIT-0001-BRN-01\nstatus: draft\n---\n\n## Options\n\nx\n' > "$IDIR/brainstorm/sessions/s1/session.md"
+second=$(bash "$S/exec-id" INIT-0001 BRN)
+[ "$second" = "INIT-0001-BRN-02" ] || bad "brnid: allocation past BRN-01 returned '$second'"
+ok "exec-id allocates and increments BRN ids"
+
+# 40. exec-plan-regression check: the clearance gate reads the LATEST
+# audit round's verdict, so a 'clean' row against a FAIL audit is caught,
+# and a PASS re-audit round clears it. Waived needs a note.
+d=$(fixture regcheck)
+cd "$d"
+bash "$S/exec-initiative" new Reg > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-reg"
+printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-plan.md"
+RD="$d/.executor/INIT-0001/plan-regression"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" init > /dev/null 2>&1
+# Audit round 1 FAILs.
+printf -- '---\nkind: regression\nverdict: FAIL\n---\n\nFAIL — 2 defects\n' > "$RD/regression-P01-R01.md"
+# A 'clean' row is a lie while the latest audit FAILs.
+printf '| INIT-0001-P01 | clean | regression-P01-R01.md | fix-P01-R01.md | |\n' >> "$RD/summary.md"
+if bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1; then
+  bad "regcheck: clean row accepted while latest audit FAILs"
+fi
+# A PASS re-audit round clears the row.
+printf -- '---\nkind: regression\nverdict: PASS\n---\n\nPASS — 0 defects\n' > "$RD/regression-P01-R02.md"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1 \
+  || bad "regcheck: clean row refused after a PASS re-audit"
+# A waived row with no note is a self-granted waiver.
+perl -pi -e 's/\| INIT-0001-P01 \| clean \|/| INIT-0001-P01 | waived |/' "$RD/summary.md"
+if bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1; then
+  bad "regcheck: waived row accepted with no note"
+fi
+perl -pi -e 's/(INIT-0001-P01 \| waived \| regression-P01-R01.md \| fix-P01-R01.md \|) \|/$1 human waived low-severity naming |/' "$RD/summary.md"
+bash "$S/exec-plan-regression" "$IDIR/plans/INIT-0001-P01-plan.md" check >/dev/null 2>&1 \
+  || bad "regcheck: waived row with a note refused"
+ok "plan-regression check reads the latest audit round and gates waivers"
+
+# 41. exec-store-check B2: a pre-initiative session at the store root that
+# claims an initiative is adoption-in-name-only — it was never moved.
+d=$(fixture storeb2)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+RDIR="$d/docs/executor/brainstorm/sessions/2026-09-28-feature"
+mkdir -p "$RDIR"
+printf -- '---\nkind: brainstorm\ninitiative: INIT-0001\nstatus: draft\ndecided: null\nquestion: q\n---\n\n## Options\n\nx\n' > "$RDIR/session.md"
+out=$(bash "$S/exec-store-check" 2>&1 || true)
+echo "$out" | grep -q 'adopt it' || bad "storeb2: root session claiming an initiative not flagged"
+ok "store-check flags a root session adopted in name only"
+
+# 42. exec-store-check B3: a session carrying an allocated BRN id is a
+# document and needs a Documents-table row; an id that is not BRN-nn is
+# refused. A correctly-registered session passes.
+d=$(fixture storeb3)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+SDIR="$IDIR/brainstorm/sessions/s1"
+mkdir -p "$SDIR"
+printf -- '---\nkind: brainstorm\nid: INIT-0001-BRN-01\ninitiative: INIT-0001\nstatus: draft\ndecided: null\nquestion: q\n---\n\n## Options\n\nx\n' > "$SDIR/session.md"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "storeb3: BRN id with no Documents row passed store check"
+fi
+regdoc "$IDIR" INIT-0001-BRN-01 brainstorm draft "brainstorm/sessions/s1/session.md"
+bash "$S/exec-store-check" >/dev/null 2>&1 \
+  || bad "storeb3: registered BRN session still failed store check"
+# A non-BRN id on a session is refused.
+perl -pi -e 's/id: INIT-0001-BRN-01/id: INIT-0001-FOO-01/' "$SDIR/session.md"
+perl -pi -e 's/INIT-0001-BRN-01/INIT-0001-FOO-01/' "$IDIR/INDEX.md"
+if bash "$S/exec-store-check" >/dev/null 2>&1; then
+  bad "storeb3: a session with a non-BRN id passed store check"
+fi
+ok "store-check requires a Documents row and a BRN id for sessions"
+
+# 43. exec-store-check P1: an initiative that entered execution with the
+# plan-regression gate unpassed is flagged — and a passed gate requires
+# the clearance summary to exist on disk.
+d=$(fixture storep1)
+cd "$d"
+bash "$S/exec-initiative" new Probe > /dev/null 2>&1
+IDIR="$d/docs/executor/INIT-0001-probe"
+# Mark execution entered (and the branch it implies) without passing
+# plan-regression.
+perl -pi -e 's/^\| execution \| — \| — \|/| execution | 2026-09-28 | — |/' "$IDIR/INDEX.md"
+perl -pi -e 's/^\*\*Status:\*\* active/**Status:** active\n\n**Branch:** initiative\/INIT-0001 (forked 2026-09-28)/' "$IDIR/INDEX.md"
+out=$(bash "$S/exec-store-check" 2>&1 || true)
+echo "$out" | grep -q 'plan-regression' || bad "storep1: execution entered without plan-regression not flagged"
+ok "store-check flags execution entered without plan-regression clearance"
+
+# ---------------------------------------------------------------------
+# Thin-controller engine: exec-step, exec-supervise, exec-report.
+# These assert the contracts the redesign exists to enforce, each of which
+# was a reproduced failure mode — not the implementation's shape.
+
+eng=$(fixture engine)
+mkdir -p "$eng/docs/executor/INIT-0001-x/plans"
+ENGPLAN="$eng/docs/executor/INIT-0001-x/plans/INIT-0001-P01.md"
+cat > "$ENGPLAN" <<'PLANEOF'
+---
+id: INIT-0001-P01
+initiative: INIT-0001
+kind: plan
+title: Engine probe
+status: active
+created_at: 2026-09-12T07:00:00Z
+updated_at: 2026-09-12T07:00:00Z
+spec: INIT-0001-SPEC-01
+---
+
+# Plan
+
+### Task 1: First — `INIT-0001-P01-T01`
+**Depends on:** `none`
+
+### Task 2: Second — `INIT-0001-P01-T02`
+**Depends on:** `INIT-0001-P01-T01`
+PLANEOF
+commit_all "$eng" plan
+cd "$eng"
+WS="$eng/.executor/INIT-0001/P01"
+bash "$S/exec-workspace" "$ENGPLAN" >/dev/null
+
+# Rewrite the dispatch log to a known state. The seed has no Last-Seen
+# column; writing one also proves the readers locate columns by name.
+engrow() { # started outcome
+  cat > "$WS/dispatches.md" <<EOF
+---
+kind: dispatches
+plan: INIT-0001-P01
+created_at: 2026-09-12T07:00:00Z
+updated_at: 2026-09-12T07:00:00Z
+---
+
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
+|---|---|---|---|---|---|---|---|---|
+| INIT-0001-P01-T01 | IMPL-P01-T01 | top | g1 | task/T01 | $1 | $2 | brief.md | $1 |
+EOF
+}
+engledger() { printf '%s\n' "$1" >> "$WS/progress.md"; }
+OLD5=$(TZ=UTC date -u -v-5d +%Y-%m-%d 2>/dev/null || date -u -d '5 days ago' +%Y-%m-%d)
+TODAYD=$(date -u +%Y-%m-%d)
+rm -f "$WS/state/.step-stamp"
+
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "DISPATCH INIT-0001-P01-T01"*) ok "step: a fresh run dispatches its first task" ;;
+  *) bad "step: fresh run emitted '$out', expected a DISPATCH of T01" ;;
+esac
+
+engrow "$TODAYD" running
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+[ "$out" = "WAIT" ] && ok "step: a live worker blocks new dispatches" \
+  || bad "step: open row emitted '$out', expected WAIT"
+
+# The failure this whole redesign exists to prevent: a worker that FINISHED
+# but whose row was never closed must be reported, never re-dispatched —
+# a revive over a completed artifact is a duplicate agent on one task.
+printf '# Report: done\n' > "$WS/reports/INIT-0001-P01-T01-report.md"
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "REPORT "*) ok "step: output on disk outranks every staleness clock" ;;
+  *) bad "step: finished worker emitted '$out', expected REPORT" ;;
+esac
+rm -f "$WS/reports/INIT-0001-P01-T01-report.md"
+
+# The ladder must advance and must stop. Attempt counts come from the
+# dispatch log, never a counter file a worker could delete.
+engrow "$OLD5" running
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "REVIVE INIT-0001-P01-T01" ] \
+  && ok "supervise: a first failure resumes the same agent" \
+  || bad "supervise: first failure did not emit REVIVE"
+engrow "$OLD5" revived-rv1
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "REDISPATCH INIT-0001-P01-T01" ] \
+  && ok "supervise: a resumed worker escalates to a fresh agent" \
+  || bad "supervise: second failure did not emit REDISPATCH"
+engrow "$OLD5" revived-rv2
+[ "$(bash "$S/exec-supervise" "$ENGPLAN" 2>/dev/null)" = "ADJUDICATE INIT-0001-P01-T01" ] \
+  && ok "supervise: a spent ladder escalates to adjudication" \
+  || bad "supervise: exhausted ladder did not emit ADJUDICATE"
+
+# gate-on-commit: nothing reaches state unreviewed, and a refusal writes
+# nothing at all (a half-written ledger is worse than an unwritten one).
+engrow "$OLD5" complete
+printf '# Report: built\n' > "$WS/reports/INIT-0001-P01-T01-report.md"
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && bad "report: an unreviewed task was ledgered complete" \
+  || ok "report: an unreviewed task never reaches the ledger"
+
+cat > "$WS/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md" <<'VEOF'
+---
+kind: verdict
+task: INIT-0001-P01-T01
+round: R01
+spec_verdict: NEEDS_FIX
+quality: CHANGES_REQUESTED
+---
+VEOF
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && bad "report: a NEEDS_FIX verdict was committed" \
+  || ok "report: a NEEDS_FIX verdict blocks the commit"
+
+# A later NEEDS_FIX must not be cleared by an earlier clean round.
+cat > "$WS/reviews/verdicts/INIT-0001-P01-T01-R02-verdict.md" <<'VEOF'
+---
+kind: verdict
+task: INIT-0001-P01-T01
+round: R02
+spec_verdict: PASS
+quality: APPROVED
+---
+VEOF
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1
+grep -q 'INIT-0001-P01-T01: complete' "$WS/progress.md" \
+  && ok "report: a clean latest verdict commits and closes the row" \
+  || bad "report: a clean verdict did not commit"
+grep -qE '^\| INIT-0001-P01-T01 \|.*\| complete \|' "$WS/dispatches.md" \
+  && ok "report: commit closes the task's dispatch row" \
+  || bad "report: commit left the dispatch row open"
+
+# A second commit is refused, not duplicated.
+before=$(grep -c 'complete' "$WS/progress.md")
+bash "$S/exec-report" "$ENGPLAN" "$WS/reports/INIT-0001-P01-T01-report.md" aaa1111 bbb2222 >/dev/null 2>&1 || true
+[ "$(grep -c 'complete' "$WS/progress.md")" = "$before" ] \
+  && ok "report: a completed task cannot be committed twice" \
+  || bad "report: re-committing duplicated the ledger line"
+
+# The livelock guard: an action the actuators keep refusing must become a
+# recorded adjudication instead of a silent infinite loop.
+rm -f "$WS/state/.step-stamp"
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+bash "$S/exec-step" "$ENGPLAN" >/dev/null 2>&1
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "ADJUDICATE loop:"*) ok "step: a no-progress loop escalates instead of spinning" ;;
+  *) bad "step: repeated unchanged emits stayed at '$out'" ;;
+esac
+engledger 'INIT-0001-P01-T02: dispatched (branch task/T02, base aaa1111)'
+out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
+case "$out" in
+  "ADJUDICATE loop:"*) bad "step: a real state change did not reset the counter" ;;
+  *) ok "step: a real state change resets the no-progress counter" ;;
+esac
+
+# Unsolicited human input is the ingress a pump needs; a stop must be a
+# recorded event with a state change, not a judgment call.
+out=$(bash "$S/exec-ruling" "$ENGPLAN" INIT-0001-P01-T01 "halt" "spec assumption is wrong" "work paused" \
+        --unsolicited "stop everything — the spec assumption is wrong" --stop 2>&1 || true)
+case "$out" in
+  *"STOP INIT-0001-P01:"*) ok "ruling: a stop prints one relayable STOP line" ;;
+  *) bad "ruling: a stop printed no STOP line" ;;
+esac
+grep -q 'stop everything — the spec assumption is wrong' "$WS/rulings.md" \
+  && ok "ruling: unsolicited human words are stored verbatim" \
+  || bad "ruling: the human's words were not stored verbatim"
+grep -q '| INIT-0001-P01 | .*blocked' "$eng/.executor/INDEX.md" \
+  && ok "ruling: a stop blocks the run" \
+  || bad "ruling: a stop did not block the run"
+bash "$S/exec-ruling" "$ENGPLAN" T d w c --stop >/dev/null 2>&1 \
+  && bad "ruling: a bare --stop was accepted" \
+  || ok "ruling: --stop without --unsolicited is refused"
+
+# ---------------------------------------------------------------------
+# Autonomy: which phase gates may clear without a human, and how a human
+# takes one back. The contract that matters most is the failure direction:
+# every ambiguity must resolve to deny.
+
+au=$(fixture autonomy)
+cd "$au"
+bash "$S/exec-initiative" new Auto > /dev/null 2>&1
+AIDIR="$au/docs/executor/INIT-0001-auto"
+# `|| true` on the setup transitions: intake is already entered by the
+# seed, so re-entering it is correctly refused. Under `set -e` an expected
+# refusal inside a fixture aborts the suite before any assertion runs.
+for ph in intake discovery architecture design; do
+  bash "$S/exec-initiative" phase INIT-0001 $ph entered >/dev/null 2>&1 || true
+  bash "$S/exec-initiative" phase INIT-0001 $ph skipped "smoke scaffolding" >/dev/null 2>&1 || true
+done
+mkdir -p "$AIDIR/brainstorm/sessions/s1"
+printf -- '---\nkind: brainstorm\nstatus: active\nfeeds: [specification]\ndecided: A\n---\n\n## Options\n\nx\n' \
+  > "$AIDIR/brainstorm/sessions/s1/session.md"
+bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1
+
+# No policy file: an auto-pass must be refused, never defaulted.
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed with no policy file" \
+  || ok "autonomy: no policy file refuses an auto-pass"
+grep -q 'auto-passed' "$AIDIR/INDEX.md" \
+  && bad "autonomy: a refused auto-pass still recorded" \
+  || ok "autonomy: a refused auto-pass writes nothing"
+
+autonomy_policy() { # enabled mode
+  cat > "$AIDIR/autonomous.md" <<EOF
+---
+kind: autonomous
+initiative: INIT-0001
+enabled: $1
+---
+
+| Phase | Mode | Why |
+|---|---|---|
+| specification | $2 | |
+EOF
+}
+
+autonomy_policy false allow
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed under a disabled policy" \
+  || ok "autonomy: a disabled policy refuses an auto-pass"
+
+autonomy_policy true deny
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: auto-passed a deny-mode phase" \
+  || ok "autonomy: mode deny refuses an auto-pass"
+[ "$(bash "$S/exec-gate" INIT-0001 specification --policy)" = "INIT-0001 specification: deny" ] \
+  && ok "autonomy: --policy reports the declared mode" \
+  || bad "autonomy: --policy did not report the mode"
+
+# A pick-class phase is one a script cannot decide: bash counts files, it
+# cannot choose between designs. `allow` without a recorded verdict must
+# still refuse, and must say why.
+autonomy_policy true allow
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && bad "autonomy: a pick-class gate was decided without a verdict" \
+  || ok "autonomy: pick-class without a scored verdict is refused"
+
+mkdir -p "$AIDIR/specs" "$AIDIR/risks" "$AIDIR/verification" "$AIDIR/verdicts"
+printf -- '---\nid: INIT-0001-SPEC-01\ninitiative: INIT-0001\nkind: spec\nstatus: active\ntitle: Smoke spec\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\nspec: null\nrequirements_count: 1\n---\n\n## R01 — A requirement\n\nBody.\n' > "$AIDIR/specs/INIT-0001-SPEC-01-smoke.md"
+printf -- '---\nid: INIT-0001-RISK-01\ninitiative: INIT-0001\nkind: risk\nstatus: active\ntitle: Smoke risk\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\n---\n\nx\n' > "$AIDIR/risks/INIT-0001-RISK-01-smoke.md"
+printf -- '---\nid: INIT-0001-VRFY-01\ninitiative: INIT-0001\nkind: verification\nstatus: active\ntitle: Smoke vrfy\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\nspec: INIT-0001-SPEC-01\ncriteria_count: 1\nevidence_types: [unit]\n---\n\n| V01 | R01 verified by unit test | unit |\n' > "$AIDIR/verification/INIT-0001-VRFY-01-smoke.md"
+printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\n' > "$AIDIR/verdicts/INIT-0001-SPEC-01-scored-verdict.md"
+# An auto-pass must clear the same critique a human pass does, so the
+# component's audit has to exist before the gate will clear it.
+clear_critique INIT-0001 specification
+
+bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
+  && ok "autonomy: a pick-class gate with a recorded verdict auto-passes" \
+  || bad "autonomy: a permitted auto-pass was refused"
+# Marker AND date: the marker says no human was involved, the date keeps
+# the row ordered. A date alone is indistinguishable from a human pass.
+grep -qE '^\| specification \| [^|]*\| \*\*auto-passed\*\* [0-9]{4}-[0-9]{2}-[0-9]{2} \|' "$AIDIR/INDEX.md" \
+  && ok "autonomy: the phase log records a typed auto-pass, not a human pass" \
+  || bad "autonomy: the auto-pass marker or date is missing from the phase log"
+[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 planning" ] \
+  && ok "autonomy: exec-step advances past an auto-passed phase" \
+  || bad "autonomy: exec-step did not advance past an auto-passed phase"
+
+# Taking it back. Only a phase that actually finished can be superseded,
+# and superseding reopens it — otherwise a human who rejects an autonomous
+# pass would have to hand-edit the log.
+bash "$S/exec-initiative" phase INIT-0001 specification superseded "the human rejected the design" >/dev/null 2>&1 \
+  && ok "autonomy: an auto-pass can be superseded by a human" \
+  || bad "autonomy: superseding an auto-passed phase was refused"
+grep -qE '^\| specification \| — \| \*\*superseded\*\*' "$AIDIR/INDEX.md" \
+  && ok "autonomy: supersession clears Entered and marks the gate" \
+  || bad "autonomy: supersession did not reopen the phase"
+[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 specification" ] \
+  && ok "autonomy: exec-step re-enters a superseded phase" \
+  || bad "autonomy: exec-step did not re-enter a superseded phase"
+
+bash "$S/exec-initiative" phase INIT-0001 handoff superseded "no such gate" >/dev/null 2>&1 \
+  && bad "autonomy: superseded a phase that never passed" \
+  || ok "autonomy: a never-passed phase cannot be superseded"
+# `planning` has its own brainstorm-entry requirement, so this setup step
+# may legitimately be refused; the assertion below is about the reason
+# note, not about whether the phase could be entered here.
+bash "$S/exec-initiative" phase INIT-0001 planning entered >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 planning skipped "smoke" >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 planning superseded "" >/dev/null 2>&1 \
+  && bad "autonomy: superseded without stating a reason" \
+  || ok "autonomy: supersession requires a stated reason"
+before=$(cksum < "$AIDIR/INDEX.md")
+# Check-only exits 1 when the gate is not ready — that is the answer, not
+# a suite failure, and the point of the assertion is what it did or did
+# not write on the way out.
+bash "$S/exec-gate" INIT-0001 planning >/dev/null 2>&1 || true
+after=$(cksum < "$AIDIR/INDEX.md")
+case "$after" in
+  "$before") ok "autonomy: check-only mode mutates nothing" ;;
+  *) bad "autonomy: check-only mode wrote to the phase log" ;;
+esac
+
+# ---------------------------------------------------------------------
+# The generic critique gate. These assert the failure DIRECTION, not just
+# the happy path: a gate that passes when it should refuse is worse than no
+# gate, because the run believes it was checked.
+
+cg=$(fixture critgate)
+cd "$cg"
+bash "$S/exec-initiative" new Crit > /dev/null 2>&1
+CIDIR="$cg/docs/executor/INIT-0001-crit"
+mkdir -p "$CIDIR/architecture"
+for n in 01 02; do
+  printf -- '---\nid: INIT-0001-ARCH-%s\ninitiative: INIT-0001\nkind: arch\nstatus: active\ntitle: Arch %s\n---\n\n```mermaid\ngraph TD; A-->B;\n```\n' "$n" "$n" \
+    > "$CIDIR/architecture/INIT-0001-ARCH-$n-a.md"
+done
+CSUM=$(bash "$S/exec-critique" INIT-0001 architecture init)
+CAUD="$cg/.executor/INIT-0001/critique/architecture/critique-architecture-R01.md"
+caudit() { # verdict high medium
+  printf -- '---\nkind: critique\ncomponent: architecture\nround: R01\nverdict: %s\nhigh: %s\nmedium: %s\nlow: 0\n---\n\n## Findings\n\nx\n' "$1" "$2" "$3" > "$CAUD"
+}
+crow() { printf '| %s | %s | critique-architecture-R01.md | | %s |\n' "$1" "$2" "${3:-fixture}" >> "$CSUM"; }
+
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a component with no audit" \
+  || ok "critique: no audit means no clearance"
+caudit PASS 0 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a component with no rows" \
+  || ok "critique: an empty clearance is not a cleared one"
+caudit PASS 2 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: believed verdict PASS beside high=2" \
+  || ok "critique: a PASS contradicting the severity counts is refused"
+caudit PASS 0 1
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: believed verdict PASS beside medium=1" \
+  || ok "critique: a PASS with a MEDIUM finding is refused"
+caudit FAIL 1 0
+caudit PASS 0 0
+crow INIT-0001-ARCH-01 clean ""
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a set with an unaudited member" \
+  || ok "critique: a set member with no row blocks clearance"
+caudit FAIL 1 0
+crow INIT-0001-ARCH-02 clean ""
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: trusted a clean row over a FAIL verdict" \
+  || ok "critique: a clean row must agree with the newest audit"
+caudit PASS 0 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && ok "critique: an honest PASS clears the component" \
+  || bad "critique: an honest PASS was refused"
+caudit PASS 0 0
+crow INIT-0001-ARCH-99 clean "ghost"
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"stale clearance row"*) ok "critique: a row for a deleted artifact is stale" ;;
+  *) bad "critique: a stale clearance row was not detected" ;;
+esac
+# Drop the ghost row. `grep -v`, not inline Python: `for l in t` over a
+# string yields characters, not lines, so it silently filters nothing.
+grep -v '^| INIT-0001-ARCH-99 ' "$CSUM" > "$CSUM.tmp" && mv "$CSUM.tmp" "$CSUM"
+
+# A waiver is a human decision: a bare cell is indistinguishable from a
+# controller self-granting one, and a note with no ruling behind it is an
+# undocumented skip.
+python3 -c "
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, 'w').write(re.sub(r'^\| INIT-0001-ARCH-01 .*$', '| INIT-0001-ARCH-01 | waived | critique-architecture-R01.md | |  |', t, count=1, flags=re.M))
+" "$CSUM"
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: accepted a waiver with no note" \
+  || ok "critique: a waiver with no note is refused"
+python3 -c "
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, 'w').write(re.sub(r'^\| INIT-0001-ARCH-01 .*$', '| INIT-0001-ARCH-01 | waived | critique-architecture-R01.md | | human waived the unenforced boundary |', t, count=1, flags=re.M))
+" "$CSUM"
+# `check | grep` cannot be used under `set -o pipefail`: the check's exit 1
+# poisons the pipeline even when grep matches, so the assertion would report
+# failure regardless of what was printed. Capture, then match.
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"no initiative ruling names it"*) ok "critique: a waiver with a note but no ruling is refused" ;;
+  *) bad "critique: a waiver was accepted with no ruling behind it" ;;
+esac
+bash "$S/exec-ruling" "$CIDIR/architecture/INIT-0001-ARCH-01-a.md" initiative \
+  "waive INIT-0001-ARCH-01's unenforced boundary" "a second boundary ships" "c1" >/dev/null 2>&1
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"critique clean"*) ok "critique: a human-ruled waiver clears the component" ;;
+  *) bad "critique: a properly ruled waiver was refused — $cout" ;;
+esac
+
+# The cap is enforced by the script, not by the skill's prose. A cap
+# nobody counts is a suggestion, and a suggestion is how a fourth round
+# appears with nobody able to say when the loop started.
+bash "$S/exec-critique" INIT-0001 architecture audit 03 >/dev/null 2>&1 \
+  && ok "critique: round 3 is within the cap" \
+  || bad "critique: round 3 was refused inside the cap"
+bash "$S/exec-critique" INIT-0001 architecture audit 04 >/dev/null 2>&1 \
+  && bad "critique: allowed a fourth audit round" \
+  || ok "critique: the three-round cap is enforced"
+bash "$S/exec-critique" INIT-0001 bogus check >/dev/null 2>&1 \
+  && bad "critique: accepted an unregistered component" \
+  || ok "critique: an unregistered component fails closed"
+
+# The gate refuses its phase, and an auto-pass cannot route around it.
+bash "$S/exec-initiative" phase INIT-0001 architecture entered >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 architecture passed "checked it myself" >/dev/null 2>&1 \
+  && bad "critique: a phase passed with its critique unclear" \
+  || ok "critique: an authoring phase will not pass unaudited"
+
+# ---------------------------------------------------------------------
+# Subagent coverage. The pump's promise is that every step is either a
+# script decision or a dispatch. Two ways that breaks silently: an action
+# exec-step can emit that maps to no registered role, and a role in the
+# registry that no prompt implements. Both are checked against the source,
+# so adding an action or a role without wiring it fails here rather than
+# at the point a run needs it.
+
+LAYOUT="$ROOT/skills/executor/references/layout.md"
+STEP="$S/exec-step"
+
+# Every action word exec-step can print, read from the source rather than
+# from a hand-kept list — a list would go stale exactly when it matters.
+emitted=$(grep -ohE 'echo "(DISPATCH|REPORT|REVIVE|REDISPATCH|ADJUDICATE|GATE-STAGE|WAIT|DONE|ASK|PHASE-ENTER|PHASE-GATE|REPAIR-STATE)' "$STEP" \
+  | sed 's/echo "//' | sort -u)
+while IFS= read -r act; do
+  [ -n "$act" ] || continue
+  grep -qF "\`$act" "$ROOT/skills/executor/SKILL.md" \
+    && ok "subagent: $act has a pump decision-table row" \
+    || bad "subagent: $act is emitted but absent from the pump decision table"
+done <<< "$emitted"
+
+# Every registered role must name a prompt template, and that template must
+# exist on disk. A role with no prompt is an agent briefed from memory.
+# The role cell reads "`AUDIT` — component auditor", so extract the
+# backticked token: word-splitting the cell would invent roles out of its
+# prose and then report them all as broken.
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
+  tmpl=$(awk -F'|' -v role="$r" '
+    match($2, /`[A-Z]+`/) {
+      cell = substr($2, RSTART + 1, RLENGTH - 2)
+      if (cell == role && match($0, /`[a-z0-9-]+\/[a-z0-9-]+-prompt\.md`/)) {
+        print substr($0, RSTART + 1, RLENGTH - 2); exit
+      }
+    }' "$LAYOUT")
+  if [ -z "$tmpl" ]; then
+    bad "subagent: role $r names no prompt template"
+  elif [ ! -f "$ROOT/skills/$tmpl" ]; then
+    bad "subagent: role $r names $tmpl, which does not exist"
+  else
+    ok "subagent: role $r has its prompt on disk"
+  fi
+done <<< "$(awk -F'|' 'match($2, /`[A-Z]+`/) { print substr($2, RSTART + 1, RLENGTH - 2) }' "$LAYOUT" | sort -u)"
+
+# AUTHOR is registered but the pump's PHASE-ENTER row must actually
+# dispatch it — the rule "never authors" is worthless without the
+# mechanism, and nothing else in the suite would notice.
+grep -qE '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" \
+  && grep -A0 '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" | grep -q 'AUTHOR' \
+  && ok "subagent: PHASE-ENTER dispatches an AUTHOR" \
+  || bad "subagent: PHASE-ENTER does not dispatch an AUTHOR"
+
+# The critique registry is positional data. A row with the wrong field
+# count resolves to a plausible-but-wrong path, so the shape is enforced
+# where it is read rather than trusted.
+badrows=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | awk -F"|" "NF != 5 { print \$1 }"' _ "$S")
+[ -z "$badrows" ] \
+  && ok "subagent: every critique registry row has 5 fields" \
+  || bad "subagent: critique registry row(s) with wrong field count: $badrows"
+
+# Two components sharing a summary_dir would land in one directory and
+# let one component's clearance satisfy the other's gate.
+dups=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_components | cut -d"|" -f4 | sort | uniq -d')
+[ -z "$dups" ] \
+  && ok "subagent: no two critique components share a clearance dir" \
+  || bad "subagent: critique components share a clearance dir: $dups"
 
 echo
 echo "$pass passed, $fail failed"

@@ -34,10 +34,26 @@ edited to hide its old content — it keeps its body and gains
 ### Brainstorm (`kind: brainstorm`)
 
 ```yaml
-question: Which placement strategy survives tenant-scale?
-status: open                      # open|decided|abandoned — brainstorm's own lifecycle
-decided: null                     # option name once the human picks
+id: INIT-0004-BRN-01              # exec-id INIT-0004 BRN; null before an initiative exists
+initiative: INIT-0004             # null for a pre-initiative session
+mode: design                      # design = a whole feature or use case; decision = one open question
+question: How should tenants onboard themselves without an operator?
+feeds: [specification, planning]  # the phases this session's outcome informs
+status: draft                     # draft while open; active once the human picks; withdrawn if abandoned
+decided: null                     # the chosen concept or option name once the human picks
 ```
+
+`feeds` is what the phase gates read: `specification entered` requires an
+`active` session whose `feeds` includes `specification`, and `planning
+entered` requires one whose `feeds` includes `planning` (normally a
+`decision` session on how the spec decomposes into plans and tasks).
+
+Required body sections, checked by `exec-store-check` B2:
+
+| Mode | While `draft` | Once `active` |
+|---|---|---|
+| `design` | `## Brief` | `## Brief`, `## Map`, `## Concepts` with ≥3 `###` concepts, `## Stress test`, `## Decision log`, `## Design`, `## Risks and open questions`, `## Handoff`, and `decided:` set |
+| `decision` | `## Options` | `## Options` with ≥3 `###` options, `## Adversarial pass`, `## Outcome`, and `decided:` set |
 
 ### Charter (`kind: charter`)
 
@@ -186,9 +202,10 @@ Per-kind fields:
 | `verdict` | the reviewer | `task`, `round: INIT-0004-P01-T03-R02`, `spec_verdict: PASS`, `quality: APPROVED` | one file per review round |
 | `fix-package` | `exec-fix-package` | `task`, `round: INIT-0004-P01-T03-R02`, `verdict:` provenance path | verdict findings + report + brief + context assembled for the fix dispatch |
 | `evidence` | `exec-evidence` | `criterion: INIT-0004-VRFY-01 #3`, `method: unit`, `state: a91e502` | one file per criterion; written to the initiative's tracked `verification/evidence/PNN/` |
-| `regression` | `executor-plan-regression` | `plan`, `round: 1` | one audit file per plan per pass; lives at `.executor/<INIT>/plan-regression/regression-P<nn>.md` |
-| `repair` | `executor-plan-regression` | `plan`, `round: 1`, `verdict:` audit path | one repair log per plan per pass; lives at `.executor/<INIT>/plan-regression/fix-P<nn>.md` |
+| `regression` | the plan auditor (`AUDIT` dispatch) | `id: INIT-0004-P02-AUDIT-R01`, `plan`, `round: R01`, `verdict: PASS \| FAIL`, `high`, `medium`, `low` | one file per plan per round, never overwritten: `.executor/<INIT>/plan-regression/regression-P<nn>-R<nn>.md`; `exec-plan-regression check` requires the latest round's `verdict: PASS` for a `clean` summary row |
+| `repair` | the plan repairer (`REPAIR` dispatch) | `id: INIT-0004-P02-FIX-R01`, `plan`, `round: R01`, `verdict:` the audit path it repairs | one repair log per plan per round: `.executor/<INIT>/plan-regression/fix-P<nn>-R<nn>.md` |
 | `gate` | `exec-plan-regression init` | — | the plan-set clearance summary, `.executor/<INIT>/plan-regression/summary.md`; rows: clean\|waived |
+| `dispatches` (plan regression) | `exec-plan-regression init` | `initiative` | `.executor/<INIT>/plan-regression/dispatches.md`; one row per `AUDIT` and `REPAIR` dispatch |
 
 `report` and `verdict` files are written by subagents, not scripts — the
 subagent copies the identity block from its brief (or verdict path) and

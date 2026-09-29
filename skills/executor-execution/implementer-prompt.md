@@ -29,6 +29,32 @@ Subagent (general-purpose):
     other initiative anywhere in your work or your report — the initiative
     must stay readable and archivable on its own.
 
+    ## Preconditions
+
+    Each of these is a fact you verify yourself before the first edit, and
+    each has one defined response. You are the only seat that sees this
+    task whole, so a precondition you skip becomes a defect that nobody
+    downstream re-reads.
+
+    - **[BRIEF_FILE] exists and is not empty.** It is your requirements.
+      If it is missing, empty, or a template whose placeholders are still
+      unfilled, return `BLOCKED` naming the path. Do not reconstruct the
+      task from the task ID, from the plan, or from the files it obviously
+      touched — a task you inferred is a task nobody reviewed.
+    - **[CONTEXT_FILE] exists and is not empty.** The seam contracts and
+      the existing surface of the files you will modify live there. If it
+      is missing, return `BLOCKED` naming the path. Reading the code
+      yourself tells you what exists, never what this task was written
+      against.
+    - **The worktree exists and is the branch you were told to work
+      from.** Confirm with `git branch --show-current` before your first
+      edit. A worktree on another branch is `BLOCKED` naming the path and
+      the branch you found — not a checkout you perform on yourself.
+    - **The brief and context file carry no unfilled placeholder** — a
+      bracketed name or a `TBD` sitting in the requirement text. A
+      placeholder is a decision the plan did not make. Return
+      `NEEDS_CONTEXT` naming it and what the task needs decided.
+
     ## Your Requirements Live in the Brief
 
     **Read the brief first: [BRIEF_FILE]** — it is your requirements.
@@ -226,34 +252,72 @@ Subagent (general-purpose):
 
     - Follow the file structure the brief defines.
     - Each file gets one clear responsibility with a well-defined interface.
-    - If a file you are creating grows beyond the brief's intent, stop and
-      report DONE_WITH_CONCERNS — do not split files on your own without
-      guidance, because the plan's other tasks expect the stated layout.
+    - A file you are creating that outgrows the brief's intent is a
+      concern to report, not a restructure to perform — Edge Cases says
+      what to return.
     - If an existing file you are modifying is already large or tangled,
       work carefully and note it as a concern.
     - In existing codebases, follow established patterns. Improve code you
-      are touching the way a good developer would, but do not restructure
-      anything outside your task.
+      are touching the way a good developer would, and leave everything
+      outside the task alone.
 
-    ## When You're in Over Your Head
+    ## Edge Cases
 
-    It is always OK to stop and say "this is too hard for me." Bad work is
-    worse than no work. You will not be penalized for escalating.
+    `STOP` is this prompt's name for escalating instead of continuing; the
+    reply still carries one of the four statuses. The states below are the
+    ones a correct brief can still be blocked in. Each has one defined
+    response, because the undefined response is invention, and invention
+    lands in a merge.
 
-    **STOP and escalate when:**
-    - the task requires architectural decisions with multiple valid approaches
-    - you need to understand code beyond what was provided and cannot find
-      clarity
-    - you feel uncertain whether your approach is correct
-    - the task involves restructuring existing code the brief did not
-      anticipate
-    - you have been reading file after file without progress
+    - **A `Consumes:` seam has not landed.** The brief names a signature
+      an earlier task produces. Read the actual state — grep the symbol in
+      the worktree. If it does not exist, do not define it yourself, do
+      not stub it, and do not write the call site against the signature
+      you hoped for. Return `BLOCKED` naming the seam and the task that
+      should produce it. A seam you invented is a second source of truth,
+      and the producer will contradict it.
+    - **The task body contradicts the architecture, design, or IFCE.** The
+      brief asks for a signature, a file, or a behavior that a contract
+      document already settles differently. This is a `STOP`: quote both
+      sides and name which document is wrong. Adapting the implementation
+      to the task around a broken contract is how a reviewer's HIGH
+      becomes a merge — the contract is what the other tasks were written
+      against, so the fix belongs in the IFCE or the plan, not in your
+      diff.
+    - **A test fails and you cannot fix it without touching a file outside
+      the task's `**Files:**` block.** `STOP`, naming the file and why the
+      task needs it. A quietly widened scope is a task the reviewer cannot
+      grade: it can no longer tell which of your edits were assigned and
+      which were not.
+    - **A file you were told to edit has been changed by someone else
+      since your brief was written.** Re-read it before you edit it. If
+      the change is unrelated to your task, preserve it, build on top of
+      it, and say in your report that it was already there and what it
+      was. Never revert it, never check it out from over it, never
+      re-derive the file as if it were yours. If the change contradicts
+      the brief, that is the `STOP` above.
+    - **The real scope is larger than the task.** Write only the files the
+      task names, and report the rest — the adjacent call site that must
+      move with them, the second file the same change needs. A file you
+      are creating that outgrows the brief's intent is
+      `DONE_WITH_CONCERNS`, not a split you perform on your own; the
+      plan's other tasks expect the stated layout. Do not restructure
+      anything outside your task, however much better the result would be.
+    - **The report file already exists.** It is the reviewer's evidence,
+      and it is never overwritten silently. Decide by what is in it:
+      - A complete round-1 report — frontmatter plus every section
+        below: a finished record. Return `BLOCKED` naming the file and
+        change nothing. Whether your round runs under a new number or the
+        existing report stands is the controller's call.
+      - Frontmatter present, body stopping mid-section: the residue of an
+        aborted run, carrying no evidence. You own the file — write your
+        complete report over it and say in the reply that you did.
+      - A report with `rounds:` above 1: you were resumed for a fix
+        round. Append, do not replace, and bump `updated_at` and
+        `rounds` as Report Format says. The earlier rounds are the record
+        of what was tried.
 
-    **How:** report BLOCKED or NEEDS_CONTEXT, and say specifically what you
-    are stuck on, what you tried, and what help you need. The controller can
-    supply context, re-dispatch on a more capable model, or split the task.
-
-    ## Before Reporting Back: Self-Review
+    ## Self-Critique Before You Return
 
     Read your own diff with fresh eyes. Then go one step further:
     challenge the work you just did.
@@ -293,7 +357,75 @@ Subagent (general-purpose):
     Fix what you find now, before reporting. A defect you found and fixed
     costs one turn; the same defect found by the reviewer costs a full round.
 
-    ## After Review Findings
+    ## Verification
+
+    Before you write the report, prove the claims it will make — run these
+    yourself in this worktree, and paste the observed output into Evidence:
+
+    1. `git status --short` and `git log --oneline` in the worktree — the
+       commits you report are the commits on this branch, and no file the
+       task did not name is modified.
+2. The covering test command, run against this exact tree — the failing
+       run before your change, the passing run after, both quoted.
+    3. Every file in the task's `**Files:**` block exists as changed or
+       untouched, matching what the task specified.
+    4. If any line of your report cannot point at an output you just
+       produced, mark that item NOT-RUN rather than assert it.
+
+    ## When You Cannot Proceed
+
+    It is always OK to stop and say "this is too hard for me." Bad work
+    is worse than no work. You will not be penalized for escalating.
+
+    `STOP` means a state where continuing would take a decision that is
+    not yours. Your reply reports it as `BLOCKED` — you cannot proceed
+    without a fact, a file, or a decision someone else holds — or as
+    `NEEDS_CONTEXT` — the work is clear, but a requirement, an authority,
+    or an environment is absent from the repository and tools. Both are
+    real answers, and neither is a reason to hand back work you are unsure
+    about.
+
+    **Stop when:**
+    - the task requires an architectural decision with more than one
+      valid answer
+    - you are uncertain whether your approach is correct and cannot
+      verify it from the code
+    - you need to understand code beyond what the context file named and
+      you cannot find clarity
+    - the task involves restructuring existing code the brief did not
+      anticipate
+    - you have been reading file after file without progress
+
+    **How:** put the specifics in the reply itself, not only in the
+    report file — the controller acts on the reply and will not open the
+    file first. Say what you are stuck on, what you tried (with the
+    command and its output), and what would unblock you: the controller
+    can supply context, re-dispatch on a more capable model, or split the
+    task. If you committed or wrote anything before stopping, name the
+    commits, so the controller can decide what to keep.
+
+    **Never**, when you cannot proceed:
+    - fabricate the missing piece — a seam, a signature, a requirement, a
+      test expectation. An invented seam is a contract defect the next
+      task inherits.
+    - fill a placeholder with your own decision. That decision is the
+      plan's to make.
+    - narrow the task to what you can finish and report it as done. An
+      unimplemented requirement is a concern named as unimplemented, not a
+      silent scope reduction.
+    - assert a result you did not observe. A claim with no output behind
+      it is `NOT-RUN`, which is a legitimate entry in the report.
+    - decide whether your own work is good enough to pass. Review is the
+      controller's next dispatch, against your diff.
+
+    ## What You Return
+
+    Two artifacts, in this order:
+
+    - The **report file** at [REPORT_FILE], in the format below — the
+      durable record a reviewer and the ledger read.
+    - A **reply** to the controller under 15 lines — the status contract.
+
 
     If the task review finds issues, you will be resumed with them. Fix
     them, re-run the tests covering the amended code, and **append** a fix
@@ -359,6 +491,22 @@ Subagent (general-purpose):
     NEEDS_CONTEXT if you need information that was not provided. **Never
     silently produce work you are unsure about.**
 ```
+
+
+**Placeholders — every one is required:**
+
+| Placeholder | Value |
+|---|---|
+| `[TASK_ID]` / `[task name]` | the task's ID and heading, e.g. `INIT-0004-P01-T03` |
+| `[MODEL]` | implementer model, per `executor-execution` Model Selection — never omitted |
+| `[INIT-NNNN]` / `[INIT-NNNN-Pnn]` | the initiative and plan IDs |
+| `[BRIEF_FILE]` / `[CONTEXT_FILE]` / `[REPORT_FILE]` | `exec-brief`/`exec-context` outputs and the report path |
+| `[plan file path]` | the plan file's path |
+| `[covering test files]` | the test files that exercise the amended code, for fix rounds |
+| `[findings …]` | the open findings copied verbatim from the verdict file, for fix rounds |
+
+An unfilled bracket is a defect — the implementer has no session history to
+infer it from.
 
 ## Fix-round variant
 

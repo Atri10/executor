@@ -302,44 +302,42 @@ decision so it is not lost.
 
 ## Brainstorm Sessions
 
-Brainstorming is the recorded exploration of a design question — options,
-counterarguments, evidence — not a document format. A session exists when
-there was reasoning worth keeping, in whatever mode it happened.
+Brainstorming is the recorded exploration of a design — options,
+counterarguments, evidence — not a document format. **The mechanics live in
+`executor-brainstorm`**: the seven-stage design session, the parallel
+concept explorers, the critic, and the recording format.
 
-**The mechanics live in `executor-brainstorm`** — session structure, the
-three-moves divergent pass, recording format, and the visual companion's
-offer rules. Discovery's job is narrower: decide at entry whether this
-initiative needs ideation at all.
+### Discovery is where the design session runs
 
-### When a session exists
+For a new feature or use case, discovery is where its `design`-mode session
+normally happens: the research documents supply the evidence, the session
+turns it into concepts, and the human's pick becomes the options document's
+decision. The session is **required before specification** —
+`exec-initiative phase <INIT> specification entered` refuses until a
+session with `status: active` and `feeds:` naming `specification` exists.
+If a pre-initiative session already explored the idea, intake adopted it;
+discovery extends or re-runs it, never ignores it.
 
-At discovery entry, decide explicitly whether the initiative needs
-ideation beyond what the charter states. If it does — the problem has
-genuinely open design questions, competing approaches, or unknowns the
-charter does not resolve — invoke `executor-brainstorm`, which runs the
-session and files it under:
+Sessions file under:
 
 ```text
 docs/executor/INIT-0004-<slug>/brainstorm/sessions/<UTC-timestamp>-<topic>/
 ```
 
-A text session is a first-class session. The session record (`session.md`,
-`kind: brainstorm`) carries the question, constraints, options and
-counterarguments, the adversarial pass, and the outcome or open questions.
+### When ideation is genuinely not needed at discovery
 
-### When no session exists
-
-If ideation is not needed (the charter already pins the approach, or
-the work is a continuation with no open design questions), record the
-skip in the initiative `INDEX.md` — the canonical location, and the one
-`exec-store-check` greps. One line containing "brainstorm" is enough:
+If the charter already pins the approach, or the work is a continuation
+with no open design questions, record the skip in the initiative
+`INDEX.md` — one line containing "brainstorm":
 `*Brainstorming considered at discovery entry: not needed — <reason>.*`
-A declined visual offer is recorded there too, once, so the next
-session does not re-offer the same thing the human already turned down.
+A declined visual offer is recorded there too, once.
 
-An empty `brainstorm/sessions/` directory with no recorded session or
-skip is a gap `exec-store-check` fails on: nobody can later tell
-whether ideation was skipped deliberately or never considered.
+That note satisfies discovery's B1 record check, **not** the specification
+gate: a spec still needs a decided design session behind it. The note says
+discovery did not need ideation; it does not say the feature was designed.
+
+An empty `brainstorm/sessions/` directory with no recorded session or skip
+is a gap `exec-store-check` fails on.
 
 ### Visual mode is a capability, not the definition
 
@@ -400,6 +398,41 @@ claim — a small initiative often qualifies. Skipping is a **stated decision**:
 and the charter's `skipped_phases` gains `discovery` with the reason in its
 body. The `skipped` row is what tells a later reader the difference between
 "we considered alternatives" and "nobody looked."
+
+## Self-Critique
+
+Before presenting the options document, run this against it and fix what
+it catches:
+
+1. **Is every claim marked with its real evidence level** — measured,
+   cited, or assumed? One `measured` claim that was only read in a doc
+   corrupts every decision weighted on it.
+2. **Are the approaches stripped equal?** An approach carrying an extra
+   feature is being compared on inflation, not design.
+3. **Is the second-best approach written as honestly as the first?** If you
+   cannot argue for it, you have not understood the choice.
+4. **Does the recommendation say what would change it** — a number, an
+   event, a finding — so the human can check your reasoning, not just
+   accept it?
+5. **Did you ask one question at a time**, and did every answer land in a
+   document rather than in chat?
+6. **Is the design session's pick the same as the options document's
+   decision?** Two records that disagree are a gate defect.
+
+## Verification
+
+Run these in this session and cite their output at the gate:
+
+1. `../executor/scripts/exec-store-check` — no finding for this
+   initiative; B1 requires a session or a recorded skip, B2/B3 check the
+   session, D8 requires an active OPTS to carry `recommends` and a filled
+   `## Decision`.
+2. Every RSCH and OPTS document has a Documents-table row — `exec-store-check`
+   I1 fails an unlisted one.
+3. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>` —
+   exit 0; mockups and research may capture real data.
+4. `../executor/scripts/exec-initiative phase <INIT> discovery passed "…"`
+   — accepted; it refuses with no RSCH or OPTS on disk.
 
 ## Red Flags
 

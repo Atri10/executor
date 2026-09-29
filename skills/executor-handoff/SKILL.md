@@ -585,6 +585,36 @@ happened" — it means say what you found and start from repository truth.
 Re-read every binding document the record names — charter, spec,
 interfaces — before touching code. A summary of a spec is not a spec.
 
+## Self-Critique
+
+Before presenting the options menu, and again before the final message:
+
+1. **Does the rulings report list every ruling in every `rulings.md`**,
+   including the initiative-level log and every human-answered question?
+   Count them against the files.
+2. **Was the test suite run on the exact tree being integrated**, not an
+   earlier commit?
+3. **Is every NOT-RUN criterion stated to the human** as an open gap
+   rather than folded into "verified"?
+4. **After a merge, did you offer stale-branch cleanup** — candidates
+   listed from `git branch --merged` and `git ls-remote`, deletion only on
+   approval?
+5. **Does the final message claim only what this session observed**, with
+   everything else marked as inference?
+
+## Verification
+
+Run these in this session and cite their output in the final message:
+
+1. `../executor/scripts/exec-scan-secrets` — exit 0 over both stores
+   (Step 2's gate).
+2. The project's test suite on the integration tree — exit 0 (Step 3).
+3. `../executor/scripts/exec-store-check` — no finding for this
+   initiative.
+4. `../executor/scripts/exec-run "$PLAN" check` for every plan — exit 0.
+5. After a merge: `git branch --merged <integration>` and
+   `git ls-remote --heads origin` — the cleanup candidate list.
+
 ## Common rationalizations
 
 | Excuse | Reality |

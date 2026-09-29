@@ -317,6 +317,9 @@ When the evidence run is a subagent dispatch rather than a command you run
 yourself, its agent identity follows the layout.md grammar: `VERIFY-P01-V03`
 (one per criterion; a re-run of the same criterion appends the round, e.g.
 `VERIFY-P01-V03-R02`). Log it in `dispatches.md` like any other dispatch.
+Template: [evidence-runner-prompt.md](evidence-runner-prompt.md). Fill every
+placeholder — the criterion, its method, its pass condition, and the commit
+verbatim — and specify the model explicitly.
 
 ## Redaction
 
@@ -448,6 +451,40 @@ Before any sentence that implies the work is done:
 - [ ] Phase row recorded with the truthful event?
 
 An unchecked box means the claim is not ready. State the actual status instead.
+
+## Self-Critique
+
+Before claiming verification, attack your own outcomes table:
+
+1. **Is any PROVEN backed by output from a different commit** than the one
+   being claimed? Evidence is valid only at the commit it was captured on.
+2. **Did any evidence run change code, tests, or config to get green?**
+   Then the criterion was not proven — it was edited.
+3. **Is any NOT-RUN described in the summary as passing, or omitted?**
+   Each one is a stated gap the human must accept.
+4. **Does each PROVEN evidence file, read cold, reach the same verdict**
+   without trusting your summary?
+5. **Is any requirement verified only by a unit suite** when its criterion
+   names a smoke or manual method on the real surface?
+6. **Did a dispatched evidence runner's report stand in for the file?** A
+   status line is not evidence; open the file it names.
+
+## Verification
+
+Run these in this session and cite their output with the claim:
+
+1. `git rev-parse --short HEAD` — matches the Commit column of every
+   PROVEN row.
+2. For each outcome row, the evidence file it cites exists —
+   `../executor/scripts/exec-store-check` X3 fails a cited file that does
+   not, and lists orphans.
+3. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>/verification`
+   — exit 0.
+4. Count PROVEN, FAILED, and NOT-RUN rows against the summary's counts —
+   equal.
+5. `../executor/scripts/exec-initiative phase <INIT> verification passed "…"`
+   only when every requirement is PROVEN or explicitly excepted by the
+   human.
 
 ## Common failures
 

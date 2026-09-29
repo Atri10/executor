@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Atri10
 # Initiative lifecycle: allocate, resolve, and advance phases.
 #
 # Usage:
@@ -17,7 +19,7 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-PHASES="intake discovery architecture design specification planning plan-regression execution review verification handoff"
+PHASES=$(exec_phases)   # canonical order lives in _exec-lib.sh (exec_phases)
 
 # Canonical phase order for transition validation. A phase may
 # only be entered after the previous one passed (or was explicitly
@@ -79,6 +81,73 @@ validate_phase_transition() {
         return 1
       fi
       ;;
+    auto-passed)
+      # Same preconditions as a human pass — the phase must be entered, and
+      # must not already be finished. What differs is the recorded marker,
+      # never the bar: an auto-pass that could not have been granted by a
+      # human is not an auto-pass, it is a hole.
+      if [ -z "$entered" ] || [ "$entered" = "—" ]; then
+        echo "phase $phase cannot be auto-passed before it is entered" >&2
+        return 1
+      fi
+      if [ -n "$passed" ] && [ "$passed" != "—" ] && [ "$passed" != "**skipped**" ]; then
+        echo "phase $phase is already finished ($passed)" >&2
+        return 1
+      fi
+      ;;
+    superseded)
+      # The deliberate inverse of the "already passed" refusal. Only a
+      # phase that HAS been passed, auto-passed, or skipped can be
+      # superseded — you cannot overturn a gate that never opened — and
+      # doing so reopens the phase rather than merely annotating it.
+      # Without this, a human who disagrees with an autonomous pass has no
+      # move but to hand-edit the log, which is the one thing the phase
+      # log exists to prevent.
+      if [ -z "$passed" ] || [ "$passed" = "—" ]; then
+        echo "phase $phase cannot be superseded before it passed, was auto-passed, or was skipped" >&2
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# ------------------------------------------------------------------
+# Entry gate: brainstorming is required before specs and plans are built.
+# Entering specification needs a decided (status: active) brainstorm
+# session whose feeds: list names specification — normally the design
+# session for the feature; entering planning needs one that names
+# planning — the decomposition session deciding how the spec splits into
+# plans and tasks. A skip note does not satisfy either: the gate asks
+# whether the design space was explored and decided, and a note records
+# only that it was not.
+
+# True when some session under $1/brainstorm/sessions is active and lists
+# $2 in its feeds:. Word-matched so "planning" never matches "replanning".
+has_decided_session_feeding() {
+  local dir=$1 phase=$2 s st feeds
+  for s in "$dir"/brainstorm/sessions/*/session.md; do
+    [ -f "$s" ] || continue
+    st=$(exec_frontmatter "$s" status)
+    feeds=$(exec_frontmatter "$s" feeds)
+    [ "$st" = "active" ] || continue
+    printf '%s\n' "$feeds" | tr '[],' '   ' | tr ' ' '\n' | grep -qx "$phase" && return 0
+  done
+  return 1
+}
+
+# Prints what an `entered` event still needs; returns nonzero when missing.
+phase_entry_missing() {
+  local phase=$1 dir=$2
+  case "$phase" in
+    specification)
+      has_decided_session_feeding "$dir" specification && return 0
+      echo "a decided brainstorm session feeding specification — run executor-brainstorm (design mode) and record feeds: [specification] with status: active"
+      return 1 ;;
+    planning)
+      has_decided_session_feeding "$dir" planning && return 0
+      echo "a decided brainstorm session feeding planning — run executor-brainstorm on how the spec decomposes into plans and tasks, feeds: [planning], status: active"
+      return 1 ;;
   esac
   return 0
 }
@@ -387,13 +456,33 @@ cmd_phase() {
   local id=${1:-} phase=${2:-} event=${3:-} note=${4:-}
   [ -n "$id" ] && [ -n "$phase" ] && [ -n "$event" ] || usage
   case " $PHASES " in *" $phase "*) ;; *) exec_die "unknown phase: $phase (want one of: $PHASES)" ;; esac
-  case "$event" in entered|passed|skipped) ;; *) exec_die "event must be entered, passed, or skipped" ;; esac
+  case "$event" in
+    entered|passed|skipped) ;;
+    auto-passed|superseded) ;;
+    *) exec_die "event must be entered, passed, auto-passed, superseded, or skipped" ;;
+  esac
   # A skipped phase always carries a reason — the documented contract,
   # enforced here. A **skipped** row with no note is indistinguishable
   # from an oversight, which is the distinction the phase log exists to
   # make.
   if [ "$event" = "skipped" ] && [ -z "${note//[[:space:]]/}" ]; then
     exec_die "phase $phase skipped requires a reason note — a skipped phase always carries one"
+  fi
+
+  if [ "$event" = "superseded" ] && [ -z "${note//[[:space:]]/}" ]; then
+    exec_die "phase $phase superseded requires a reason note — an override always states what it overturns"
+  fi
+  # An auto-pass is the one gate decision no human made, so it is the one
+  # that must prove it was permitted. Fail-closed: with no policy file, or
+  # no row naming this phase, the answer is no. "Autonomous mode is on"
+  # is not permission for every gate — the policy names them one at a time.
+  if [ "$event" = "auto-passed" ]; then
+    local policy_dir policy_mode
+    policy_dir=$(exec_initiative_dir_opt "$id")
+    policy_mode=$(exec_autonomous_mode "${policy_dir:-}" "$phase")
+    if [ "$policy_mode" != "gate" ] && [ "$policy_mode" != "allow" ]; then
+      exec_die "phase $phase is not declared auto-passable (autonomous mode: ${policy_mode:-no policy}) — add a row to ${policy_dir:-<initiative>}/autonomous.md, or pass the phase for human review"
+    fi
   fi
   # The note lands verbatim in a pipe-table cell — a raw '|' or newline
   # shifts columns and breaks the log. Same contract as title in cmd_new.
@@ -412,16 +501,50 @@ cmd_phase() {
   validate_phase_transition "$id" "$phase" "$event" "$idx" \
     || exec_die "illegal phase transition: $phase $event refused (see reason above)"
 
-  # A `passed` event asserts the phase's deliverable exists on disk, not
-  # only that the log row advanced — ordering was checked above, output
-  # presence is checked here, before any mutation. `entered` and
-  # `skipped` carry no artifact requirement; a skip stays legal.
-  if [ "$event" = "passed" ]; then
+  # An `entered` event for specification or planning requires a decided
+  # brainstorm session feeding that phase (see phase_entry_missing), and
+  # a `passed` event asserts the phase's deliverable exists on disk, not
+  # only that the log row advanced. Both are checked before any mutation;
+  # `skipped` carries no requirement, so a skip stays legal.
+  if [ "$event" = "entered" ]; then
+    local needs
+    if ! needs=$(phase_entry_missing "$phase" "$dir"); then
+      exec_die "phase $phase cannot be entered: brainstorming is required before it — missing under $dir/brainstorm/sessions:
+  $needs"
+    fi
+  fi
+  if [ "$event" = "passed" ] || [ "$event" = "auto-passed" ]; then
     local missing
     if ! missing=$(phase_artifacts_missing "$id" "$phase" "$dir"); then
-      exec_die "phase $phase cannot pass: the gate requires the artifact, not just the log row — missing under $dir:
+      exec_die "phase $phase cannot $([ "$event" = "auto-passed" ] && echo "be auto-passed" || echo "pass"): the gate requires the artifact, not just the log row — missing under $dir:
 $(printf '%s\n' "$missing" | sed 's/^/  /')"
     fi
+
+    # Critique gate. Every authoring phase is cleared by an independent
+    # audit of its component, not by the controller's reading of its own
+    # work — the whole point of a thin pump. The component comes from the
+    # registry, so a phase and its critique can never disagree about
+    # whether one exists.
+    local component
+    component=$(exec_critique_component_for_phase "$phase")
+    if [ -n "$component" ]; then
+      local critique_out critique_rc
+      critique_out=$("$(cd "$(dirname "$0")" && pwd)/exec-critique" "$id" "$component" check 2>&1) || critique_rc=$?
+      if [ -n "${critique_rc:-}" ]; then
+        exec_die "phase $phase cannot $([ "$event" = "auto-passed" ] && echo "be auto-passed" || echo "pass"): its $component critique is not clear — the controller does not clear its own work.
+$critique_out"
+      fi
+      # The critique gates the phase but does not get its own row, so the
+      # clearance is recorded in the Notes cell. Without this the log would
+      # show a bare date and a reader could not tell an audited phase from
+      # an unaudited one — the one cost this shape carries.
+      if [ -n "$note" ]; then
+        note="$note; critique $component cleared"
+      else
+        note="critique $component cleared"
+      fi
+    fi
+
     # These phases produce no thinking-store document at this layer —
     # their gate evidence lives on the run axis (exec-run audit).
     case "$phase" in
@@ -436,6 +559,16 @@ $(printf '%s\n' "$missing" | sed 's/^/  /')"
       $0 ~ "^\\| " phase " \\|" {
         if (event == "entered") { $3 = " " d " " }
         else if (event == "passed") { $4 = " " d " " }
+        # auto-passed is a DIFFERENT gate result from passed, not a
+        # synonym: a reader must be able to tell at a glance which gates
+        # no human ever looked at. The date rides along so the row still
+        # orders chronologically.
+        else if (event == "auto-passed") { $4 = " **auto-passed** " d " " }
+        # superseded reopens the phase — Entered is cleared so the phase
+        # can be re-entered and re-gated. Leaving the old Entered date
+        # would make the reopen invisible to the transition validator,
+        # which refuses a re-entry on a phase that still looks entered.
+        else if (event == "superseded") { $3 = " — "; $4 = " **superseded** " d " " }
         else {
           # skipped is a gate decision, not a history rewrite — keep a real
           # Entered date; write the placeholder only when none was recorded
@@ -453,9 +586,13 @@ $(printf '%s\n' "$missing" | sed 's/^/  /')"
     case "$event" in
       entered) entered=$(today) ;;
       passed)  passed=$(today) ;;
+      # A phase with no row at all can only be auto-passed or superseded in
+      # the degenerate case the caller got the phase order wrong; the shape
+      # still has to be the same one the in-place branch writes.
+      auto-passed) passed="**auto-passed** $(today)" ;;
+      superseded) passed="**superseded** $(today)" ;;
       # Same row shape the in-place branch emits for a phase with no
       # recorded Entered date: — placeholder plus the skipped gate marker.
-      skipped) entered="—"; passed="**skipped**" ;;
     esac
     printf '| %s | %s | %s | %s |\n' "$phase" "$entered" "$passed" "$note" >> "$idx"
   fi
