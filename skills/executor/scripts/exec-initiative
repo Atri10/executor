@@ -517,6 +517,32 @@ cmd_phase() {
       exec_die "phase $phase cannot $([ "$event" = "auto-passed" ] && echo "be auto-passed" || echo "pass"): the gate requires the artifact, not just the log row — missing under $dir:
 $(printf '%s\n' "$missing" | sed 's/^/  /')"
     fi
+
+    # Critique gate. Every authoring phase is cleared by an independent
+    # audit of its component, not by the controller's reading of its own
+    # work — the whole point of a thin pump. The component comes from the
+    # registry, so a phase and its critique can never disagree about
+    # whether one exists.
+    local component
+    component=$(exec_critique_component_for_phase "$phase")
+    if [ -n "$component" ]; then
+      local critique_out critique_rc
+      critique_out=$("$(cd "$(dirname "$0")" && pwd)/exec-critique" "$id" "$component" check 2>&1) || critique_rc=$?
+      if [ -n "${critique_rc:-}" ]; then
+        exec_die "phase $phase cannot $([ "$event" = "auto-passed" ] && echo "be auto-passed" || echo "pass"): its $component critique is not clear — the controller does not clear its own work.
+$critique_out"
+      fi
+      # The critique gates the phase but does not get its own row, so the
+      # clearance is recorded in the Notes cell. Without this the log would
+      # show a bare date and a reader could not tell an audited phase from
+      # an unaudited one — the one cost this shape carries.
+      if [ -n "$note" ]; then
+        note="$note; critique $component cleared"
+      else
+        note="critique $component cleared"
+      fi
+    fi
+
     # These phases produce no thinking-store document at this layer —
     # their gate evidence lives on the run axis (exec-run audit).
     case "$phase" in

@@ -89,6 +89,36 @@ project is tagged; between releases, entries are dated and `main` moves.
   `_exec-lib.sh`. `exec-initiative` validates transitions against it and
   `exec-step` folds the phase log against it; two hand-maintained copies
   would let a run advance and refuse in the same turn.
+- 2026-09-29 — **Every authoring phase now passes a critique gate.**
+  Previously only 2 of 11 phases could reject a bad deliverable:
+  `plan-regression` and `review`. `design` and `verification` had no
+  artifact gate at all, and architecture and specification ran adversarial
+  *self*-critiques whose own skills refused the word critic. New
+  `executor-critique` skill and `exec-critique` script generalize the
+  plan-regression contract to all nine authoring components (`charter`,
+  `discovery`, `architecture`, `design`, `specification`, `plans`, `code`,
+  `verification`, `handoff`). The phase→component→catalog mapping is a
+  registry row in `_exec-lib.sh`, so adding a component is data, not a
+  fork. `exec-initiative phase … passed` now refuses unless the
+  component's critique is `clean|waived`; the clearance is recorded in the
+  phase log's Notes cell, since the critique gets no row of its own.
+
+  The gate is hardened where `exec-plan-regression` was soft, which was the
+  point of generalizing rather than forking: `verdict: PASS` beside a
+  non-zero `high`/`medium` is refused instead of believed, the three-round
+  cap is enforced by the script (`audit 04` exits 2 with a message), and a
+  waiver needs both a note in the row and an initiative ruling naming it.
+  `plans` resolves to the existing `plan-regression/` home and reads the
+  same `summary.md`, so the shipped skill and its artifacts stay valid —
+  one gate, two front doors, not two gates that can disagree.
+
+  This also closes a structural hole: **upstream drift was undetectable.**
+  No reviewer prompt in `executor-review` opened the architecture store,
+  so an implementation satisfying every `R-nn` and `C-nn` while violating
+  the ARCH passed every gate in the system. Two seats now catch it: the
+  `code` component's critique catalog, and `final-reviewer-prompt.md`,
+  which takes the architecture, IFCE and design stores as required inputs
+  and adds an architecture-conformance check to what it reviews.
 - 2026-09-29 — **Autonomous mode, fail-closed.** `exec-gate INIT PHASE
   --auto` clears a phase gate without a human only when the initiative's
   `autonomous.md` names that phase with mode `gate` or `allow`. Every

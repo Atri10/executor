@@ -300,6 +300,9 @@ every `*-prompt.md` file must be named here.
 | `REVIEW` — scoped re-reviewer | executor-review | `REVIEW-P01-T03-R02` (same round as the verdict it writes) | `executor-review/re-review-prompt.md` | `<workspace>/dispatches.md` |
 | `REVIEW` — final whole-branch reviewer | executor-review | `REVIEW-P01-final` | `executor-review/final-reviewer-prompt.md` | `<workspace>/dispatches.md` |
 | `VERIFY` — evidence runner | executor-verification | `VERIFY-P01-V03`; a re-run appends the round: `VERIFY-P01-V03-R02` | `executor-verification/evidence-runner-prompt.md` | `<workspace>/dispatches.md` |
+| `AUDIT` — component auditor | executor-critique | `AUDIT-<component>-R01` | `executor-critique/component-auditor-prompt.md` | `.executor/<INIT>/critique/<component>/dispatches.md` |
+| `REPAIR` — component repairer | executor-critique | `REPAIR-<component>-R01` (round = the audit it repairs) | `executor-critique/component-repairer-prompt.md` | `.executor/<INIT>/critique/<component>/dispatches.md` |
+| `AUDIT` — component re-auditor | executor-critique | `AUDIT-<component>-R02` (round = the audit it writes) | `executor-critique/component-reauditor-prompt.md` | `.executor/<INIT>/critique/<component>/dispatches.md` |
 | `AUDIT` — plan auditor | executor-plan-regression | `AUDIT-P02-R01` | `executor-plan-regression/plan-auditor-prompt.md` | `.executor/<INIT>/plan-regression/dispatches.md` |
 | `REPAIR` — plan repairer | executor-plan-regression | `REPAIR-P02-R01` (round = the audit it repairs) | `executor-plan-regression/plan-repairer-prompt.md` | `.executor/<INIT>/plan-regression/dispatches.md` |
 | `AUDIT` — plan re-auditor | executor-plan-regression | `AUDIT-P02-R02` (round = the audit it writes) | `executor-plan-regression/plan-reauditor-prompt.md` | `.executor/<INIT>/plan-regression/dispatches.md` |
@@ -341,6 +344,7 @@ Never hand-build a path. Use the scripts:
 | Commit a worker's result through its gate | `../scripts/exec-report PLAN_FILE REPORT_FILE [BASE_SHA] [HEAD_SHA]` |
 | Record a ruling, an unsolicited correction, or a stop | `../scripts/exec-ruling PLAN_FILE TASK_ID "<decision>" "<why>" "<cost>" [--answered "<q>" \| --unsolicited "<verbatim>" [--stop]]` |
 | Decide whether a phase gate may clear without a human | `../scripts/exec-gate INIT_ID PHASE [--auto\|--policy]` |
+| Audit a component's set, or check whether it may gate its phase | `../scripts/exec-critique INIT_ID COMPONENT dir\|catalog\|init\|audit [ROUND]\|repair [ROUND]\|latest\|check` |
 
 Scripts resolve the plan's `id:` frontmatter field, not its filename, so
 renaming a plan never orphans its workspace. A plan with no `id:` field is

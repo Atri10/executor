@@ -47,6 +47,16 @@ Subagent (general-purpose):
 
     **Plan file (the task list and global constraints):** [PLAN_FILE]
     **Dependency map (declared seams, from the plan):** [DEPENDENCY_MAP]
+    **Architecture, interfaces and design (the upstream contracts):**
+    [ARCH_DIR], [IFCE_FILES], [DSGN_DIR]
+
+    These are **required inputs, not optional context.** An implementation
+    can satisfy every `R-nn` and every `C-nn` while violating the
+    architecture — adapters importing each other, a domain type crossing
+    into a transport type, a seam renamed from its IFCE — and a review that
+    never opens the architecture store has no way to see it. Review against
+    the spec AND the architecture. Where they disagree, that is a finding.
+
     **Preflight scan (declared conflicts + rulings):** [PREFLIGHT_SCAN]
     **Ledger (task outcomes, rulings, deferrals):** [LEDGER_FILE]
     **Task briefs and implementer reports:** [BRIEFS_DIR], [REPORTS_DIR]
@@ -155,6 +165,21 @@ Subagent (general-purpose):
     - Every requirement in [SPEC_FILE]: met, missing, extra, or misunderstood.
     - Requirements that no single task owned, and therefore nobody built.
     - Features present in the branch that no requirement asked for.
+
+    **Architecture conformance — the checks that had nowhere to live:**
+    - Do the branch's boundaries match [ARCH_DIR]? Adapters importing each
+      other, a domain type crossing into a transport type, a dependency
+      pointing the wrong way: each is a finding, and none of them is
+      visible from the spec alone.
+    - Do the implemented signatures match the IFCEs byte-for-byte? A
+      renamed seam is a finding; a seam that drifted in *meaning* while
+      keeping its name is worse, and only the IFCE shows it.
+    - Is [DSGN_DIR] still true of the code, or did implementation quietly
+      replace a design decision? An ADR that no longer describes what was
+      built is a finding.
+    - Where the spec and the architecture disagree, name both sides. A spec
+      that contradicts an active ADR is a defect in one of them, and the
+      diff alone cannot tell you which.
 
     **Production readiness:**
     - Migration path if a schema, format, or on-disk layout changed.
@@ -399,6 +424,9 @@ Subagent (general-purpose):
 | `[HEAD_SHA]` | current commit |
 | `[DIFF_FILE]` | `exec-review-package PLAN_FILE final MERGE_BASE HEAD` output path |
 | `[DEPENDENCY_MAP]` | the plan's `## Dependency Map` section, copied verbatim |
+| `[ARCH_DIR]` | `docs/executor/<initiative>/architecture/` — ARCH, ADR and IFCE documents. `None — no architecture was authored.` if the phase was skipped. |
+| `[IFCE_FILES]` | the IFCE documents the plan set cites — resolved by glob, never hand-listed |
+| `[DSGN_DIR]` | `docs/executor/<initiative>/design/` — `None — no design was authored.` if skipped |
 | `[PREFLIGHT_SCAN]` | `<workspace>/preflight-scan.md` — the conflict table and its rulings |
 | `[LEDGER_FILE]` | `<workspace>/progress.md` |
 | `[BRIEFS_DIR]` / `[REPORTS_DIR]` / `[VERDICTS_DIR]` | `<workspace>/briefs/`, `reports/`, `reviews/verdicts/` |

@@ -35,6 +35,45 @@ commit_all() { git -C "$1" add -A && git -C "$1" commit -qm "${2:-fixture}"; }
 # document's frontmatter status. regdoc IDIR ID KIND STATUS RELPATH
 regdoc() { printf '| %s | %s | t | %s | `%s` |\n' "$2" "$3" "$4" "$5" >> "$1/INDEX.md"; }
 
+# Seed a CLEARED critique for COMPONENT so a fixture can pass its phase.
+# Every authoring phase is gated by an independent audit, so any fixture
+# that drives a phase to `passed` has to produce that audit's evidence —
+# writing the phase row directly would be testing the one path the gate
+# exists to prevent. clear_critique INIT_ID COMPONENT
+clear_critique() {
+  local id=$1 component=$2 sum d afile key
+  sum=$(bash "$S/exec-critique" "$id" "$component" init 2>/dev/null) || return 1
+  d=$(dirname "$sum")
+  afile="$d/critique-$component-R01.md"
+  printf -- '---\nkind: critique\ncomponent: %s\nround: R01\nverdict: PASS\nhigh: 0\nmedium: 0\nlow: 0\n---\n\n## Findings\n\nNone.\n' \
+    "$component" > "$afile"
+  # One clean row per artifact in the registered set. A document component
+  # whose set is empty is a fixture bug, not a run-axis component — say so
+  # rather than seeding a run-axis row that the coverage pass will
+  # (correctly) report as stale three lines later.
+  local keys set_spec
+  set_spec=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_component "$2" "$3" | cut -d"|" -f3' \
+    _ "$S" "$id" "$component" 2>/dev/null || true)
+  keys=$(bash -c '. "$1/_exec-lib.sh"; exec_critique_set "$2" "$3"' _ "$S" "$id" "$component" 2>/dev/null || true)
+  if [ "$set_spec" = "-" ]; then
+    # Run-axis components audit no directory; their unit is the run itself.
+    printf '| %s-run | clean | critique-%s-R01.md | | fixture seed, run axis |\n' \
+      "$id" "$component" >> "$sum"
+  elif [ -z "$keys" ]; then
+    echo "fixture bug: $component has a registered set but no artifacts — author one, or drop the seed" >&2
+    return 1
+  else
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      key=$(bash -c '. "$1/_exec-lib.sh"
+        k=$(exec_frontmatter "$2" id 2>/dev/null || true)
+        [ -n "$k" ] || { k=$(basename "$2"); k=${k%.md}; }
+        printf "%s\n" "$k"' _ "$S" "$f")
+      printf '| %s | clean | critique-%s-R01.md | | fixture seed |\n' "$key" "$component" >> "$sum"
+    done <<< "$keys"
+  fi
+}
+
 FM=$'---
 id: INIT-0001-P01
 initiative: INIT-0001
@@ -180,6 +219,10 @@ bash "$S/exec-initiative" new Probe > /dev/null 2>&1
 if bash "$S/exec-initiative" phase INIT-0001 handoff passed "probe" >/dev/null 2>&1; then
   bad "phase: direct handoff accepted"
 fi
+printf -- '# Goal\n\nfixture charter body\n' > "$d/docs/executor/INIT-0001-probe/charter.md"
+# Only intake is passed here; discovery is entered, not passed, so it needs
+# no critique seed.
+clear_critique INIT-0001 charter
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "phase: legal intake pass refused"
 bash "$S/exec-initiative" phase INIT-0001 discovery entered "start" > /dev/null 2>&1 || bad "phase: legal discovery enter refused"
 ok "phase transition gates enforced"
@@ -684,12 +727,17 @@ d=$(fixture artgate)
 cd "$d"
 bash "$S/exec-initiative" new Gate > /dev/null 2>&1
 IDIR="$d/docs/executor/INIT-0001-gate"
+clear_critique INIT-0001 charter
+# discovery's critique is seeded AFTER its artifact exists (line 727):
+# seeding against an empty set would produce a run-axis row that the
+# coverage pass then correctly reports as stale.
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "artgate: intake pass refused"
 bash "$S/exec-initiative" phase INIT-0001 discovery entered "go" > /dev/null 2>&1 || bad "artgate: discovery enter refused"
 if bash "$S/exec-initiative" phase INIT-0001 discovery passed "done" >/dev/null 2>&1; then
   bad "artgate: discovery passed with no RSCH/OPTS artifact"
 fi
 printf -- '---\nid: INIT-0001-RSCH-01\ninitiative: INIT-0001\nkind: research\nstatus: draft\ntitle: r\ncreated_at: 2026-09-12T07:00:00Z\nupdated_at: 2026-09-12T07:00:00Z\nsupersedes: null\nsuperseded_by: null\nquestion: q\nsources: []\nconfidence: low\n---\n\nfinding\n' > "$IDIR/discovery/INIT-0001-RSCH-01-r.md"
+clear_critique INIT-0001 discovery
 bash "$S/exec-initiative" phase INIT-0001 discovery passed "done" > /dev/null 2>&1 || bad "artgate: discovery pass refused with artifact present"
 bash "$S/exec-initiative" phase INIT-0001 architecture entered "go" > /dev/null 2>&1 || bad "artgate: architecture enter refused"
 if bash "$S/exec-initiative" phase INIT-0001 architecture skipped >/dev/null 2>&1; then
@@ -708,6 +756,8 @@ IDIR="$d/docs/executor/INIT-0001-regress"
 mkdir -p "$IDIR/plans"
 printf '%s\n%s\n' "$FM" "$TASK" > "$IDIR/plans/INIT-0001-P01-probe.md"
 printf '%s\n%s\n' "$FM" "$TASK" > "$d/plan.md"
+clear_critique INIT-0001 charter
+clear_critique INIT-0001 plans
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" > /dev/null 2>&1 || bad "planreg: intake pass refused"
 for ph in discovery architecture design specification; do
   bash "$S/exec-initiative" phase INIT-0001 "$ph" skipped "fixture: not needed" > /dev/null 2>&1 || bad "planreg: $ph skip refused"
@@ -928,9 +978,17 @@ cd "$d"
 bash "$S/exec-initiative" new Probe > /dev/null 2>&1
 IDIR="$d/docs/executor/INIT-0001-probe"
 SDIR="$IDIR/brainstorm/sessions/s1"
-mkdir -p "$SDIR" "$IDIR/discovery" "$IDIR/architecture" "$IDIR/specs" "$IDIR/risks" "$IDIR/verification" "$IDIR/plans"
+mkdir -p "$SDIR" "$IDIR/discovery" "$IDIR/architecture" "$IDIR/design" "$IDIR/specs" "$IDIR/risks" "$IDIR/verification" "$IDIR/plans"
 printf -- '---\nid: INIT-0001-RSCH-01\n---\n\nx\n' > "$IDIR/discovery/INIT-0001-RSCH-01-r.md"
 printf -- '---\nid: INIT-0001-ARCH-01\n---\n\nx\n' > "$IDIR/architecture/INIT-0001-ARCH-01-a.md"
+printf -- '---\nid: INIT-0001-DSGN-01\n---\n\nx\n' > "$IDIR/design/INIT-0001-DSGN-01-d.md"
+printf -- '# Goal\n\nfixture charter body\n' > "$IDIR/charter.md"
+clear_critique INIT-0001 charter
+clear_critique INIT-0001 discovery
+clear_critique INIT-0001 architecture
+clear_critique INIT-0001 design
+# specification's seed waits until its artifacts exist, below the brainstorm
+# entry-gate checks — seeding an empty set would be a fixture bug.
 bash "$S/exec-initiative" phase INIT-0001 intake passed "ok" >/dev/null 2>&1
 bash "$S/exec-initiative" phase INIT-0001 discovery entered >/dev/null 2>&1
 bash "$S/exec-initiative" phase INIT-0001 discovery passed "picked" >/dev/null 2>&1
@@ -962,6 +1020,7 @@ bash "$S/exec-initiative" phase INIT-0001 specification entered >/dev/null 2>&1 
 printf -- '---\nid: INIT-0001-SPEC-01\n---\n\nx\n' > "$IDIR/specs/INIT-0001-SPEC-01-s.md"
 printf -- '---\nid: INIT-0001-RISK-01\n---\n\nx\n' > "$IDIR/risks/INIT-0001-RISK-01-r.md"
 printf -- '---\nid: INIT-0001-VRFY-01\n---\n\nx\n' > "$IDIR/verification/INIT-0001-VRFY-01-v.md"
+clear_critique INIT-0001 specification
 bash "$S/exec-initiative" phase INIT-0001 specification passed "ok" >/dev/null 2>&1 \
   || bad "entrygate: specification passed refused with artifacts present"
 
@@ -1316,6 +1375,9 @@ printf -- '---\nid: INIT-0001-SPEC-01\ninitiative: INIT-0001\nkind: spec\nstatus
 printf -- '---\nid: INIT-0001-RISK-01\ninitiative: INIT-0001\nkind: risk\nstatus: active\ntitle: Smoke risk\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\n---\n\nx\n' > "$AIDIR/risks/INIT-0001-RISK-01-smoke.md"
 printf -- '---\nid: INIT-0001-VRFY-01\ninitiative: INIT-0001\nkind: verification\nstatus: active\ntitle: Smoke vrfy\ncreated_at: 2026-09-29T00:00:00Z\nupdated_at: 2026-09-29T00:00:00Z\nsupersedes: null\nsuperseded_by: null\nspec: INIT-0001-SPEC-01\ncriteria_count: 1\nevidence_types: [unit]\n---\n\n| V01 | R01 verified by unit test | unit |\n' > "$AIDIR/verification/INIT-0001-VRFY-01-smoke.md"
 printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\n' > "$AIDIR/verdicts/INIT-0001-SPEC-01-scored-verdict.md"
+# An auto-pass must clear the same critique a human pass does, so the
+# component's audit has to exist before the gate will clear it.
+clear_critique INIT-0001 specification
 
 bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
   && ok "autonomy: a pick-class gate with a recorded verdict auto-passes" \
@@ -1363,6 +1425,121 @@ case "$after" in
   "$before") ok "autonomy: check-only mode mutates nothing" ;;
   *) bad "autonomy: check-only mode wrote to the phase log" ;;
 esac
+
+# ---------------------------------------------------------------------
+# The generic critique gate. These assert the failure DIRECTION, not just
+# the happy path: a gate that passes when it should refuse is worse than no
+# gate, because the run believes it was checked.
+
+cg=$(fixture critgate)
+cd "$cg"
+bash "$S/exec-initiative" new Crit > /dev/null 2>&1
+CIDIR="$cg/docs/executor/INIT-0001-crit"
+mkdir -p "$CIDIR/architecture"
+for n in 01 02; do
+  printf -- '---\nid: INIT-0001-ARCH-%s\ninitiative: INIT-0001\nkind: arch\nstatus: active\ntitle: Arch %s\n---\n\n```mermaid\ngraph TD; A-->B;\n```\n' "$n" "$n" \
+    > "$CIDIR/architecture/INIT-0001-ARCH-$n-a.md"
+done
+CSUM=$(bash "$S/exec-critique" INIT-0001 architecture init)
+CAUD="$cg/.executor/INIT-0001/critique/architecture/critique-architecture-R01.md"
+caudit() { # verdict high medium
+  printf -- '---\nkind: critique\ncomponent: architecture\nround: R01\nverdict: %s\nhigh: %s\nmedium: %s\nlow: 0\n---\n\n## Findings\n\nx\n' "$1" "$2" "$3" > "$CAUD"
+}
+crow() { printf '| %s | %s | critique-architecture-R01.md | | %s |\n' "$1" "$2" "${3:-fixture}" >> "$CSUM"; }
+
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a component with no audit" \
+  || ok "critique: no audit means no clearance"
+caudit PASS 0 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a component with no rows" \
+  || ok "critique: an empty clearance is not a cleared one"
+caudit PASS 2 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: believed verdict PASS beside high=2" \
+  || ok "critique: a PASS contradicting the severity counts is refused"
+caudit PASS 0 1
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: believed verdict PASS beside medium=1" \
+  || ok "critique: a PASS with a MEDIUM finding is refused"
+caudit FAIL 1 0
+caudit PASS 0 0
+crow INIT-0001-ARCH-01 clean ""
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: cleared a set with an unaudited member" \
+  || ok "critique: a set member with no row blocks clearance"
+caudit FAIL 1 0
+crow INIT-0001-ARCH-02 clean ""
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: trusted a clean row over a FAIL verdict" \
+  || ok "critique: a clean row must agree with the newest audit"
+caudit PASS 0 0
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && ok "critique: an honest PASS clears the component" \
+  || bad "critique: an honest PASS was refused"
+caudit PASS 0 0
+crow INIT-0001-ARCH-99 clean "ghost"
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"stale clearance row"*) ok "critique: a row for a deleted artifact is stale" ;;
+  *) bad "critique: a stale clearance row was not detected" ;;
+esac
+# Drop the ghost row. `grep -v`, not inline Python: `for l in t` over a
+# string yields characters, not lines, so it silently filters nothing.
+grep -v '^| INIT-0001-ARCH-99 ' "$CSUM" > "$CSUM.tmp" && mv "$CSUM.tmp" "$CSUM"
+
+# A waiver is a human decision: a bare cell is indistinguishable from a
+# controller self-granting one, and a note with no ruling behind it is an
+# undocumented skip.
+python3 -c "
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, 'w').write(re.sub(r'^\| INIT-0001-ARCH-01 .*$', '| INIT-0001-ARCH-01 | waived | critique-architecture-R01.md | |  |', t, count=1, flags=re.M))
+" "$CSUM"
+bash "$S/exec-critique" INIT-0001 architecture check >/dev/null 2>&1 \
+  && bad "critique: accepted a waiver with no note" \
+  || ok "critique: a waiver with no note is refused"
+python3 -c "
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, 'w').write(re.sub(r'^\| INIT-0001-ARCH-01 .*$', '| INIT-0001-ARCH-01 | waived | critique-architecture-R01.md | | human waived the unenforced boundary |', t, count=1, flags=re.M))
+" "$CSUM"
+# `check | grep` cannot be used under `set -o pipefail`: the check's exit 1
+# poisons the pipeline even when grep matches, so the assertion would report
+# failure regardless of what was printed. Capture, then match.
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"no initiative ruling names it"*) ok "critique: a waiver with a note but no ruling is refused" ;;
+  *) bad "critique: a waiver was accepted with no ruling behind it" ;;
+esac
+bash "$S/exec-ruling" "$CIDIR/architecture/INIT-0001-ARCH-01-a.md" initiative \
+  "waive INIT-0001-ARCH-01's unenforced boundary" "a second boundary ships" "c1" >/dev/null 2>&1
+cout=$(bash "$S/exec-critique" INIT-0001 architecture check 2>&1 || true)
+case "$cout" in
+  *"critique clean"*) ok "critique: a human-ruled waiver clears the component" ;;
+  *) bad "critique: a properly ruled waiver was refused — $cout" ;;
+esac
+
+# The cap is enforced by the script, not by the skill's prose. A cap
+# nobody counts is a suggestion, and a suggestion is how a fourth round
+# appears with nobody able to say when the loop started.
+bash "$S/exec-critique" INIT-0001 architecture audit 03 >/dev/null 2>&1 \
+  && ok "critique: round 3 is within the cap" \
+  || bad "critique: round 3 was refused inside the cap"
+bash "$S/exec-critique" INIT-0001 architecture audit 04 >/dev/null 2>&1 \
+  && bad "critique: allowed a fourth audit round" \
+  || ok "critique: the three-round cap is enforced"
+bash "$S/exec-critique" INIT-0001 bogus check >/dev/null 2>&1 \
+  && bad "critique: accepted an unregistered component" \
+  || ok "critique: an unregistered component fails closed"
+
+# The gate refuses its phase, and an auto-pass cannot route around it.
+bash "$S/exec-initiative" phase INIT-0001 architecture entered >/dev/null 2>&1 || true
+bash "$S/exec-initiative" phase INIT-0001 architecture passed "checked it myself" >/dev/null 2>&1 \
+  && bad "critique: a phase passed with its critique unclear" \
+  || ok "critique: an authoring phase will not pass unaudited"
 
 echo
 echo "$pass passed, $fail failed"

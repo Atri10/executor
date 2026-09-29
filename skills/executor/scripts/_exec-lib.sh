@@ -843,3 +843,79 @@ exec_row_liveness() {
 exec_phases() {
   echo "intake discovery architecture design specification planning plan-regression execution review verification handoff"
 }
+
+# The critique component registry: one row per AUTHORING phase, mapping it
+# to the artifact set a critique stage audits and where that stage's
+# clearance record lives. Every consumer reads this table — the gate in
+# exec-initiative, the generic checker in exec-critique, and the skill's
+# check catalogs — so adding a component is a row here, not new code.
+#
+#   component | phase | set_spec | summary_dir | catalog
+#
+# set_spec    — `;`-separated `dir:glob` pairs, resolved under the thinking
+#               store's initiative dir. An empty dir (`:charter.md`) is the
+#               initiative root. `-` when the component has no document set.
+#               The set is what each artifact is judged AGAINST, which is
+#               why an empty set is never a clean set.
+# summary_dir — under the initiative's execution dir. `plans` keeps the
+#               pre-existing plan-regression/ home so the shipped skill,
+#               its artifacts, and its readers all stay valid.
+# catalog     — the check catalog key; the critique skill owns its contents.
+exec_critique_components() {
+  cat <<'REGISTRY'
+charter|intake|:charter.md|critique/charter|charter
+discovery|discovery|discovery:${init}-RSCH-[0-9][0-9]*.md;discovery:${init}-OPTS-[0-9][0-9]*.md|critique/discovery|discovery
+architecture|architecture|architecture:${init}-ARCH-[0-9][0-9]*.md;architecture:${init}-ADR-[0-9][0-9]*.md;architecture:${init}-IFCE-[0-9][0-9]*.md|critique/architecture|architecture
+design|design|design:${init}-DSGN-[0-9][0-9]*.md|critique/design|design
+specification|specification|specs:${init}-SPEC-[0-9][0-9]*.md;risks:${init}-RISK-[0-9][0-9]*.md;verification:${init}-VRFY-[0-9][0-9]*.md|critique/specification|specification
+plans|planning|plans:${init}-P[0-9][0-9]*.md|plan-regression|plans
+code|execution|-|-|critique/code|code
+verification|verification|verification:${init}-VRFY-[0-9][0-9]*.md|critique/verification|verification
+handoff|handoff|-|-|critique/handoff|handoff
+REGISTRY
+}
+
+# One registry row for COMPONENT, or exit 2. An unregistered component is
+# a typo, and a typo must fail closed: a critique stage the engine cannot
+# identify is a gate nobody can evaluate.
+exec_critique_component() {
+  local want=$1 init=${2:-} row
+  row=$(exec_critique_components | awk -F'|' -v c="$want" '$1 == c { print; exit }') || true
+  [ -n "$row" ] || exec_die "unknown critique component '$want' — known: $(exec_critique_components | cut -d'|' -f1 | tr '\n' ' ')"
+  # ${init} is a placeholder, not a shell expansion: the row is data, and
+  # expanding it here keeps every consumer from re-deriving the globs with
+  # its own idea of the initiative id.
+  printf '%s\n' "$row" | sed "s/\${init}/$init/g"
+}
+
+# The component that gates PHASE, or empty when the phase is not an
+# authoring phase. Resolved from the registry rather than a second table so
+# a phase cannot gain a critique without the two agreeing.
+exec_critique_component_for_phase() {
+  local phase=$1
+  exec_critique_components | awk -F'|' -v p="$phase" '$2 == p { print $1; exit }'
+}
+
+# The set of artifacts COMPONENT audits, one path per line. Derived from
+# disk, never from the registry: a document that was renamed or deleted
+# must leave the set, and a clearance row naming it must then read stale.
+exec_critique_set() {
+  local id=$1 component=$2 row base pair dir glob set_spec
+  # The id is what expands the registry's ${init} placeholder; without it
+  # the globs stay literal and the set silently resolves to nothing.
+  row=$(exec_critique_component "$component" "$id")
+  set_spec=$(printf '%s' "$row" | cut -d'|' -f3)
+  [ "$set_spec" != "-" ] || return 0
+  base=$(exec_initiative_dir "$id")
+  while IFS= read -r pair; do
+    [ -n "$pair" ] || continue
+    dir=${pair%%:*}
+    glob=${pair#*:}
+    [ "$dir" = "$pair" ] && glob=""   # no colon: not a pair, skip
+    [ -n "$glob" ] || continue
+    find "$base/$dir" -maxdepth 1 -name "$glob" 2>/dev/null | sort
+  # The trailing newline is load-bearing: `printf '%s'` emits none, `read`
+  # then returns nonzero at EOF, and a while-read loop drops the last (for a
+  # single-dir component, the only) item on the floor.
+  done < <(printf '%s\n' "$set_spec" | tr ';' '\n')
+}

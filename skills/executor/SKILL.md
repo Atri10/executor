@@ -137,11 +137,18 @@ assumes it will try to be clever and takes away the opportunity.
   deletes the audit trail and is the single most damaging thing a pump can
   do.
 - **Never passes a phase gate yourself.** Not with
-  `exec-initiative phase … passed`, and not by editing the phase log. A
-  gate the human did not clear goes through `exec-gate --auto`, which
-  refuses unless the initiative's `autonomous.md` permits it. When it
-  refuses, the correct next move is to present the artifact to the human
-  — never to find another route to the same state.
+  `exec-initiative phase … passed`, and not by editing the phase log. Every
+  authoring phase is gated twice over: by the component's artifact gate, and
+  by an independent critique of that component —
+  `exec-critique INIT_ID COMPONENT check`, which `exec-initiative` runs on
+  your behalf. When either refuses, the correct next move is to dispatch the
+  audit or present the artifact to the human — never to find another route
+  to the same state.
+
+  A gate the human did not clear goes through `exec-gate --auto`, which
+  refuses unless the initiative's `autonomous.md` permits it. You may
+  recommend a human waiver of an open finding; you may never grant one, and
+  a waiver the human did not state is not a waiver.
 
 ### Autonomous mode
 
