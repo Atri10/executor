@@ -16,7 +16,21 @@ for unattended runs. The three defects this closes: only two of eleven
 phases could reject a bad deliverable, upstream drift was structurally
 undetectable, and the pump's "never authors" rule had no mechanism behind it.
 
-### Added
+
+### Fixed
+- 2026-09-29 — **CI's plan-lint control had gone stale, and its negative
+  case had gone vacuous.** The positive control was a six-line stub written
+  when the linter only checked store paths; when the task-body contract
+  landed (`Implements`, `Depends on`, `Interfaces`, `Requirements`, checkbox
+  steps, `Run`/`Expected`), the stub stopped satisfying them and the job
+  began failing on its own control. The negative case was worse: written as
+  an independent literal, it failed for seven unrelated reasons, so it would
+  have passed with the store-path contract deleted outright — a test that
+  looks green while testing nothing. The negative case is now derived from
+  the positive by a single `sed` line, and asserted to produce exactly one
+  violation naming that contract. Both directions are verified: neutering the
+  store-path check fails the step loudly, and introducing a second violation
+  is rejected as vacuous.
 - 2026-09-29 — **The thin-controller engine: scripts and subagents own
   the pipeline, the main agent only drives it.** During execution the
   controller's whole job is now: run `exec-step`, do the one action it

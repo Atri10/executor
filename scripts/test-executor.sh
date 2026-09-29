@@ -1089,8 +1089,10 @@ RDIR="$d/docs/executor/brainstorm/sessions/2026-09-28-feature"
 mkdir -p "$RDIR"
 printf -- '---\nkind: brainstorm\ninitiative: INIT-0001\nstatus: draft\ndecided: null\nquestion: q\n---\n\n## Options\n\nx\n' > "$RDIR/session.md"
 out=$(bash "$S/exec-store-check" 2>&1 || true)
-echo "$out" | grep -q 'adopt it' || bad "storeb2: root session claiming an initiative not flagged"
-ok "store-check flags a root session adopted in name only"
+case "$out" in
+  *'adopt it'*) ok "store-check flags a root session adopted in name only" ;;
+  *) bad "storeb2: root session claiming an initiative not flagged" ;;
+esac
 
 # 42. exec-store-check B3: a session carrying an allocated BRN id is a
 # document and needs a Documents-table row; an id that is not BRN-nn is
@@ -1128,8 +1130,10 @@ IDIR="$d/docs/executor/INIT-0001-probe"
 perl -pi -e 's/^\| execution \| — \| — \|/| execution | 2026-09-28 | — |/' "$IDIR/INDEX.md"
 perl -pi -e 's/^\*\*Status:\*\* active/**Status:** active\n\n**Branch:** initiative\/INIT-0001 (forked 2026-09-28)/' "$IDIR/INDEX.md"
 out=$(bash "$S/exec-store-check" 2>&1 || true)
-echo "$out" | grep -q 'plan-regression' || bad "storep1: execution entered without plan-regression not flagged"
-ok "store-check flags execution entered without plan-regression clearance"
+case "$out" in
+  *plan-regression*) ok "store-check flags execution entered without plan-regression clearance" ;;
+  *) bad "storep1: execution entered without plan-regression not flagged" ;;
+esac
 
 # ---------------------------------------------------------------------
 # Thin-controller engine: exec-step, exec-supervise, exec-report.
@@ -1589,10 +1593,18 @@ done <<< "$(awk -F'|' 'match($2, /`[A-Z]+`/) { print substr($2, RSTART + 1, RLEN
 # AUTHOR is registered but the pump's PHASE-ENTER row must actually
 # dispatch it — the rule "never authors" is worthless without the
 # mechanism, and nothing else in the suite would notice.
-grep -qE '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" \
-  && grep -A0 '^\| `PHASE-ENTER' "$ROOT/skills/executor/SKILL.md" | grep -q 'AUTHOR' \
-  && ok "subagent: PHASE-ENTER dispatches an AUTHOR" \
-  || bad "subagent: PHASE-ENTER does not dispatch an AUTHOR"
+# Read the row first, then match on the variable. `grep ... | grep -q` is
+# unsafe under `set -o pipefail`: `grep -q` exits on the first match and
+# closes the pipe, the upstream grep takes SIGPIPE and exits 141, and
+# pipefail reports THAT as the pipeline's status. Whether the write is
+# buffered large enough to swallow the early close is a race — so the
+# assertion failed roughly one run in three, and passed the rest, which is
+# the worst shape a gate can have.
+phase_row=$(awk '/^\| `PHASE-ENTER/ { print; exit }' "$ROOT/skills/executor/SKILL.md")
+case "$phase_row" in
+  *AUTHOR*) ok "subagent: PHASE-ENTER dispatches an AUTHOR" ;;
+  *) bad "subagent: PHASE-ENTER does not dispatch an AUTHOR" ;;
+esac
 
 # The critique registry is positional data. A row with the wrong field
 # count resolves to a plausible-but-wrong path, so the shape is enforced

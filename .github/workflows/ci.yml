@@ -73,18 +73,75 @@ jobs:
             bash -n "$f"
           done < <(find skills/executor/scripts scripts -type f \
                      \( -name 'exec-*' -o -name '*.sh' \) -print0)
-      - name: Plan lint rejects a forbidden store path (and only that)
+      - name: Plan lint accepts a conforming plan, and rejects a store path and only that
         run: |
           set -e
-          # The control is a valid plan: proves the negative case fails
-          # for the targeted contract, not for missing frontmatter.
+          # The positive control is a plan that satisfies EVERY contract the
+          # linter enforces today. It used to be a six-line stub written when
+          # the linter only checked store paths; when the task-body contract
+          # landed, the stub silently stopped being valid and this step began
+          # failing on its own control.
+          #
+          # The negative case is DERIVED from the positive by one line, and
+          # asserted to produce exactly one violation. Written as two
+          # independent literals they drifted together, and the negative case
+          # then failed for seven unrelated reasons — so it would still have
+          # passed with the store-path contract deleted outright. A negative
+          # control that cannot fail for the right reason is worse than none.
           mkdir -p /tmp/fx/plans
-          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > /tmp/fx/plans/valid.md
+          cat > /tmp/fx/plans/valid.md <<'PLAN'
+          ---
+          id: INIT-0001-P01
+          initiative: INIT-0001
+          kind: plan
+          title: Fixture plan
+          status: active
+          execution_mode: inline
+          spec: S
+          interfaces: []
+          tasks: 1
+          ---
+
+          **Goal:** exercise the plan linter's task-body contract, and nothing else.
+
+          **Branch:** `feat/INIT-0001-P01`
+
+          **Execution order:** none
+
+          ### Task 1: Write the file — `INIT-0001-P01-T01`
+
+          **Implements:** R01
+
+          **Depends on:** none
+
+          **Files:**
+          - Modify: `a.ts`
+          - Test: `a.test.ts`
+
+          **Interfaces:**
+          - consumes: none
+          - produces: none
+
+          **Requirements:** R01 — `a.ts` exports `a()` returning `1`.
+
+          - [ ] Add a failing test asserting `a()` returns 1.
+          - [ ] Implement `a()` in `a.ts`.
+          - [ ] Run the test; confirm it passes.
+
+          Run: `npm test -- a.test.ts`
+          Expected: 1 passing
+          PLAN
           bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/valid.md
-          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Create: docs/executor/x/y/\n' > /tmp/fx/plans/p.md
-          if bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/p.md; then
-            echo "lint accepted a forbidden literal store path"; exit 1
-          fi
+
+          sed 's|^- Modify: `a.ts`$|- Create: docs/executor/x/y/|' \
+            /tmp/fx/plans/valid.md > /tmp/fx/plans/p.md
+          out=$(bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/p.md 2>&1) && {
+            echo "lint accepted a forbidden literal store path"; exit 1; }
+          echo "$out" | grep -q "literal docs/executor/ path" || {
+            echo "negative control failed for the wrong reason:"; echo "$out"; exit 1; }
+          echo "$out" | grep -q "1 violation(s)" || {
+            echo "negative control is vacuous — it must produce exactly 1 violation:"
+            echo "$out"; exit 1; }
       - name: exec-run drift detection fires
         run: |
           set -e
