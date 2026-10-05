@@ -56,6 +56,24 @@ if [ -n "$(bash4_constructs)" ]; then
 else
   ok "bash 3.2: no bash 4.0+ construct in the shipped scripts"
 fi
+
+# Parsing is a separate gate from constructs. bash 3.2 cannot PARSE a
+# `case` statement directly inside `$( … )` — "syntax error near unexpected
+# token `;;'" — while 5.x accepts it, so `bash -n` on the author's PATH bash
+# says fine and only the macOS runner disagrees. That shipped once (exec-graph)
+# and CI caught it, not this suite. Parse with the system /bin/bash too:
+# on macOS that IS the 3.2 floor; on Linux it is 5.x and the macOS CI job
+# remains the backstop. Cheap enough to run every time (one -n per file).
+parse_fail=""
+while IFS= read -r -d '' f; do
+  /bin/bash -n "$f" 2>/dev/null || parse_fail="$parse_fail $f"
+done < <(find "$ROOT/skills/executor/scripts" "$ROOT/scripts" -type f \
+           \( -name 'exec-*' -o -name '*.sh' \) -print0 2>/dev/null)
+if [ -n "$parse_fail" ]; then
+  bad "system /bin/bash cannot parse:$parse_fail"
+else
+  ok "system /bin/bash parses every shipped script"
+fi
 fixture() {
   local d="$WORK/$1"; mkdir -p "$d"
   git -C "$d" init -q -b main

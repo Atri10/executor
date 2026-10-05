@@ -62,15 +62,27 @@ EOF
 # exec_dispatch_append/set, exec_mark_dispatched, exec_row_liveness,
 # exec_update_ledger_line). A file no path reaches is a hand-edit — the
 # failure this whole redesign exists to remove.
+#
+# `case` is a separate function, not inline: bash 3.2 (the /bin/bash every
+# stock macOS ships, and the shell this suite runs under) fails to PARSE a
+# `case` statement directly inside `$( … )` — "syntax error near
+# unexpected token `;;'". A 5.x shell accepts it, so the defect was
+# invisible locally and only the macOS CI runner saw it. Hoisting the
+# case out of the substitution is the portable shape.
+writer_helpers_for() {
+  case "$1" in
+    progress.md)      grep -lE 'exec_seed_workspace|exec_mark_dispatched|exec_update_ledger_line|exec_ledger_set' "$HERE"/exec-* 2>/dev/null ;;
+    dispatches.md)    grep -lE 'exec_seed_workspace|exec_dispatch_append|exec_dispatch_set|exec_row_liveness' "$HERE"/exec-* 2>/dev/null ;;
+    rulings.md|preflight-scan.md) grep -lE 'exec_seed_workspace' "$HERE"/exec-* 2>/dev/null ;;
+    INDEX.md)         grep -lE 'exec_run_registry' "$HERE"/exec-* 2>/dev/null ;;
+  esac
+}
 for f in progress.md dispatches.md rulings.md preflight-scan.md INDEX.md; do
   writers=$(
     { grep -lE "(>|>>|tee |mv ).*${f}\\b" "$HERE"/exec-* 2>/dev/null;
-      case "$f" in
-        progress.md)      grep -lE 'exec_seed_workspace|exec_mark_dispatched|exec_update_ledger_line|exec_ledger_set' "$HERE"/exec-* 2>/dev/null ;;
-        dispatches.md)    grep -lE 'exec_seed_workspace|exec_dispatch_append|exec_dispatch_set|exec_row_liveness' "$HERE"/exec-* 2>/dev/null ;;
-        rulings.md|preflight-scan.md) grep -lE 'exec_seed_workspace' "$HERE"/exec-* 2>/dev/null ;;
-        INDEX.md)         grep -lE 'exec_run_registry' "$HERE"/exec-* 2>/dev/null ;;
-      esac; } | grep -v 'exec-graph$' | sort -u | while IFS= read -r w; do basename "$w"; done | tr '\n' ' '
+      writer_helpers_for "$f"; } \
+      | grep -v 'exec-graph$' | sort -u \
+      | while IFS= read -r w; do basename "$w"; done | tr '\n' ' '
   )
   if [ -n "$writers" ]; then
     ok "$f writers: $writers"
