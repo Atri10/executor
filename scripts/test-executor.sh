@@ -1714,22 +1714,11 @@ fi
 # that only checks "the script printed something" would pass while the
 # row was still hand-appended upstream.
 
-hfx() { # a ready plan fixture: workspace seeded, run started
-  local d
-  d=$(fixture "$1")
-  mkdir -p "$d/docs/executor/INIT-0001-probe/plans"
-  printf -- '---\nid: INIT-0001-P01\ninitiative: INIT-0001\nkind: plan\ntitle: Probe plan\nstatus: active\nsequential: true\ncreated_at: 2026-10-05T00:00:00Z\nupdated_at: 2026-10-05T00:00:00Z\n---\n\n### Task 1: first thing — `INIT-0001-P01-T01`\n\nDo one.\n\n### Task 2: second thing — `INIT-0001-P01-T02`\n\nDo two.\n\n**Depends on:** INIT-0001-P01-T01\n' \
-    > "$d/docs/executor/INIT-0001-probe/plans/p01.md"
-  commit_all "$d" fixture
-  printf '%s\n' "$d"
-}
-
 hd=$(fixture hard-dispatch)
 mkdir -p "$hd/docs/executor/INIT-0001-probe/plans"
 printf -- '---\nid: INIT-0001-P01\ninitiative: INIT-0001\nkind: plan\ntitle: Probe plan\nstatus: active\nsequential: true\ncreated_at: 2026-10-05T00:00:00Z\nupdated_at: 2026-10-05T00:00:00Z\n---\n\n### Task 1: first thing — `INIT-0001-P01-T01`\n\nDo one.\n\n### Task 2: second thing — `INIT-0001-P01-T02`\n\nDo two.\n\n**Depends on:** INIT-0001-P01-T01\n' \
   > "$hd/docs/executor/INIT-0001-probe/plans/p01.md"
 commit_all "$hd" fixture
-hplan="$hd/docs/executor/INIT-0001-probe/plans/p01.md"
 
 # Registry seeds 'ready' — exec-run start is the transition, not the seed.
 (cd "$hd" && bash "$S/exec-workspace" docs/executor/INIT-0001-probe/plans/p01.md >/dev/null)

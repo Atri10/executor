@@ -4,8 +4,9 @@
 .executor/*
 
 # The tool's thinking store. This repo is the tool, not a consumer of it:
-# docs/executor/ only ever fills with residue from local test runs.
-docs/executor/
+# docs/ only ever fills with residue from local test runs and session-local
+# planning artifacts; none of it ships.
+docs/
 
 # macOS
 .DS_Store

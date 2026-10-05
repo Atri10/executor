@@ -49,8 +49,9 @@ one `exec` front door.
 - Report `result:` frontmatter is routed: `blocked` → ADJUDICATE,
   `needs-context`/`needs_context` → ASK — a finished worker can no longer
   silently burn revive rungs.
-- `docs/hardening/` — `gap-graph.md` (26-gap ledger with status column),
-  `graph.tsv`, `IMPLEMENTATION-PLAN.md` (waves + landed status).
+- `exec-graph check` — 50 integrity checks over verbs, writers, roles,
+  IDs, and cross-store references (session-local hardening plan and gap
+  ledger kept out of the tree; `docs/` is gitignored).
 
 ### Fixed
 

@@ -80,7 +80,10 @@ for f in progress.md dispatches.md rulings.md preflight-scan.md INDEX.md; do
 done
 
 # -- roles: every registry role resolves a real template --------------
-while IFS='|' read -r role idpat tmpl needs; do
+# read -r into `_` for the unused columns: the registry row has five
+# fields and the template is the third; naming the others would be dead
+# variables a linter must then be told about.
+while IFS='|' read -r role _ tmpl _; do
   [ -n "$role" ] || continue
   tfile="$HERE/../../$tmpl"
   if [ -f "$tfile" ]; then
@@ -131,13 +134,7 @@ for p in "$docs_store"/*/plans/*.md "$docs_store"/plans/*.md; do
   [ -z "$stray" ] && ok "$plan_id: every dispatch row names a declared task" \
     || bad "$plan_id: dispatch rows name undeclared tasks: $stray"
 
-  # Open dispatch rows must resolve to a real worker or a real verdict
-  open_dead=$(awk -F'|' -v d="$wdir" '
-    /^\|/ && NR>3 {
-      o=$8; gsub(/^[ \t]+|[ \t]+$/,"",o)
-      if (o=="running" || o ~ /^revived-rv[0-9]+$/) { t=$2; gsub(/ /,"",t); print t }
-    }' "$wdir/dispatches.md" 2>/dev/null | sort -u)
-  # (Informational — supervise owns open-row policy.)
+  # (Open-row liveness policy is exec-supervise's; nothing to check here.)
 done
 [ "$checked" -eq 0 ] && note "no in-flight plan workspaces — ref checks skipped"
 
