@@ -7,6 +7,73 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+The write side is scripted. Every state mutation the pump used to perform
+by hand — dispatch rows, `revived-rvN` cells, `Last-Seen`, evidence
+selection, prompt bracket-filling — is now a single script call behind
+one `exec` front door.
+
+### Added
+
+- `exec` — the single entry point: bare `exec` prints the resume digest;
+  `exec <name>` dispatches to `exec-<name>`; `exec verbs`/`exec roles`
+  print the machine-readable registries.
+- `exec-status` — one-file resume digest (initiatives + plan runs + open
+  rows + store drift); `--write` stamps `.executor/RESUME.md` so a fresh
+  agent reorients in one read.
+- `exec-dispatch` — one locked act: mints the agent ID, builds the
+  role's input file, marks the ledger, appends the dispatches.md row,
+  renders a bracket-clean prompt.
+- `exec-ladder` — `revive`/`redispatch` rewrites `revived-rvN` cells and
+  enforces `EXEC_MAX_REVIVE` itself; emits the prompt path.
+- `exec-seen`, `exec-heartbeat` — the two liveness witnesses workers and
+  supervise actually consume.
+- `exec-prompt` — renders a role template; refuses while any
+  `[UPPER_SNAKE]` bracket remains unfilled.
+- `exec-adjudicate` — mechanically assembles the adjudication evidence
+  pack (report + verdict + diff + open rows + ledger/rulings tails) then
+  dispatches SUPERVISOR; the adjudicated party no longer selects the
+  adjudicator's evidence.
+- `exec-present` — the fixed-shape gate card for PHASE-GATE; artifact
+  bytes never enter the pump's context.
+- `exec-graph` — `check` verifies every `exec-step` verb has exactly one
+  actuator row, every ledger file has a script writer, every role's
+  template resolves, ID grammars carry placeholders, and ledger↔plan↔
+  dispatch↔registry references resolve (dangling = FAIL, not NOTE).
+- `exec-step` verbs — `RUN-START` (registry `ready`), `REVIEW` (report ∧ ¬verdict ∧ ¬reviewer),
+  `FIX` (verdict unclean), `CRITIQUE` (phase entered ∧ component unclear);
+  `REPORT` narrows to verdict-clean; every emit carries a `(wake on …)`
+  condition; WAIT/ASK exempt from the no-progress guard.
+- `exec-initiative phase … check` — dry-run event: validates `passed`
+  conditions and writes nothing; `exec-gate`'s check mode uses it (the
+  old "check" used to pass the gate for real).
+- Report `result:` frontmatter is routed: `blocked` → ADJUDICATE,
+  `needs-context`/`needs_context` → ASK — a finished worker can no longer
+  silently burn revive rungs.
+- `docs/hardening/` — `gap-graph.md` (26-gap ledger with status column),
+  `graph.tsv`, `IMPLEMENTATION-PLAN.md` (waves + landed status).
+
+### Fixed
+
+- REPORT livelock: a report with a reviewer in flight emits `WAIT`
+  indefinitely instead of three identical `REPORT`s and an `ADJUDICATE
+  loop` on a healthy run.
+- `exec_product_exists` crashed BSD/bash-3.2 runs on glob specs (`rest`
+  unbound under `set -u` inside `local`); supervisor zombies now report
+  instead of dying.
+- `exec-report` now refreshes the registry's Tasks cell inside its own
+  store lock (the header had always claimed it did; it never did).
+- `exec-workspace` seeds the registry row `ready` (previously lied
+  `running` before `exec-run start`); `exec-gate` check mode no longer
+  mutates the phase log it claims to inspect.
+
+### Changed
+
+- `skills/executor/SKILL.md` decision table is generated from
+  `_exec-lib.sh` `exec_verbs` — the single table `exec-step`, the scripts,
+  and `exec-graph check` all consume; hand-edit is prohibited because a
+  table and a script disagreeing is how stale rows get followed.
+
+
 ## [0.6.0] — 2026-09-29
 
 The controller no longer carries the work. The pipeline is two axes of
