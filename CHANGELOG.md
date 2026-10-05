@@ -7,6 +7,11 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-05
+
+Patch release: the store helpers could invent a filesystem root, and the
+docs still described the pre-scripted write path.
+
 ### Fixed
 
 - **`exec_docs_store`/`exec_run_store` invented a filesystem root outside a
