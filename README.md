@@ -23,8 +23,15 @@ similar. The skills are markdown; the scripts are POSIX bash.
 
 ## Install
 
-Clone the repo and copy the `skills/` directories into whatever directory
-your agent loads skills from:
+One line, any of 20+ agents (Claude Code, Codex, Cursor, Copilot, Gemini
+CLI, OpenCode, Amp, Goose, and more) — [`skills`](https://github.com/vercel-labs/skills)
+discovers every skill in the repo and wires them into your harness:
+
+```bash
+npx skills add Atri10/executor
+```
+
+Or clone and copy `skills/` into whatever directory your agent loads from:
 
 ```bash
 git clone git@github.com:Atri10/executor.git
