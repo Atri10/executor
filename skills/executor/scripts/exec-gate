@@ -84,9 +84,9 @@ run_transition() { # event note
 }
 
 if [ "$auto" -eq 0 ]; then
-  # Check-only: a dry run of the human pass, so the caller learns whether
-  # the gate is ready without mutating anything.
-  if out=$(run_transition passed "" 2>&1); then
+  # Check-only: the `check` event validates `passed` and writes nothing.
+  # The old form ran `passed` for real — a "check" that passed the gate.
+  if out=$(run_transition check "" 2>&1); then
     echo "GATE READY: $init $phase — the structural gate passes (a human still has to run it)"
   else
     echo "$out" >&2

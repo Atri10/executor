@@ -459,7 +459,13 @@ cmd_phase() {
   case "$event" in
     entered|passed|skipped) ;;
     auto-passed|superseded) ;;
-    *) exec_die "event must be entered, passed, auto-passed, superseded, or skipped" ;;
+    # check = dry-run of `passed` — validates transition legality, artifact
+    # presence, and critique clearance, writes nothing. exec-gate's
+    # check-only mode and exec-step's CRITIQUE verb read the fold through
+    # it; a "check" that passes the gate for real is a lie the log
+    # then reports as human-passed.
+    check) ;;
+    *) exec_die "event must be entered, passed, auto-passed, superseded, skipped, or check" ;;
   esac
   # A skipped phase always carries a reason — the documented contract,
   # enforced here. A **skipped** row with no note is indistinguishable
@@ -495,25 +501,24 @@ cmd_phase() {
   idx="$dir/INDEX.md"
   [ -f "$idx" ] || exec_die "no INDEX.md in $dir"
 
+  # `check` validates as `passed` and writes nothing — move the alias up
+  # so the transition validator checks the same legality the gate does.
+  local eff_event=$event
+  [ "$event" = "check" ] && eff_event=passed
   #validate the transition BEFORE any mutation. A skipped
   # predecessor or a passed-before-entered sequence is refused here, not
   # discovered later by store-check.
-  validate_phase_transition "$id" "$phase" "$event" "$idx" \
+  validate_phase_transition "$id" "$phase" "$eff_event" "$idx" \
     || exec_die "illegal phase transition: $phase $event refused (see reason above)"
 
-  # An `entered` event for specification or planning requires a decided
-  # brainstorm session feeding that phase (see phase_entry_missing), and
-  # a `passed` event asserts the phase's deliverable exists on disk, not
-  # only that the log row advanced. Both are checked before any mutation;
-  # `skipped` carries no requirement, so a skip stays legal.
-  if [ "$event" = "entered" ]; then
+  if [ "$eff_event" = "entered" ]; then
     local needs
     if ! needs=$(phase_entry_missing "$phase" "$dir"); then
       exec_die "phase $phase cannot be entered: brainstorming is required before it — missing under $dir/brainstorm/sessions:
   $needs"
     fi
   fi
-  if [ "$event" = "passed" ] || [ "$event" = "auto-passed" ]; then
+  if [ "$eff_event" = "passed" ] || [ "$event" = "auto-passed" ]; then
     local missing
     if ! missing=$(phase_artifacts_missing "$id" "$phase" "$dir"); then
       exec_die "phase $phase cannot $([ "$event" = "auto-passed" ] && echo "be auto-passed" || echo "pass"): the gate requires the artifact, not just the log row — missing under $dir:
@@ -551,6 +556,11 @@ $critique_out"
       execution|review|verification)
         echo "note: phase $phase artifacts are verified on the run axis" >&2 ;;
     esac
+  fi
+
+  if [ "$event" = "check" ]; then
+    echo "$id: $phase ready (check — nothing written)"
+    return 0
   fi
 
   if grep -q "^| $phase |" "$idx"; then

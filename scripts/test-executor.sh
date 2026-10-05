@@ -1206,7 +1206,9 @@ commit_all "$eng" plan
 cd "$eng"
 WS="$eng/.executor/INIT-0001/P01"
 bash "$S/exec-workspace" "$ENGPLAN" >/dev/null
-
+# The run is started the way a real run is started — a seeded workspace
+# sits at 'ready' until exec-run start flips it, and the fold says so.
+bash "$S/exec-run" "$ENGPLAN" start >/dev/null 2>&1 || true
 # Rewrite the dispatch log to a known state. The seed has no Last-Seen
 # column; writing one also proves the readers locate columns by name.
 engrow() { # started outcome
@@ -1236,8 +1238,10 @@ esac
 
 engrow "$TODAYD" running
 out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
-[ "$out" = "WAIT" ] && ok "step: a live worker blocks new dispatches" \
-  || bad "step: open row emitted '$out', expected WAIT"
+case "$out" in
+  WAIT*) ok "step: a live worker blocks new dispatches" ;;
+  *) bad "step: open row emitted '$out', expected WAIT" ;;
+esac
 
 # Timestamp parsing must be platform-independent. It was not: BSD's
 # `date -j -f "%Y-%m-%d" <date>` ignores the parsed date and returns roughly
@@ -1265,13 +1269,16 @@ eo=$(bash -c '. "$1/_exec-lib.sh"; exec_timestamp_epoch "$2"' _ "$S" "$old")
   || bad "timestamp: '$old' ($eo) did not compare before '$stamp' ($e1)"
 
 # The failure this whole redesign exists to prevent: a worker that FINISHED
-# but whose row was never closed must be reported, never re-dispatched —
-# a revive over a completed artifact is a duplicate agent on one task.
+# but whose row was never closed must reach the review pipeline, never
+# be re-dispatched — a revive over a completed artifact is a duplicate
+# agent on one task. Under the verb split "reported" means REVIEW (no
+# verdict yet), not the old REPORT emit.
+
 printf '# Report: done\n' > "$WS/reports/INIT-0001-P01-T01-report.md"
 out=$(bash "$S/exec-step" "$ENGPLAN" 2>/dev/null)
 case "$out" in
-  "REPORT "*) ok "step: output on disk outranks every staleness clock" ;;
-  *) bad "step: finished worker emitted '$out', expected REPORT" ;;
+  "REVIEW "*"INIT-0001-P01-T01"*) ok "step: output on disk outranks every staleness clock" ;;
+  *) bad "step: finished worker emitted '$out', expected REVIEW of T01" ;;
 esac
 rm -f "$WS/reports/INIT-0001-P01-T01-report.md"
 
@@ -1455,9 +1462,11 @@ bash "$S/exec-gate" INIT-0001 specification --auto >/dev/null 2>&1 \
 grep -qE '^\| specification \| [^|]*\| \*\*auto-passed\*\* [0-9]{4}-[0-9]{2}-[0-9]{2} \|' "$AIDIR/INDEX.md" \
   && ok "autonomy: the phase log records a typed auto-pass, not a human pass" \
   || bad "autonomy: the auto-pass marker or date is missing from the phase log"
-[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 planning" ] \
-  && ok "autonomy: exec-step advances past an auto-passed phase" \
-  || bad "autonomy: exec-step did not advance past an auto-passed phase"
+step_out=$(bash "$S/exec-step" INIT-0001 2>/dev/null)
+case "$step_out" in
+  PHASE-ENTER\ INIT-0001\ planning*) ok "autonomy: exec-step advances past an auto-passed phase" ;;
+  *) bad "autonomy: exec-step did not advance past an auto-passed phase (got: $step_out)" ;;
+esac
 
 # Taking it back. Only a phase that actually finished can be superseded,
 # and superseding reopens it — otherwise a human who rejects an autonomous
@@ -1468,9 +1477,11 @@ bash "$S/exec-initiative" phase INIT-0001 specification superseded "the human re
 grep -qE '^\| specification \| — \| \*\*superseded\*\*' "$AIDIR/INDEX.md" \
   && ok "autonomy: supersession clears Entered and marks the gate" \
   || bad "autonomy: supersession did not reopen the phase"
-[ "$(bash "$S/exec-step" INIT-0001 2>/dev/null)" = "PHASE-ENTER INIT-0001 specification" ] \
-  && ok "autonomy: exec-step re-enters a superseded phase" \
-  || bad "autonomy: exec-step did not re-enter a superseded phase"
+step_out=$(bash "$S/exec-step" INIT-0001 2>/dev/null)
+case "$step_out" in
+  PHASE-ENTER\ INIT-0001\ specification*) ok "autonomy: exec-step re-enters a superseded phase" ;;
+  *) bad "autonomy: exec-step did not re-enter a superseded phase (got: $step_out)" ;;
+esac
 
 bash "$S/exec-initiative" phase INIT-0001 handoff superseded "no such gate" >/dev/null 2>&1 \
   && bad "autonomy: superseded a phase that never passed" \
@@ -1695,6 +1706,191 @@ elif [ -n "$dups" ]; then
 else
   ok "subagent: no two critique components share a clearance dir"
 fi
+
+# ------------------------------------------------------------------
+# Hardening wave-1/2 fixtures: the write-path scripts (exec-dispatch,
+# exec-ladder, exec-seen, exec-heartbeat) and the new exec-step verbs.
+# Each exercises the ledger files a pump used to edit by hand — a test
+# that only checks "the script printed something" would pass while the
+# row was still hand-appended upstream.
+
+hfx() { # a ready plan fixture: workspace seeded, run started
+  local d
+  d=$(fixture "$1")
+  mkdir -p "$d/docs/executor/INIT-0001-probe/plans"
+  printf -- '---\nid: INIT-0001-P01\ninitiative: INIT-0001\nkind: plan\ntitle: Probe plan\nstatus: active\nsequential: true\ncreated_at: 2026-10-05T00:00:00Z\nupdated_at: 2026-10-05T00:00:00Z\n---\n\n### Task 1: first thing — `INIT-0001-P01-T01`\n\nDo one.\n\n### Task 2: second thing — `INIT-0001-P01-T02`\n\nDo two.\n\n**Depends on:** INIT-0001-P01-T01\n' \
+    > "$d/docs/executor/INIT-0001-probe/plans/p01.md"
+  commit_all "$d" fixture
+  printf '%s\n' "$d"
+}
+
+hd=$(fixture hard-dispatch)
+mkdir -p "$hd/docs/executor/INIT-0001-probe/plans"
+printf -- '---\nid: INIT-0001-P01\ninitiative: INIT-0001\nkind: plan\ntitle: Probe plan\nstatus: active\nsequential: true\ncreated_at: 2026-10-05T00:00:00Z\nupdated_at: 2026-10-05T00:00:00Z\n---\n\n### Task 1: first thing — `INIT-0001-P01-T01`\n\nDo one.\n\n### Task 2: second thing — `INIT-0001-P01-T02`\n\nDo two.\n\n**Depends on:** INIT-0001-P01-T01\n' \
+  > "$hd/docs/executor/INIT-0001-probe/plans/p01.md"
+commit_all "$hd" fixture
+hplan="$hd/docs/executor/INIT-0001-probe/plans/p01.md"
+
+# Registry seeds 'ready' — exec-run start is the transition, not the seed.
+(cd "$hd" && bash "$S/exec-workspace" docs/executor/INIT-0001-probe/plans/p01.md >/dev/null)
+reg_status=$(awk 'BEGIN{FS="|"} $0 ~ /INIT-0001-P01/ { s=$4; gsub(/ /,"",s); print s; exit }' "$hd/.executor/INDEX.md")
+[ "$reg_status" = "ready" ] \
+  && ok "exec-workspace seeds the registry row 'ready'" \
+  || bad "exec-workspace seeds 'ready' (got '$reg_status')"
+
+# RUN-START: the fold sees the ready row and names the transition.
+emit=$(cd "$hd" && bash "$S/exec-step" docs/executor/INIT-0001-probe/plans/p01.md)
+case "$emit" in
+  RUN-START*) ok "exec-step emits RUN-START on a ready registry row" ;;
+  *) bad "exec-step emits RUN-START on ready row (got: $emit)" ;;
+esac
+
+(cd "$hd" && bash "$S/exec-run" docs/executor/INIT-0001-probe/plans/p01.md start >/dev/null)
+reg_status=$(awk 'BEGIN{FS="|"} $0 ~ /INIT-0001-P01/ { s=$4; gsub(/ /,"",s); print s; exit }' "$hd/.executor/INDEX.md")
+[ "$reg_status" = "running" ] \
+  && ok "exec-run start flips ready -> running" \
+  || bad "exec-run start flips ready -> running (got '$reg_status')"
+
+# exec-dispatch: one act must produce the minted agent, the 9-column row,
+# the annotated ledger line, and a bracket-clean prompt — the four writes
+# the controller used to perform by hand.
+out=$(cd "$hd" && bash "$S/exec-dispatch" docs/executor/INIT-0001-probe/plans/p01.md --role impl --task 1 --model cheap)
+case "$out" in
+  *AGENT=IMPL-P01-T01*) ok "exec-dispatch mints IMPL-P01-T01" ;;
+  *) bad "exec-dispatch mints IMPL-P01-T01 (got: $out)" ;;
+esac
+row=$(tail -1 "$hd/.executor/INIT-0001/P01/dispatches.md")
+case "$row" in
+  "| INIT-0001-P01-T01 | impl | cheap | IMPL-P01-T01 |"*" | running | "*" | "*) ok "dispatch row lands 9 cols, Outcome=running" ;;
+  *) bad "dispatch row shape (got: $row)" ;;
+esac
+grep -q 'INIT-0001-P01-T01: dispatched (agent IMPL-P01-T01, model cheap, base ' "$hd/.executor/INIT-0001/P01/progress.md" \
+  && ok "ledger carries the annotated dispatched line (base recorded)" \
+  || bad "ledger lacks the annotated dispatched line"
+promptf="$hd/.executor/INIT-0001/P01/state/prompts/IMPL-P01-T01.prompt.md"
+if [ -f "$promptf" ] && ! grep -qE '\[[A-Z][A-Z0-9_]+\]' "$promptf"; then
+  ok "rendered prompt has zero unfilled [UPPER_SNAKE] brackets"
+else
+  bad "rendered prompt missing or carries unfilled brackets"
+fi
+
+# exec-prompt refuses an unfilled slot instead of shipping a defect.
+if bash "$S/exec-prompt" --file "$ROOT/skills/executor/supervisor-prompt.md" "INIT-NNNN=INIT-0009" >/dev/null 2>&1; then
+  bad "exec-prompt emits a prompt with unfilled slots"
+else
+  ok "exec-prompt refuses on unfilled slots (exit 2)"
+fi
+
+# exec-seen / exec-heartbeat move the liveness witnesses.
+before=$(awk 'BEGIN{FS="|"} $0 ~ /INIT-0001-P01-T01/ { s=$10; gsub(/ /,"",s); print s; exit }' "$hd/.executor/INIT-0001/P01/dispatches.md")
+sleep 1
+(cd "$hd" && bash "$S/exec-seen" docs/executor/INIT-0001-probe/plans/p01.md INIT-0001-P01-T01 >/dev/null)
+after=$(awk 'BEGIN{FS="|"} $0 ~ /INIT-0001-P01-T01/ { s=$10; gsub(/ /,"",s); print s; exit }' "$hd/.executor/INIT-0001/P01/dispatches.md")
+[ "$after" != "$before" ] && [ -n "$after" ] \
+  && ok "exec-seen refreshes the open row's Last-Seen" \
+  || bad "exec-seen did not refresh Last-Seen ($before -> $after)"
+(cd "$hd" && bash "$S/exec-heartbeat" docs/executor/INIT-0001-probe/plans/p01.md INIT-0001-P01-T01 >/dev/null)
+[ -f "$hd/.executor/INIT-0001/P01/state/INIT-0001-P01-T01.heartbeat" ] \
+  && ok "exec-heartbeat lands the witness file" \
+  || bad "exec-heartbeat left no state/*.heartbeat"
+
+# exec-ladder: revived-rvN lands on the open row, and the bound refuses
+# past EXEC_MAX_REVIVE — the pump used to rewrite these cells by hand.
+(cd "$hd" && bash "$S/exec-ladder" docs/executor/INIT-0001-probe/plans/p01.md INIT-0001-P01-T01 revive >/dev/null)
+outcome=$(awk 'BEGIN{FS="|"} $0 ~ /INIT-0001-P01-T01/ { s=$8; gsub(/ /,"",s); print s; exit }' "$hd/.executor/INIT-0001/P01/dispatches.md")
+[ "$outcome" = "revived-rv1" ] \
+  && ok "exec-ladder revive writes revived-rv1" \
+  || bad "exec-ladder revive wrote '$outcome' (want revived-rv1)"
+(cd "$hd" && bash "$S/exec-ladder" docs/executor/INIT-0001-probe/plans/p01.md INIT-0001-P01-T01 revive >/dev/null)
+if (cd "$hd" && bash "$S/exec-ladder" docs/executor/INIT-0001-probe/plans/p01.md INIT-0001-P01-T01 revive >/dev/null 2>&1); then
+  bad "third revive past the ladder bound was allowed"
+else
+  ok "exec-ladder refuses the hop past EXEC_MAX_REVIVE"
+fi
+
+# The REPORT livelock is dead: a report at the gate while a reviewer row
+# is open emits WAIT forever, never ADJUDICATE loop — the fold now reads
+# the review row instead of demanding a verdict that cannot exist yet.
+{ printf '%s\n' '---'; printf '%s\n' 'task: INIT-0001-P01-T01' 'result: DONE' 'status: active' '---'; printf '%s\n' 'Done.'; } > "$hd/.executor/INIT-0001/P01/reports/INIT-0001-P01-T01-report.md"
+
+mkdir -p "$hd/.executor/INIT-0001/P01/reviews/verdicts"
+printf '| %s | review | mid | REVIEW-P01-T01-R01 | — | %s | running | t.diff | %s |\n' \
+  "INIT-0001-P01-T01" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >> "$hd/.executor/INIT-0001/P01/dispatches.md"
+livelock=0
+for i in 1 2 3 4 5; do
+  emit=$(cd "$hd" && bash "$S/exec-step" docs/executor/INIT-0001-probe/plans/p01.md)
+  case "$emit" in ADJUDICATE*) livelock=1 ;; esac
+done
+[ "$livelock" -eq 0 ] \
+  && ok "reviewer in flight: 5 folds emit WAIT, never ADJUDICATE loop" \
+  || bad "REPORT livelock lives: a fold emitted ADJUDICATE while a reviewer ran"
+
+# result: blocked routes to adjudication, not the report gate.
+sed -i.bak 's/result: DONE/result: BLOCKED/' "$hd/.executor/INIT-0001/P01/reports/INIT-0001-P01-T01-report.md"
+emit=$(cd "$hd" && bash "$S/exec-step" docs/executor/INIT-0001-probe/plans/p01.md)
+case "$emit" in
+  ADJUDICATE\ INIT-0001-P01-T01*) ok "result: blocked routes to ADJUDICATE" ;;
+  *) bad "result: blocked routes to ADJUDICATE (got: $emit)" ;;
+esac
+sed -i.bak 's/result: BLOCKED/result: NEEDS_CONTEXT/' "$hd/.executor/INIT-0001/P01/reports/INIT-0001-P01-T01-report.md"
+emit=$(cd "$hd" && bash "$S/exec-step" docs/executor/INIT-0001-probe/plans/p01.md)
+case "$emit" in
+  ASK*) ok "result: needs-context routes to ASK" ;;
+  *) bad "result: needs-context routes to ASK (got: $emit)" ;;
+esac
+rm -f "$hd/.executor/INIT-0001/P01/reports/INIT-0001-P01-T01-report.md.bak"
+
+# exec-initiative check: validates the gate without writing it (the old
+# exec-gate check mode ran `passed` for real — the mutation it claimed
+# to be checking for).
+id=$(fixture hard-check)
+mkdir -p "$id/docs/executor/INIT-0002-check"
+cat > "$id/docs/executor/INIT-0002-check/INDEX.md" <<'EOF'
+id: INIT-0002
+kind: initiative
+title: Check probe
+status: active
+created_at: 2026-10-05T00:00:00Z
+updated_at: 2026-10-05T00:00:00Z
+
+# Check probe
+
+**Phase:** brainstorming
+
+| Phase | Entered | Gate passed | Notes |
+|---|---|---|---|
+| intake | 2026-10-05 | 2026-10-05 | seeded |
+| brainstorm | 2026-10-05 | 2026-10-05 | seeded |
+EOF
+commit_all "$id" fixture
+if out=$(cd "$id" && bash "$S/exec-initiative" phase INIT-0002 architecture check 2>&1); then
+  bad "check on a phase with no artifact reported ready"
+else
+  ok "check refuses an artifact-less phase without writing"
+fi
+phase_cell=$(awk 'BEGIN{FS="|"} $0 ~ /^\| architecture/ {print $4}' "$id/docs/executor/INIT-0002-check/INDEX.md")
+[ -z "$phase_cell" ] || [ "$phase_cell" = " " ] \
+  && ok "check wrote no gate-passed cell" \
+  || bad "check mutated the phase log ($phase_cell)"
+
+# A run marked complete in the registry is DONE, not GATE-STAGE — the
+# fold used to re-emit the stage-gate forever because nothing told it
+# the gate had already passed.
+done_d=$(fixture hard-done)
+mkdir -p "$done_d/docs/executor/INIT-0003-z/plans"
+printf -- '---\nid: INIT-0003-P01\ninitiative: INIT-0003\nkind: plan\ntitle: Done probe\nstatus: active\nsequential: true\ncreated_at: 2026-10-05T00:00:00Z\nupdated_at: 2026-10-05T00:00:00Z\n---\n\n### Task 1: only — `INIT-0003-P01-T01`\n\nx\n' \
+  > "$done_d/docs/executor/INIT-0003-z/plans/p01.md"
+commit_all "$done_d" fixture
+(cd "$done_d" && bash "$S/exec-workspace" docs/executor/INIT-0003-z/plans/p01.md >/dev/null \
+   && bash "$S/exec-run" docs/executor/INIT-0003-z/plans/p01.md start >/dev/null 2>&1 || true)
+awk -F'|' 'BEGIN{OFS="|"} /INIT-0003-P01/ { $4=" complete " } {print}' "$done_d/.executor/INDEX.md" > "$done_d/.executor/INDEX.md.tmp" \
+  && mv "$done_d/.executor/INDEX.md.tmp" "$done_d/.executor/INDEX.md"
+emit=$(cd "$done_d" && bash "$S/exec-step" docs/executor/INIT-0003-z/plans/p01.md)
+case "$emit" in
+  DONE*) ok "registry complete emits DONE, not GATE-STAGE" ;;
+  *) bad "registry complete emitted '$emit' (want DONE)" ;;
+esac
 
 echo
 echo "$pass passed, $fail failed"
