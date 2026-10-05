@@ -133,4 +133,20 @@ if [ -f "$dir/dispatches.md" ]; then
   ' "$dir/dispatches.md" > "$tmp" && mv "$tmp" "$dir/dispatches.md"
 fi
 
+# The registry's Tasks cell is a cache of the ledger — it refreshes inside
+# this same lock so a commit and its count are one act (the header's claim
+# was previously unfulfilled; the cell went stale between commits).
+reg="$(exec_run_store)/INDEX.md"
+if [ -f "$reg" ]; then
+  total_t=$(awk 'BEGIN{c=0} /^### Task /{c++} END{print c+0}' "$plan")
+  done_t=$(exec_ledger_states "$dir/progress.md" "$plan_id" \
+    | awk -F'\t' '$2 ~ /^complete([ (]|$)/ {n++} END{print n+0}')
+  rtmp=$(store_tmp "$(exec_run_store)")
+  awk -v id="$plan_id" -v tc="$done_t/$total_t" '
+    BEGIN { FS = OFS = "|" }
+    $0 ~ ("^\\| " id " \\|") { $5 = " " tc " " }
+    { print }
+  ' "$reg" > "$rtmp" && mv "$rtmp" "$reg"
+fi
+
 printf 'COMMITTED %s: report gated, ledger line appended, dispatch rows closed\n' "$task"

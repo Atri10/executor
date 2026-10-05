@@ -52,6 +52,17 @@ Subagent (general-purpose):
 
     Every ID you cite belongs to initiative [INITIATIVE_ID].
 
+    ## Liveness
+
+    The engine measures you by a heartbeat file, not by silence — evidence
+    runs can be slow, and a slow run looks identical to a dead one without
+    the beat. After each command completes:
+
+        bash [SCRIPTS_DIR]/exec-heartbeat [PLAN_FILE] [PLAN_ID]-Vnn
+
+    Replace `Vnn` with your criterion's number. A quiet heartbeat reads as
+    a dead worker and burns a revive rung.
+
     ## Your Deliverable Is an Evidence File
 
     You write the evidence through the script, never by hand:

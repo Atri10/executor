@@ -136,6 +136,21 @@ if [ -f "$layout" ]; then
     printf '%s\n' "$registered" | grep -qxF "$rel" \
       || { echo "FAIL ${p#./}: prompt template is not listed in the dispatch registry (references/layout.md)"; fail=1; }
   done < <(find "$dir" -name '*-prompt.md' -print0)
+
+  # Liveness contract: every plan-scoped worker template must carry the
+  # heartbeat instruction — a worker that never beats reads as a dead one.
+  # Listed by name so adding a plan-scoped role template without the
+  # contract fails here, not in a live run.
+  for rel in executor-execution/implementer-prompt.md \
+             executor-review/task-reviewer-prompt.md \
+             executor-review/re-review-prompt.md \
+             executor-review/final-reviewer-prompt.md \
+             executor-verification/evidence-runner-prompt.md \
+             executor/supervisor-prompt.md; do
+    [ -f "$dir/$rel" ] || continue
+    grep -qF 'exec-heartbeat' "$dir/$rel" \
+      || { echo "FAIL ${dir}/$rel: worker template lacks the exec-heartbeat liveness contract"; fail=1; }
+  done
 fi
 
 # No ASCII-art diagrams. Box-drawing characters draw trees and boxes whose

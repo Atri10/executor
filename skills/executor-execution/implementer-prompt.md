@@ -29,6 +29,15 @@ Subagent (general-purpose):
     other initiative anywhere in your work or your report — the initiative
     must stay readable and archivable on its own.
 
+    ## Liveness
+
+    The engine measures you by a heartbeat file, not by silence. Between
+    units of work — after every edit and every test run — beat it:
+
+        bash [SCRIPTS_DIR]/exec-heartbeat [PLAN_FILE] [TASK_ID]
+
+    A quiet heartbeat reads as a dead worker and burns a revive rung.
+
     ## Preconditions
 
     Each of these is a fact you verify yourself before the first edit, and
@@ -450,10 +459,15 @@ Subagent (general-purpose):
     rounds: 1
     title: Report for [TASK_ID]
     status: active
+    result: <DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT>
     created_at: <UTC from an executed command>
     updated_at: <same>
     ---
     ```
+
+    `result:` mirrors your reply status — the fold reads it and routes
+    without waiting on your return. DONE* reports go to review; BLOCKED and
+    NEEDS_CONTEXT go to adjudication, not the report gate.
 
     Bump `updated_at` (and increment `rounds`) every time you append a fix
     report. Then:

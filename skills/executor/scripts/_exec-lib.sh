@@ -329,21 +329,171 @@ exec_task_branch() {
   ' "$dir/progress.md"
 }
 
-# The fork commit recorded beside a task's branch, or empty.
+# The fork commit recorded beside a task, or empty. Reads any canonical
+# dispatched line carrying "base <sha>" — the branch form
+# ("dispatched (branch <name>, base <sha>)") and the bare annotation form
+# ("dispatched (agent X, base <sha>)") a sequential plan writes, which has
+# no branch to name. Last match wins, same as exec_task_branch.
 exec_task_branch_base() {
   local dir=$1 tid=$2
   [ -f "$dir/progress.md" ] || return 0
   awk -v tid="$tid" '
-    $0 ~ ("^" tid ": dispatched \\(branch ") {
+    $0 ~ ("^" tid ": dispatched \\(") && $0 ~ /( |,)base / {
       line = $0
-      sub(/^.*, base /, "", line)
-      sub(/\\).*$/, "", line)
+      sub(/^.* base /, "", line)
+      sub(/[ ),].*$/, "", line)
       b = line
     }
     END { if (b != "") print b }
   ' "$dir/progress.md"
 }
 
+# Append one dispatches.md row honoring the file's own header — column
+# order and column SET both vary in the wild (older stores lack Branch and
+# Last-Seen). Values arrive \x01-joined as alternating NAME VALUE pairs in
+# $2 — awk cannot see NUL but \x01 survives; callers never emit it in cell
+# text. A column the table lacks is dropped; a column the table carries
+# but the caller omits is em-dash.
+#   exec_dispatch_append DFILE $'Task\x01TID\x01Role\x01impl\x01…'
+exec_dispatch_append() {
+  local dfile=$1 pairs=$2 tmp
+  [ -f "$dfile" ] || return 1
+  tmp=$(mktemp "${dfile}.XXXXXX") || return 1
+  awk -v args="$pairs" '
+    BEGIN {
+      na = split(args, a, "\x01")
+      for (i = 1; i + 1 <= na; i += 2) v[a[i]] = a[i + 1]
+    }
+    /^\|[ \t]*Task[ \t]*\|/ && !done {
+      n = split($0, h, "|")
+      line = "|"
+      for (i = 2; i < n; i++) {
+        c = h[i]; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        val = (c in v) ? v[c] : "—"
+        line = line " " val " |"
+      }
+      done = 1
+    }
+    # The row is built from the table header, then appended at EOF —
+    # rows grow downward, newest last, per the seeded file contract.
+    { print }
+    END { if (done) print line }
+  ' "$dfile" > "$tmp" && mv "$tmp" "$dfile"
+}
+
+# Set one named column on every OPEN row for TASK (Outcome running or
+# revived-rvN). Columns are located by header name; a table without the
+# column is a no-op, matching the readers' tolerance for older stores.
+#   exec_dispatch_set DFILE TASK_ID COLUMN VALUE
+exec_dispatch_set() {
+  local dfile=$1 task=$2 col=$3 val=$4 tmp
+  [ -f "$dfile" ] || return 1
+  tmp=$(mktemp "${dfile}.XXXXXX") || return 1
+  awk -v t="$task" -v col="$col" -v val="$val" '
+    BEGIN { FS = "|"; OFS = "|" }
+    /^\|[ \t]*Task[ \t]*\|/ {
+      for (i = 2; i <= NF; i++) {
+        c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c == "Task") ti = i
+        if (c == "Outcome" || c == "Status") oi = i
+        if (c == col) ci = i   # target may BE Outcome — test it last
+      }
+      print; next
+    }
+    /^\|/ {
+      if (!ti || !ci) { print; next }
+      cell = $ti; gsub(/[ \t]/, "", cell)
+      if (cell != t) { print; next }
+      o = oi ? $oi : ""; gsub(/^[ \t]+|[ \t]+$/, "", o)
+      if (o != "running" && o !~ /^revived-rv[0-9]+$/) { print; next }
+      $ci = " " val " "
+      print; next
+    }
+    { print }
+  ' "$dfile" > "$tmp" && mv "$tmp" "$dfile"
+}
+
+# The task segment of a full task ID: INIT-0004-P01-T03 -> 3.
+# Caller validates the ID belongs to the plan first.
+exec_task_num() { echo "${1##*-T}" | sed 's/^0*//'; }
+
+# ------------------------------------------------------------------
+# The machine-readable tables every consumer shares. Skill prose used to
+# carry these as markdown the pump transcribed by hand; a second copy is
+# how the docs and the scripts tell two stories.
+
+# Verb → actuator decision table. `counted` marks the verbs that promise a
+# state change — the no-progress guard may count only those; WAIT/ASK/DONE
+# await an external event and must never accumulate toward an
+# ADJUDICATE loop on a healthy run.
+#   verb | actuator | counted
+exec_verbs() {
+  cat <<'EOF'
+REPAIR-STATE|run the named repair (usually exec-workspace PLAN)|yes
+RUN-START|exec-run PLAN start|yes
+DISPATCH|exec-dispatch PLAN --task N --role impl; spawn AGENT on PROMPT|yes
+REVIEW|exec-dispatch PLAN --role review --task Tnn; spawn reviewer|yes
+FIX|exec-dispatch PLAN --role fix --task Tnn; spawn fix implementer|yes
+REVIVE|exec-ladder PLAN TID revive; spawn AGENT on PROMPT|yes
+REDISPATCH|exec-ladder PLAN TID redispatch; spawn AGENT on PROMPT|yes
+ADJUDICATE|exec-adjudicate PLAN TID; spawn SUPERVISOR on PROMPT|yes
+REPORT|exec-report PLAN REPORT_FILE (gate-on-commit)|yes
+GATE-STAGE|exec-run PLAN complete|yes
+PHASE-ENTER|exec-initiative phase INIT PHASE entered, then exec-dispatch --role author|yes
+PHASE-GATE|exec-present INIT PHASE to the human, or exec-gate INIT PHASE --auto|yes
+CRITIQUE|exec-critique INIT COMPONENT init, then dispatch AUDIT per the phase skill|yes
+ASK|relay the topic to the human; record the answer with exec-ruling|no
+WAIT|idle one turn; the emit carries the wake condition|no
+DONE|report the finished state and stop|no
+EOF
+}
+
+# Dispatch registry — the machine-readable form of references/layout.md's
+# role table. needs: brief = exec-brief+exec-context; diff = exec-review-
+# package; fix = exec-fix-package; none = key=value slots only.
+#   role | id_pattern | template (relative to skills/) | needs
+# <TID>/<Pnn>/<Tnn>/<Vnn>/<BRN>/<L>/<C>/<nn> are substituted at mint time.
+exec_roles() {
+  cat <<'EOF'
+impl|IMPL-<Pnn>-<Tnn>[-Rnn]|executor-execution/implementer-prompt.md|brief
+review|REVIEW-<Pnn>-<Tnn>-R<nn>|executor-review/task-reviewer-prompt.md|diff
+re-review|REVIEW-<Pnn>-<Tnn>-R<nn>|executor-review/re-review-prompt.md|diff
+final-review|REVIEW-<Pnn>-final|executor-review/final-reviewer-prompt.md|diff
+fix|IMPL-<Pnn>-<Tnn>[-Rnn]|executor-execution/implementer-prompt.md|fix
+verify|VERIFY-<Pnn>-<Vnn>[-Rnn]|executor-verification/evidence-runner-prompt.md|none
+supervisor|SUPERVISOR-<Pnn>-<Tnn>|executor/supervisor-prompt.md|none
+decide|DECIDE-<Pnn>-<Tnn>|executor/decide-prompt.md|none
+author|AUTHOR-<phase>|executor/author-prompt.md|none
+EOF
+}
+
+# One exec_roles row for ROLE, or exit 2 — an unregistered role is a typo,
+# and a dispatch the registry cannot name is a dispatch with no contract.
+exec_role() {
+  local row
+  row=$(exec_roles | awk -F'|' -v r="$1" '$1 == r { print; exit }')
+  [ -n "$row" ] || exec_die "unregistered dispatch role: $1 (want one of: $(exec_roles | cut -d'|' -f1 | tr '\n' ' '))"
+  echo "$row"
+}
+
+# Does the named product exist? Spec forms:
+#   none            never exists on disk (liveness by heartbeat alone)
+#   file:PATH       -s test on an exact path
+#   glob:DIR:PAT    any file matching PAT under DIR (verdicts are globbed)
+exec_product_exists() {
+  local spec=$1
+  case "$spec" in
+    ""|none)  return 1 ;;
+    file:*)   [ -s "${spec#file:}" ] ;;
+    glob:*)
+      # bash 3.2 evaluates every word in a `local` before any assignment —
+      # `local rest=… d=${rest%%:*}` reads rest unbound under set -u.
+      local rest d pat
+      rest=${spec#glob:}; d=${rest%%:*}; pat=${rest#*:}
+      ls "$d"/$pat >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
 # Seed a plan workspace's four ledger files (idempotent — existing files
 # are never rewritten). Every script that writes into a workspace calls
 # this first, so no entry point can produce the bare-dir drift seen in
@@ -447,7 +597,7 @@ updated_at: $stamp
 *Context: the brief and context file paths each agent received, so 'bad context or bad model?' has a one-line answer. Rows append BELOW the header, never above it.*
 *Agent identities follow the grammar ROLE-Pnn-Tnn[-Rnn]: IMPL for implementers, REVIEW for reviewers (round-suffixed, REVIEW-P01-final for the whole-branch review), VERIFY for evidence runs. A resumed agent keeps its identity. See references/layout.md.*
 *Branch is the task branch the agent worked on (task/<TASK-ID>), written by exec-branch task start; a sequential plan leaves it empty.*
-*Last-Seen is the liveness witness exec-step reads: the pump refreshes it each turn and the worker touches state/<TASK-ID>.heartbeat as it works. Started alone is day-granular, which cannot tell a slow worker from a dead one. Absence of the column in an older workspace is tolerated — readers locate it by name and fall back to Started.*
+*Last-Seen is the liveness witness exec-step reads: exec-dispatch and exec-ladder stamp it at write time, exec-seen refreshes it when the pump relays worker output, and the worker beats state/<TASK-ID>.heartbeat via exec-heartbeat. A pump that stamped it every fold would make the fallback permanently fresh — no per-turn refresh here. Started alone is day-granular, which cannot tell a slow worker from a dead one. Absence of the column in an older workspace is tolerated — readers locate it by name and fall back to Started.*
 
 | Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
 |---|---|---|---|---|---|---|---|---|
@@ -834,15 +984,23 @@ exec_timestamp_epoch() { # 2026-09-29 | 2026-09-29T07:33:51Z -> epoch, or empty
     || date -u -d "$dp $tp" +%s 2>/dev/null || true
 }
 
-# $3 = started (YYYY-MM-DD), $4 = last-seen (may be empty).
+# $3 = started (YYYY-MM-DD), $4 = last-seen (may be empty),
+# $5 = product spec for the zombie check (exec_product_exists form).
+# Default: the task's report file — implementer rows. A reviewer row's
+# product is a verdict glob, a supervisor row's is a ruling section; the
+# caller derives the spec from the row's Role cell. A row whose product
+# spec is wrong reports zombie forever, which reads the implementer's
+# report as the reviewer's output and re-commits it — the livelock the
+# spec argument exists to prevent.
 exec_row_liveness() {
-  local dir=$1 task=$2 started=$3 lastseen=$4
+  local dir=$1 task=$2 started=$3 lastseen=$4 product=${5:-}
   local hb_ttl=${EXEC_HEARTBEAT_TTL:-1800}
   local suspect_ttl=${EXEC_SUSPECT_TTL:-7200}
   local dead_ttl=${EXEC_DEAD_TTL:-86400}
   local age seen seen_epoch age_s
 
-  [ -s "$dir/reports/${task}-report.md" ] && { echo zombie; return 0; }
+  [ -n "$product" ] || product="file:$dir/reports/${task}-report.md"
+  exec_product_exists "$product" && { echo zombie; return 0; }
 
   age=$(exec_heartbeat_age "$dir" "$task")
   if [ -n "$age" ]; then

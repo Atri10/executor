@@ -67,7 +67,10 @@ fi
 if ! grep -q "^| $plan_id |" "$reg" 2>/dev/null; then
   init=$(exec_initiative_of "$plan_id" 2>/dev/null || echo "—")
   rel=${dir#"$store/"}
-  awk -v row="| $plan_id | $init | running | 0/? | $(date -u +%Y-%m-%d) | — | \`$rel/\` |" '
+  # Seeded as 'ready': the run starts when exec-run start flips it to
+  # 'running' — a row born 'running' tells a resumed controller the run
+  # started when nothing ever did, which is the lie RUN-START closes.
+  awk -v row="| $plan_id | $init | ready | 0/? | $(date -u +%Y-%m-%d) | — | \`$rel/\` |" '
     { print }
     /^\|---/ && !done { print row; done = 1 }
   ' "$reg" > "$reg.tmp" && mv "$reg.tmp" "$reg"

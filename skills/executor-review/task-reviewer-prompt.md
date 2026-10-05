@@ -46,6 +46,16 @@ Subagent (general-purpose):
     from another initiative — if something outside this initiative matters,
     describe it in words.
 
+    ## Liveness
+
+    The engine measures you by a heartbeat file, not by silence. Between
+    units of work — after each pass over the diff and before you write the
+    verdict — beat it:
+
+        bash [SCRIPTS_DIR]/exec-heartbeat [PLAN_FILE] [TASK_ID]
+
+    A quiet heartbeat reads as a dead worker and burns a revive rung.
+
     ## Your Deliverable Is a File
 
     You write your verdict to [VERDICT_FILE] yourself, in the structure given

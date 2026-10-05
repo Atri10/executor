@@ -52,6 +52,15 @@ Subagent (general-purpose):
     Every ID you cite belongs to initiative [INITIATIVE_ID]. Never cite an ID
     from another initiative.
 
+    ## Liveness
+
+    The engine measures you by a heartbeat file, not by silence. Between
+    units of work — after each finding you verdict — beat it:
+
+        bash [SCRIPTS_DIR]/exec-heartbeat [PLAN_FILE] [TASK_ID]
+
+    A quiet heartbeat reads as a dead worker and burns a revive rung.
+
     ## Your Deliverable Is a File
 
     You write your verdict to [VERDICT_FILE] yourself, in the structure below,

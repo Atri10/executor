@@ -20,7 +20,7 @@
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/_exec-lib.sh"
 
-[ $# -ge 2 ] && [ $# -le 3 ] || exec_die "usage: exec-run PLAN_FILE start|task|complete|check|pause|blocked [TASK_ID]"
+[ $# -ge 2 ] && [ $# -le 6 ] || exec_die "usage: exec-run PLAN_FILE start|task|complete|check|pause|blocked [TASK_ID] [--line ANNOTATION] [--state WORD]"
 
 plan=$1
 action=$2
@@ -208,19 +208,19 @@ sync_dispatch_outcomes() {
 # the append-only State changes line. progress.md is per-plan, so this
 # takes no store lock — the lock guards the shared INDEX.
 mark_dispatch() {
-  local tid=$1 tmp
+  local tid=$1 line=${2:-} tstate=${3:-dispatched} tmp
   tmp=$(mktemp "$dir/.progress.XXXXXX")
   if grep -qE "^\| *${tid} *\|" "$dir/progress.md" 2>/dev/null; then
     # Row exists: retarget its State cell (FS=| makes State $3).
-    awk -v tid="$tid" '
+    awk -v tid="$tid" -v st="$tstate" '
       BEGIN { FS = OFS = "|" }
-      $0 ~ ("^\\| *" tid " *\\|") { $3 = " dispatched " }
+      $0 ~ ("^\\| *" tid " *\\|") { $3 = " " st " " }
       { print }
     ' "$dir/progress.md" > "$tmp" && mv "$tmp" "$dir/progress.md"
   else
     # No row yet: insert under the Task-status header; a ledger without
     # the table gets the row appended rather than lost.
-    awk -v row="| $tid | dispatched | — | — | — |" '
+    awk -v row="| $tid | $tstate | — | — | — |" '
       !inserted && /^\| Task \|/ {
         print
         if ((getline line) > 0) print line
@@ -232,7 +232,14 @@ mark_dispatch() {
       END { if (!inserted) print row }
     ' "$dir/progress.md" > "$tmp" && mv "$tmp" "$dir/progress.md"
   fi
-  printf '%s: dispatched\n' "$tid" >> "$dir/progress.md"
+  # Canonical ledger line: the state word first, then the annotation.
+  # exec_ledger_states reads the first word; exec_task_branch_base reads
+  # "base <sha>" out of the annotation for the review package's BASE.
+  if [ -n "$line" ]; then
+    printf '%s: %s\n' "$tid" "$line" >> "$dir/progress.md"
+  else
+    printf '%s: dispatched\n' "$tid" >> "$dir/progress.md"
+  fi
 }
 
 # Fix-round cap: executor-execution documents five rounds maximum per
@@ -302,6 +309,16 @@ case "$action" in
     ;;
   task)
     task_id=${3:-}
+    line=""; tstate="dispatched"
+    shift 2
+    [ $# -gt 0 ] && shift || true   # drop TASK_ID itself
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --line)  line=$2; shift 2 ;;
+        --state) tstate=$2; shift 2 ;;
+        *) exec_die "unknown flag for task: $1 (want --line|--state)" ;;
+      esac
+    done
     [ -n "$task_id" ] || exec_die "usage: exec-run PLAN_FILE task ${plan_id}-Tnn — the dispatch marker names the task it records"
     # The ID must belong to THIS plan — a marker for another plan's task
     # is a ledger lie the audit would flag anyway.
@@ -340,7 +357,7 @@ case "$action" in
     # adjudication/disposition lets it through.
     enforce_fix_cap "$task_id"
     update_row "running" "$done_count/$total" ""
-    mark_dispatch "$task_id"
+    mark_dispatch "$task_id" "$line" "$tstate"
     echo "$plan_id: dispatched $task_id ($done_count/$total)"
     ;;
   complete)

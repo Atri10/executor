@@ -33,6 +33,15 @@ Subagent (general-purpose):
     Every ID above belongs to [INIT-NNNN]. Do not reference an ID from any
     other initiative anywhere in your work or your ruling.
 
+    ## Liveness
+
+    The engine measures you by a heartbeat file, not by silence. Beat it
+    once after you have read the evidence and again before you rule:
+
+        bash [SCRIPTS_DIR]/exec-heartbeat [PLAN_FILE] [LANE]
+
+    A quiet heartbeat reads as a dead worker and burns a revive rung.
+
     ## You Did Not Write Any Of This
 
     You are fresh. You did not dispatch the worker whose lane you are

@@ -47,6 +47,9 @@ revive_count() {
 # Open rows as "task<TAB>started<TAB>outcome<TAB>last-seen". Columns are
 # located by header name, so a workspace seeded before Last-Seen existed and
 # one seeded after both parse the same.
+# Open rows as "task<TAB>role<TAB>started<TAB>outcome<TAB>last-seen".
+# Columns are located by header name, so a workspace seeded before
+# Last-Seen existed and one seeded after both parse the same.
 open_rows() {
   local dfile=$1 pid=$2
   [ -f "$dfile" ] || return 0
@@ -56,6 +59,7 @@ open_rows() {
       for (i = 2; i <= NF; i++) {
         c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
         if (c == "Task") ti = i
+        else if (c == "Role") ri = i
         else if (c == "Started") si = i
         else if (c == "Outcome" || c == "Status") oi = i
         else if (c == "Last-Seen" || c == "Last Seen") li = i
@@ -70,17 +74,35 @@ open_rows() {
       # An open row is running OR revived — a revived worker is still in
       # flight and its row is the only record of how far the ladder got.
       if (o != "running" && o !~ /^revived-rv[0-9]+$/) next
+      r = ri ? $ri : ""; gsub(/^[ \t]+|[ \t]+$/, "", r)
       s = si ? $si : ""; gsub(/[ \t]/, "", s)
       l = li ? $li : ""; gsub(/[ \t]/, "", l)
-      print t, s, o, l
+      print t, r, s, o, l
     }
   ' "$dfile"
 }
 
-action_for() { # dir dfile task started outcome lastseen
-  local dir=$1 dfile=$2 task=$3 started=$4 outcome=$5 lastseen=$6
+# The zombie product for a row, derived from its Role: a reviewer proves
+# itself with a verdict file, an implementer with a report. A role-agnostic
+# product check reads the implementer's report as the reviewer's output —
+# the row looks zombie forever and the fold re-commits the old report.
+product_for() { # dir task role
+  local d=$1 t=$2 r=$3
+  case "$r" in
+    *review*|*Review*|*REVIEW*)
+      echo "glob:$d/reviews/verdicts:${t}-R*-verdict.md" ;;
+    supervisor|SUPERVISOR|decide|DECIDE)
+      echo "none" ;;
+    *)
+      echo "file:$d/reports/${t}-report.md" ;;
+  esac
+}
+
+action_for() { # dir dfile task role started outcome lastseen
+  local dir=$1 dfile=$2 task=$3 role=$4 started=$5 outcome=$6 lastseen=$7
   local live n
-  live=$(exec_row_liveness "$dir" "$task" "$started" "$lastseen")
+  live=$(exec_row_liveness "$dir" "$task" "$started" "$lastseen" \
+         "$(product_for "$dir" "$task" "$role")")
   case "$live" in
     zombie) echo "ZOMBIE $task"; return 0 ;;
     alive)  echo "ALIVE $task"; return 0 ;;
@@ -121,9 +143,9 @@ dir=$(exec_workspace_dir "$plan")
 dfile="$dir/dispatches.md"
 
 emitted=0
-while IFS=$'\t' read -r task started outcome lastseen; do
+while IFS=$'\t' read -r task role started outcome lastseen; do
   [ -n "$task" ] || continue
-  line=$(action_for "$dir" "$dfile" "$task" "$started" "$outcome" "$lastseen")
+  line=$(action_for "$dir" "$dfile" "$task" "$role" "$started" "$outcome" "$lastseen")
   printf '%s\n' "$line"
   emitted=$((emitted + 1))
   # Default mode stops at the first row that needs a decision: a run with
