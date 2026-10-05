@@ -339,23 +339,28 @@ many turns a subagent takes, and the cheapest models routinely take 2-3× the
 turns on multi-step work, costing more overall. Use a mid-tier model as the
 floor for reviewers and for implementers working from prose descriptions.
 
-**Log every dispatch** in `dispatches.md` (seeded with its header) so the
-selection is reviewable after the fact and a resumed controller can find a
-live agent:
+**Every dispatch goes through `exec-dispatch`**, which mints the agent ID,
+marks the ledger, appends the row, and renders the prompt — you never write
+this table by hand. The seeded header is nine columns; readers locate them by
+name, so a store that predates a column still parses:
 
 ```markdown
-| Task | Role | Model | Agent | Started | Outcome | Context |
-|---|---|---|---|---|---|---|
-| INIT-0004-P01-T03 | implementer | cheap | IMPL-P01-T03 | 2026-09-01T14:20Z | DONE | briefs/T03-brief.md + briefs/T03-context.md |
-| INIT-0004-P01-T03 | reviewer R01 | standard | REVIEW-P01-T03-R01 | 2026-09-01T14:41Z | 2 findings | reviews/diffs/T03-R01-*.diff |
-| INIT-0004-P01-T03 | implementer fix R01 | cheap (resumed) | IMPL-P01-T03 | 2026-09-01T14:52Z | DONE | verdict T03-R01 + report |
+| Task | Role | Model | Agent | Branch | Started | Outcome | Context | Last-Seen |
+|---|---|---|---|---|---|---|---|---|
+| INIT-0004-P01-T03 | impl | cheap | IMPL-P01-T03 | task/T03 | 2026-09-01T14:20Z | running | briefs/T03-brief.md + briefs/T03-context.md | 2026-09-01T14:20Z |
+| INIT-0004-P01-T03 | review | mid | REVIEW-P01-T03-R01 | — | 2026-09-01T14:41Z | running | T03-R01-*.diff | 2026-09-01T14:41Z |
+| INIT-0004-P01-T03 | fix | cheap | IMPL-P01-T03-R01 | task/T03 | 2026-09-01T14:52Z | revived-rv1 | T03-R01-fix-package.md | 2026-09-01T14:52Z |
 ```
 
-Three uses, all load-bearing: model-selection decisions become reviewable
+The load-bearing properties: model-selection decisions become reviewable
 after the fact, a resumed controller finds a live agent to resume instead of
 replacing it, and **the Context column records exactly what each agent
 received** — so when a run goes sideways, "bad context or bad model?" has a
-one-line answer instead of a guess.
+one-line answer instead of a guess. `Outcome: running` (or `revived-rvN`)
+marks an open row; `exec-report` closes it. `Last-Seen` and the
+`state/<task>.heartbeat` witness are what `exec-supervise` reads to decide a
+worker is alive, suspect, or dead — refresh them with `exec-seen` and
+`exec-heartbeat` from the worker's own turn loop, never by editing the cell.
 
 ## Context Discipline
 
@@ -518,7 +523,7 @@ from the dispatch result — fix-loop rounds 1-3 resume that identity. A
 fresh implementer at rounds 4-5 takes `IMPL-P01-T03-R4` (or `-R5`) so the
 log distinguishes the two instances.
 
-**Ledger:** `INIT-0004-P01-T03: dispatched (model cheap, agent IMPL-P01-T03, base a1b2c3d)`
+**Ledger:** `exec-dispatch` writes it — `INIT-0004-P01-T03: dispatched (model cheap, agent IMPL-P01-T03, base a1b2c3d)`. Never write this line by hand; the review package reads its base SHA off it.
 
 If the implementer asks questions — before starting or mid-task — answer
 clearly and completely, provide the context it needs, and do not rush it
@@ -526,14 +531,23 @@ into implementation.
 
 ### 2. Handle the report
 
-Implementers report one of four statuses.
+Implementers report one of four statuses, and the report carries it in its
+`result:` frontmatter so the fold can route it without you. Three of the
+four are mechanical; only the fourth is a judgment call, and it is a
+dispatch, not your decision.
 
 | Status | Handling |
 |---|---|
-| **DONE** | Generate the review package and dispatch the task reviewer. The task is not complete until the verdict file exists in `reviews/verdicts/` — a report without a verdict is an unjudged claim. |
-| **DONE_WITH_CONCERNS** | Read the concerns before proceeding. Correctness or scope concerns get addressed before review. Observations ("this file is getting large") get noted in the ledger and review proceeds. |
-| **NEEDS_CONTEXT** | Supply the missing information and re-dispatch. |
-| **BLOCKED** | Assess the blocker: (1) context problem → more context, same model; (2) needs more reasoning → more capable model; (3) task too large → break it into pieces; (4) the plan itself is wrong → rule on the correction with `exec-ruling` and re-dispatch carrying the ruling. |
+| **DONE** | Nothing to do — the fold sees the report and emits `REVIEW`. The task is not complete until the verdict file exists in `reviews/verdicts/` — a report without a verdict is an unjudged claim. |
+| **DONE_WITH_CONCERNS** | Read the concerns before proceeding. Correctness or scope concerns get addressed before review; observations ("this file is getting large") get noted and review proceeds. The fold routes this as `REVIEW`; the concerns are yours to read, not to suppress. |
+| **NEEDS_CONTEXT** | The fold emits `ASK <task>` — relay the worker's question to the human, or answer it and re-dispatch with the answer. |
+| **BLOCKED** | The fold emits `ADJUDICATE <task>` — run `exec-adjudicate` and spawn the SUPERVISOR. Do not rule yourself: the four-way assessment below is exactly the judgment the adjudicator exists to make. |
+
+**The four-way assessment belongs to the SUPERVISOR, not to you.** It
+decides whether the blocker is (1) a context problem → more context, same
+model; (2) a reasoning ceiling → more capable model; (3) a task too large →
+split it; or (4) a plan defect → a ruling plus a re-dispatch. Your job is
+to dispatch it, not to answer it.
 
 **Never ignore an escalation, and never force the same model to retry
 unchanged.** If the implementer said it is stuck, something has to change

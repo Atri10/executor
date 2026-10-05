@@ -57,11 +57,14 @@ Install The Executor skill library for me:
    - ~/.aider/skills/ or as my harness documents
 3. Copy every directory from the clone's skills/ folder into that skills
    directory (each is one skill: skills/executor, skills/executor-spec, ...).
-4. Verify: run bash <skills-dir>/executor/scripts/exec-run with no arguments
-   — it must print a usage line and exit non-zero. Then confirm every copied
-   skills/<name>/ directory contains a SKILL.md (count the directories, not a
-   remembered number — the skill set grows, and a stale count here fails an
-   install that is actually fine).
+4. Verify: run bash <skills-dir>/executor/scripts/exec with no arguments
+   inside the clone — it must print the resume digest (or a clean "nothing
+   in flight"), proving the script tree resolves. Then run
+   bash <skills-dir>/executor/scripts/exec-graph check inside the clone —
+   it must report 0 failed, proving the whole script tree is intact. Also
+   confirm every copied skills/<name>/ directory contains a SKILL.md (count
+   the directories, not a remembered number — the skill set grows, and a
+   stale count here fails an install that is actually fine).
 5. Tell me which directory you installed into, and how to invoke the
    router in my harness (usually /skill:executor or just asking for
    "the executor").
@@ -103,21 +106,22 @@ stated decision recorded in the charter, not an omission.
 
 ### The shape of a run
 
-The controller runs one loop and holds no judgment: it runs `exec-step`,
-reads the single action word it prints, does that, and goes back. Every
-arrow below is either a script decision or a dispatched subagent. There is
-no step where the controller does the work.
+The controller runs one loop and holds no judgment: it runs `exec`, reads
+the single action word it prints, does that, and goes back. Every arrow
+below is either a script decision or a dispatched subagent. There is no
+step where the controller does the work.
 
 ```mermaid
 flowchart TD
-    start(["exec-step INIT-NNNN"]) --> enter{"PHASE-ENTER phase"}
-    enter --> author["dispatch AUTHOR phase"]
+    start(["exec"]) --> enter{"PHASE-ENTER phase"}
+    enter --> author["exec-dispatch --role author"]
     author --> artifact["artifact on disk"]
     artifact --> check["exec-critique check"]
     check -->|"not clear"| loop["AUDIT then REPAIR then re-AUDIT"]
     loop --> check
     check -->|"clean or waived"| gate{"PHASE-GATE phase"}
     gate -->|"human gates it"| next["next phase"]
+    gate -->|"exec-present gate card"| next
     gate -->|"autonomous declared"| auto["exec-gate --auto"]
     auto -->|"refused"| gate
     auto -->|"auto-passed"| next
@@ -155,21 +159,36 @@ before anyone is replaced.
 
 ```mermaid
 flowchart TD
-    step(["exec-step PLAN_FILE"]) --> act{"action"}
-    act -->|"DISPATCH"| brief["exec-brief then exec-context"]
-    brief --> impl["dispatch IMPL"]
+    step(["exec step PLAN_FILE"]) --> act{"action"}
+    act -->|"RUN-START"| start["exec-run PLAN start"]
+    act -->|"DISPATCH"| disp["exec-dispatch PLAN --role impl"]
+    disp --> impl["spawn IMPL on the printed PROMPT"]
     impl --> worker[("worker runs on its own branch")]
-    worker -->|"done"| rep["dispatch REPORT writer"]
-    rep --> commit["exec-report gates and commits"]
-    act -->|"GATE-STAGE"| audit["exec-run complete"]
-    audit -->|"refused on failure"| act
-    act -->|"WAIT"| idle[("stop, workers keep running")]
-    act -->|"REVIVE"| revive["same agent plus revive-preamble"]
-    revive --> worker
-    act -->|"ADJUDICATE"| sup["dispatch SUPERVISOR"]
-    sup --> act
+    worker -->|"report lands"| rep{"verdict?"}
+    rep -->|"none, no reviewer"| rev["REVIEW: exec-dispatch --role review"]
+    rev --> reviewer[("reviewer writes verdict")]
+    reviewer --> rep
+    rep -->|"none, reviewer in flight"| waitrev[("WAIT — no livelock")]
+    rep -->|"unclean"| fix["FIX: exec-dispatch --role fix"]
+    fix --> worker
+    rep -->|"clean"| commit["REPORT: exec-report gates and commits"]
+    commit --> next{"more tasks?"}
+    next -->|"yes"| step
+    next -->|"no"| gate["GATE-STAGE: exec-run complete"]
+    act -->|"REVIVE / REDISPATCH"| ladder["exec-ladder rewrites the rung"]
+    ladder --> worker
+    act -->|"ADJUDICATE"| adj["exec-adjudicate builds the evidence pack"]
+    adj --> sup["spawn SUPERVISOR on the printed PROMPT"]
+    sup --> step
+    act -->|"WAIT"| idle[("idle one turn — the emit names the wake")]
     act -->|"DONE"| fin(["plan complete"])
 ```
+
+A worker's status reaches run state through two gates, never through the
+controller's memory: the report's `result:` frontmatter (`blocked` routes to
+ADJUDICATE, `needs-context` to ASK) and `exec-report`'s verdict gate. A
+report with no verdict yet emits `REVIEW` — and `WAIT` while that reviewer
+runs, which is what stops a healthy run from reading as a stalled one.
 
 ## Feature highlights
 
@@ -337,17 +356,26 @@ outside the worktree, or a defect where every path forward is a guess.
 
 | Script | Owns |
 |---|---|
-| `exec-initiative` | Allocate initiative IDs, scaffold folders, phase log, initiative branch (`branch INIT-0004`) |
+| `exec` | **The single entry point**: bare `exec` prints the resume digest, `exec <name>` dispatches to `exec-<name>`, `exec verbs` prints the decision table, `exec roles` the dispatch registry. The controller never needs the scripts directory path |
+| `exec-initiative` | Allocate initiative IDs, scaffold folders, phase log, initiative branch (`branch INIT-0004`); `phase … check` validates a gate without writing it |
 | `exec-id` | Next free ID of any type — allocation never guesses |
 | `exec-plan-lint` | **Planning gate**: rejects literal store paths in plans, task headings without IDs, missing or empty `spec`/`interfaces`/`tasks`/`execution_mode`, task-count mismatch, and over-specified task bodies (impl-language fences >40 lines or >60% of a body) |
-| `exec-workspace` | Resolve and seed a plan's execution workspace: ledger, rulings, preflight scan, dispatch log |
+| `exec-workspace` | Resolve and seed a plan's execution workspace: ledger, rulings, preflight scan, dispatch log; seeds the registry row `ready` |
 | `exec-brief` / `exec-context` | Task brief and context files, generated, never hand-built — briefs carry contract verbatim and mark embedded code as advisory |
+| `exec-dispatch` | **The dispatch act, one locked step**: mints the agent ID per the registry grammar, builds the role's input file (brief+context, review package, fix package, or evidence), marks the ledger with the annotation, appends the dispatches.md row (`running`), and renders the role prompt bracket-clean. Nothing dispatches by hand |
+| `exec-ladder` | The revive ladder's write path: `revive`/`redispatch` rewrites the open row's `revived-rvN` cell, refreshes Last-Seen, enforces `EXEC_MAX_REVIVE` itself, and prints the filled preamble + prompt paths |
+| `exec-seen` / `exec-heartbeat` | The two liveness witnesses: refresh an open row's `Last-Seen`, and stamp the worker heartbeat file `exec-supervise` reads |
+| `exec-prompt` | Renders any registered role template with `KEY=VAL` slots; refuses to emit while any `[UPPER_SNAKE]` bracket is unfilled — an unfilled bracket is a defect, not a style gap |
 | `exec-review-package` | Review diffs with commit list + stat + `-U10` diff in one file, per round |
 | `exec-fix-package` | Fix-round dispatch package: verdict findings + implementer report + brief + context verbatim, so fix agents see the contract, not a paraphrase |
 | `exec-run` | Run lifecycle in the registry: `start`/`task`/`complete`/`pause`/`blocked`/`check` |
-| `exec-step` | **The pump kernel**: folds a plan run (or an initiative's phase log, or every in-flight run) and emits exactly one typed action — `DISPATCH`/`REPORT`/`REVIVE`/`REDISPATCH`/`ADJUDICATE`/`GATE-STAGE`/`REPAIR-STATE`/`PHASE-ENTER`/`PHASE-GATE`/`ASK`/`WAIT`/`DONE`. Read-only and non-improvising: "what is legal next" is a script question, not a controller judgment. Repeated emits with no state change escalate to `ADJUDICATE` instead of looping |
-| `exec-supervise` | **Worker liveness and the revive ladder**: output presence > worker heartbeat > row age, then `REVIVE` → `REDISPATCH` → `ADJUDICATE`, counted from the dispatch log rather than a counter file a worker could delete |
-| `exec-report` | **Gate-on-commit**: the only path a worker's result takes into run state. Refuses (writing nothing) unless the task's latest-round verdict is clean; on success appends the canonical ledger line, writes the Task status row, and closes the dispatch rows in one locked act |
+| `exec-step` | **The pump kernel**: folds a plan run (or an initiative's phase log, or every in-flight run) and emits exactly one typed action — `REPAIR-STATE`/`RUN-START`/`DISPATCH`/`REVIEW`/`FIX`/`REVIVE`/`REDISPATCH`/`ADJUDICATE`/`REPORT`/`GATE-STAGE`/`PHASE-ENTER`/`PHASE-GATE`/`CRITIQUE`/`ASK`/`WAIT`/`DONE`. Read-only and non-improvising: "what is legal next" is a script question, not a controller judgment. Every emit carries a `(wake on …)` condition; repeated emits with no state change escalate to `ADJUDICATE` instead of looping |
+| `exec-supervise` | **Worker liveness and the revive ladder**: output presence > worker heartbeat > row age, then `REVIVE` → `REDISPATCH` → `ADJUDICATE`, counted from the dispatch log rather than a counter file a worker could delete. Product paths are role-aware (a review row's product is its verdict, not the implementer's report) |
+| `exec-adjudicate` | **The evidence pack**: assembles the adjudication set mechanically — report, latest verdict, diff, open rows, ledger and rulings tails — then dispatches SUPERVISOR. The adjudicated party does not choose the adjudicator's evidence |
+| `exec-present` | **The gate card**: emits a fixed-shape summary for PHASE-GATE — entered, gate state, critique clearance, artifact paths, gate-check result. Artifact bytes never enter the controller's context |
+| `exec-status` | **The resume surface**: one digest of every in-flight run and initiative with its next verb, open rows, and store drift. `--write` stamps `.executor/RESUME.md` so a cold agent reorients in one read |
+| `exec-graph` | **The graph's integrity check**: every `exec-step` verb has exactly one actuator row, every ledger file traces to a script writer, every role template resolves, every ID grammar carries placeholders, and ledger↔plan↔dispatch↔registry references resolve. A dangling reference is a FAIL, not a NOTE |
+| `exec-report` | **Gate-on-commit**: the only path a worker's result takes into run state. Refuses (writing nothing) unless the task's latest-round verdict is clean; on success appends the canonical ledger line, writes the Task status row, closes the dispatch rows, and refreshes the registry's task count — one locked act |
 | `exec-gate` | **Autonomy policy**: decides whether a phase gate may clear without a human. Fail-closed — a missing, disabled, or unlisted policy reads as `deny`. `--auto` records `**auto-passed**` in the phase log (visibly distinct from a human `passed`); a pick-class phase additionally requires a scored verdict on disk, because a script can count files but cannot choose between designs |
 | `exec-plan-regression` | **Plan-set gate**: resolves the initiative-level `plan-regression/` dir, seeds the clearance summary, and `check` refuses a run while any plan is unaudited or unrepaired |
 | `exec-critique` | **The gate every authoring phase passes through**: audits one component's document set against itself and its upstream contracts, then decides whether that phase may be marked `passed`. One script, every component — the mapping from phase to component to check catalog is a registry row, so adding a component is data, not a fork. Hardened where `plan-regression` was soft: `verdict: PASS` beside a non-zero `high`/`medium` is refused rather than believed, the three-round cap is enforced by the script, and a waiver needs both a note and an initiative ruling behind it |
@@ -447,14 +475,15 @@ main thing to get right when reading a transcript.
 **The phase axis** is the initiative's own lifecycle: intake → discovery →
 architecture → design → specification → planning → plan-regression →
 execution → review → verification → handoff. Its atomic step is
-`exec-step INIT-NNNN`, which prints `PHASE-ENTER` or `PHASE-GATE`. Between
-those two, the phase's `AUTHOR` writes the artifact and the phase's critique
-audits it.
+`exec step INIT-NNNN`, which prints `PHASE-ENTER` or `PHASE-GATE`. Between
+those two, `exec-dispatch --role author` mints and logs the phase's `AUTHOR`,
+which writes the artifact; the phase's critique audits it.
 
-**The plan axis** is what happens inside execution: `exec-step PLAN_FILE`
-prints `DISPATCH`, `REPORT`, `GATE-STAGE`, `REVIVE`, `ADJUDICATE`, `WAIT` or
-`DONE`. Workers run on their own branches; a worker's result reaches run state
-only through `exec-report`, which refuses unless the latest verdict is clean.
+**The plan axis** is what happens inside execution: `exec step PLAN_FILE`
+prints `RUN-START`, `DISPATCH`, `REVIEW`, `FIX`, `REPORT`, `GATE-STAGE`,
+`REVIVE`, `REDISPATCH`, `ADJUDICATE`, `WAIT` or `DONE`. Workers run on their
+own branches; a worker's result reaches run state only through `exec-report`,
+which refuses unless the latest verdict is clean.
 
 The canonical phase order lives in exactly one place — `exec_phases()` in
 `_exec-lib.sh` — and both the validator and the pump fold against it. Two
@@ -462,12 +491,22 @@ hand-maintained copies would let a run advance and refuse in the same turn.
 
 ### The controller carries no weight
 
-The controller runs one loop: run `exec-step`, read the single action word it
+The controller runs one loop: run `exec`, read the single action word it
 prints, do that, go back. It never authors, never judges, never passes a gate.
 The reason is not stylistic — the controller is the least reliable worker in
 the system. It dies, compacts, drifts, and is under pressure at exactly the
 moment a judgment call matters, so the design assumes it will get clever and
 takes away the opportunity.
+
+That includes the write side. Nothing the controller used to do by hand
+survives as a hand-step: `exec-dispatch` performs the whole dispatch act
+(mint the agent ID, build the role's input, mark the ledger, append the row,
+render the prompt), `exec-ladder` rewrites the revive rungs and enforces the
+bound, `exec-seen` and `exec-heartbeat` move the liveness witnesses,
+`exec-adjudicate` assembles the adjudicator's evidence set, and `exec-report`
+is the only path a result takes into run state. `exec-graph check` fails the
+build when any of that wiring drifts — a ledger file with no script writer, a
+verb with no actuator, a reference that no longer resolves.
 
 Every step is therefore one of two things, and the distinction is load-bearing:
 

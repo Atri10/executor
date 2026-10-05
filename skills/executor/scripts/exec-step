@@ -378,6 +378,7 @@ step_scan() {
   local emitted=0 p
   local docs_store
   docs_store=$(exec_docs_store 2>/dev/null || true)
+  [ -n "$docs_store" ] || { echo "DONE (no repository root — nothing to scan)"; return 0; }
   for p in "$docs_store"/*/plans/*.md "$docs_store"/plans/*.md; do
     [ -f "$p" ] || continue
     local plan_id wdir

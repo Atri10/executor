@@ -1899,6 +1899,30 @@ case "$emit" in
   *) bad "registry complete emitted '$emit' (want DONE)" ;;
 esac
 
+# Outside a repository the store helpers must FAIL, not invent a root.
+# `echo "$(exec_root)/docs/executor"` swallowed exec_root's death — the
+# substitution yielded empty and echo still succeeded — so callers got
+# `/docs/executor`, and `"$store"/*/INDEX.md` then globbed the filesystem
+# root. Found by running the README's own install-verification command in
+# a bare directory, which is exactly where a fresh install runs it.
+norepo="$WORK/norepo"; mkdir -p "$norepo"
+out=$(cd "$norepo" && bash -c '. "$1/_exec-lib.sh"; exec_docs_store' _ "$S" 2>&1) \
+  && bad "exec_docs_store succeeded outside a repo (printed '$out')" \
+  || ok "exec_docs_store fails outside a repo instead of inventing a root"
+case "$out" in
+  *docs/executor*) bad "exec_docs_store printed a path outside a repo: $out" ;;
+esac
+if (cd "$norepo" && bash "$S/exec-status" >/dev/null 2>&1); then
+  bad "exec-status reported a resume digest outside a repo"
+else
+  ok "exec-status refuses outside a repo instead of printing a bogus digest"
+fi
+emit=$(cd "$norepo" && bash "$S/exec-step" 2>/dev/null)
+case "$emit" in
+  *"no repository root"*|"DONE (no .executor store — nothing in flight)") ok "bare exec-step outside a repo reports cleanly" ;;
+  *) bad "bare exec-step outside a repo emitted '$emit'" ;;
+esac
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

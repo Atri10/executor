@@ -33,12 +33,27 @@ exec_main_root() {
 
 # Tracked thinking store: worktree root, so specs and plans commit on the
 # branch that produced them.
-exec_docs_store() { echo "$(exec_root)/docs/executor"; }
+#
+# The `local root` + `|| return` shape is load-bearing: written as
+# `echo "$(exec_root)/docs/executor"` the failure of exec_root is swallowed
+# by the substitution — the subshell exits, `$( )` yields empty, and `echo`
+# still succeeds, so callers got a plausible-looking absolute path built on
+# nothing (`/docs/executor`) instead of a failure. Outside a repository that
+# is worse than wrong: `"$store"/*/INDEX.md` then globs the filesystem root.
+exec_docs_store() {
+  local root
+  root=$(exec_root) || return 2
+  echo "$root/docs/executor"
+}
 
 # Untracked execution store: main root, so it survives worktree teardown and
 # every worktree of the same repository shares one execution record. Plan IDs
 # are unique repo-wide, so sharing cannot collide.
-exec_run_store()  { echo "$(exec_main_root)/.executor"; }
+exec_run_store() {
+  local root
+  root=$(exec_main_root) || return 2
+  echo "$root/.executor"
+}
 
 # Read one frontmatter scalar from a markdown file. Frontmatter is the block
 # between the first '---' line and the next '---' line. Prints nothing when

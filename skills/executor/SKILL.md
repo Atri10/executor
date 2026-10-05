@@ -94,8 +94,7 @@ see The Pump Contract below.
 
 Execution has one loop, and it is mechanical:
 
-1. Run `exec-step PLAN_FILE` (or bare `exec-step` to scan every in-flight
-   run).
+1. Run `exec` (bare — the resume digest) or `exec step PLAN_FILE`.
 2. Read the single action word it prints.
 3. Do exactly that thing.
 4. Go back to 1.
@@ -107,13 +106,15 @@ assumes it will try to be clever and takes away the opportunity.
 
 The same loop runs on the phase axis, and it is the same shape:
 
-1. `exec-step INIT-NNNN` emits `PHASE-ENTER <phase>`.
-2. You write the Entered cell, then **dispatch that phase's `AUTHOR`**.
+1. `exec` emits `PHASE-ENTER <phase>`.
+2. `exec dispatch --role author` mints the AUTHOR, renders its prompt, and
+   logs the dispatch — then spawn it. You do not write the artifact.
 3. The author writes the artifact and returns. You do not.
 4. The phase's own critique stage runs (`AUDIT` → `REPAIR` → `AUDIT`).
-5. `exec-step` emits `PHASE-GATE`. The human gates it, or `exec-gate --auto`
-   does, and `exec-initiative` refuses unless both the artifact gate and
-   the critique are clear.
+5. `exec` emits `PHASE-GATE`. Present it with `exec present INIT PHASE`
+   (the gate card — paths and states, never artifact bytes); the human
+   gates it, or `exec-gate --auto` does, and `exec-initiative` refuses
+   unless both the artifact gate and the critique are clear.
 
 Every arrow in that list is a dispatch or a script. There is no step where
 you do the work, and that is the property the whole design is buying.
@@ -122,7 +123,7 @@ you do the work, and that is the property the whole design is buying.
 
 > Generated from `skills/executor/scripts/_exec-lib.sh` `exec_verbs` —
 > the machine-readable table the scripts and `exec-graph check` both
-> consume. Regenerate with `exec verbs`; do not hand-edit this table —
+> consume. Print it with `exec verbs`; do not hand-edit this table —
 > a table and a script that disagree is how stale rows get followed.
 
 | `exec-step` emits | You do |

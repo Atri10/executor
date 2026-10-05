@@ -7,6 +7,32 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`exec_docs_store`/`exec_run_store` invented a filesystem root outside a
+  repository.** `echo "$(exec_root)/docs/executor"` swallowed `exec_root`'s
+  death — the substitution yielded empty and `echo` still succeeded — so the
+  helpers printed `/docs/executor` and `/.executor`, and
+  `"$store"/*/INDEX.md` then globbed the filesystem root. They now propagate
+  the failure; `exec-status` refuses with "not inside a git repository"
+  instead of printing a digest that reads like an empty project; `exec-step`
+  and `exec-graph` guard their store globs. Found by running the README's
+  own install-verification command in a bare directory — where a fresh
+  install actually runs it.
+- **`exec-graph` did not parse under bash 3.2.** A `case` statement directly
+  inside `$( … )` is a syntax error on the stock macOS shell; the case is
+  hoisted into a function, and the suite now runs `/bin/bash -n` over every
+  shipped script as a separate parse gate.
+
+### Changed
+
+- README and the execution skill document the scripted write path: the
+  `exec` front door, `exec-dispatch`/`exec-ladder`/`exec-seen`/
+  `exec-heartbeat`/`exec-adjudicate`/`exec-present`/`exec-graph` in the
+  script table, the current nine-column dispatch row, and the mechanical
+  report-status routing (only `BLOCKED` reaches a judgment, and it reaches
+  the SUPERVISOR, not the controller).
+
 ## [0.7.0] — 2026-10-05
 
 The write side is scripted. Every state mutation the pump used to perform

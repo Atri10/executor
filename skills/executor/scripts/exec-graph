@@ -126,6 +126,7 @@ ok "every ID grammar carries placeholders"
 # -- refs: ledger ↔ plan ↔ dispatch ↔ INDEX ---------------------------
 docs_store=$(exec_docs_store 2>/dev/null || true)
 checked=0
+if [ -n "$docs_store" ]; then
 for p in "$docs_store"/*/plans/*.md "$docs_store"/plans/*.md; do
   [ -f "$p" ] || continue
   plan_id=$(exec_frontmatter "$p" id 2>/dev/null || true)
@@ -148,6 +149,7 @@ for p in "$docs_store"/*/plans/*.md "$docs_store"/plans/*.md; do
 
   # (Open-row liveness policy is exec-supervise's; nothing to check here.)
 done
+fi
 [ "$checked" -eq 0 ] && note "no in-flight plan workspaces — ref checks skipped"
 
 # INDEX.md rows resolve to plan folders and back

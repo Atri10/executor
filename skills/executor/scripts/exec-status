@@ -17,6 +17,14 @@ SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 write=0; [ "${1:-}" = "--write" ] && write=1
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+# Resolve the stores before emitting anything: outside a repository the
+# digest would otherwise print a header and a bogus "none under /docs/…",
+# which reads like an empty project rather than a wrong invocation.
+docs_store=$(exec_docs_store 2>/dev/null || true)
+store=$(exec_run_store 2>/dev/null || true)
+[ -n "$docs_store" ] && [ -n "$store" ] \
+  || exec_die "not inside a git repository — the Executor stores resolve from the repo root"
+
 {
   echo "# Executor resume — $now"
   echo
@@ -24,19 +32,18 @@ now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "verb the fold emits; run the actuator it names, then re-fold."
   echo
 
-  docs_store=$(exec_docs_store 2>/dev/null || true)
-  store=$(exec_run_store 2>/dev/null || true)
-
   echo "## Initiatives"
   echo
   found=0
-  for idx in "$docs_store"/*/INDEX.md; do
-    [ -f "$idx" ] || continue
-    init=$(exec_frontmatter "$idx" id 2>/dev/null || basename "$(dirname "$idx")")
-    step=$("$SCRIPTS_DIR/exec-step" "$init" 2>/dev/null || echo "?")
-    echo "- \`$init\` → \`$step\`"
-    found=1
-  done
+  if [ -d "$docs_store" ]; then
+    for idx in "$docs_store"/*/INDEX.md; do
+      [ -f "$idx" ] || continue
+      init=$(exec_frontmatter "$idx" id 2>/dev/null || basename "$(dirname "$idx")")
+      step=$("$SCRIPTS_DIR/exec-step" "$init" 2>/dev/null || echo "?")
+      echo "- \`$init\` → \`$step\`"
+      found=1
+    done
+  fi
   [ "$found" -eq 0 ] && echo "- none under $docs_store"
   echo
 
