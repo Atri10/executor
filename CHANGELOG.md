@@ -7,10 +7,14 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-05
+
 The write side is scripted. Every state mutation the pump used to perform
 by hand — dispatch rows, `revived-rvN` cells, `Last-Seen`, evidence
 selection, prompt bracket-filling — is now a single script call behind
-one `exec` front door.
+one `exec` front door. The engine's claim ("the controller holds no state
+and makes no judgment") now holds on the write path, not just the read
+path, and `exec-graph check` proves what is mechanically provable.
 
 ### Added
 
@@ -49,9 +53,6 @@ one `exec` front door.
 - Report `result:` frontmatter is routed: `blocked` → ADJUDICATE,
   `needs-context`/`needs_context` → ASK — a finished worker can no longer
   silently burn revive rungs.
-- `exec-graph check` — 50 integrity checks over verbs, writers, roles,
-  IDs, and cross-store references (session-local hardening plan and gap
-  ledger kept out of the tree; `docs/` is gitignored).
 
 ### Fixed
 
