@@ -120,20 +120,29 @@ you do the work, and that is the property the whole design is buying.
 
 ### The decision table
 
+> Generated from `skills/executor/scripts/_exec-lib.sh` `exec_verbs` —
+> the machine-readable table the scripts and `exec-graph check` both
+> consume. Regenerate with `exec verbs`; do not hand-edit this table —
+> a table and a script that disagree is how stale rows get followed.
+
 | `exec-step` emits | You do |
 |---|---|
-| `DISPATCH <task-id> <n>` | `exec-brief` + `exec-context` for the task, then spawn the role's subagent from its registry prompt |
-| `REPORT <report-file>` | Run `exec-report PLAN_FILE <report-file>` — it gates, and either commits or refuses. Never write the ledger line yourself |
-| `REVIVE <task-id>` | Re-dispatch the same agent with `executor/revive-preamble.md` prepended; rewrite the row's Outcome to `revived-rv1` |
-| `REDISPATCH <task-id>` | Fresh agent, full brief, `revive-preamble.md` prepended; Outcome becomes `revived-rv2` |
-| `ADJUDICATE <task-id>` | Spawn a `SUPERVISOR` with the evidence. Do not rule yourself |
-| `GATE-STAGE <plan-id>` | `exec-run PLAN_FILE complete` — it runs the full audit and refuses on failure |
-| `REPAIR-STATE <what>` | Run the named repair (almost always `exec-workspace`) |
+| `REPAIR-STATE <run-dir>` | Run the named repair (usually `exec-workspace PLAN`) |
+| `RUN-START <plan-id>` | `exec-run PLAN start` — the plan-regression gate rides it |
+| `DISPATCH <task-id> <n>` | `exec-dispatch PLAN --task N --role impl`; spawn AGENT on PROMPT |
+| `REVIEW <task-id> R<nn>` | `exec-dispatch PLAN --role review --task Tnn`; spawn the reviewer on PROMPT |
+| `FIX <task-id> R<nn>` | `exec-dispatch PLAN --role fix --task Tnn`; spawn the fix implementer |
+| `REVIVE <task-id>` | `exec-ladder PLAN TID revive`; spawn AGENT on PROMPT |
+| `REDISPATCH <task-id>` | `exec-ladder PLAN TID redispatch`; spawn AGENT on PROMPT |
+| `ADJUDICATE <task-id>` | `exec-adjudicate PLAN TID`; spawn SUPERVISOR on PROMPT |
+| `REPORT <report-file>` | `exec-report PLAN REPORT_FILE` — it gates, and either commits or refuses. Never write the ledger line yourself |
+| `GATE-STAGE <plan-id>` | `exec-run PLAN complete` — it runs the full audit and refuses on failure |
+| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered`, then **dispatch the phase's `AUTHOR` subagent** — authoring the artifact yourself is the one thing this table exists to stop |
+| `PHASE-GATE <init> <phase>` | `exec-present <init> <phase>` to the human; or `exec-gate <init> <phase> --auto` where autonomous mode is declared — a refusal is the answer, not an obstacle |
+| `CRITIQUE <init> <component>` | `exec-critique <init> <component> init`, then dispatch AUDIT per the phase skill |
 | `ASK <topic>` | Relay to the human, or spawn a `DECIDE`/`SUPERVISOR` for a `decision`-class question |
-| `WAIT` | Stop and let the workers run. Say what you are waiting on |
+| `WAIT` | Idle one turn — the emit carries the wake condition |
 | `DONE` | The run is finished. Report and stop |
-| `PHASE-ENTER <init> <phase>` | `exec-initiative phase <init> <phase> entered`, then **dispatch the phase's `AUTHOR` subagent** with `executor/author-prompt.md` and the phase skill's `SKILL.md` as its specification. Authoring the artifact yourself is the one thing this table exists to stop |
-| `PHASE-GATE <init> <phase>` | Ask the human to gate the phase. If autonomous mode is declared for it, `exec-gate <init> <phase> --auto`; if that refuses, present the artifact — a refusal is the answer, not an obstacle to work around |
 
 
 **What "subagent-driven" means here, precisely.** Every step is either a
