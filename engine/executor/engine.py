@@ -1,44 +1,72 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Atri10
-"""The kernel: fold events into state, emit the next action, ingest payloads.
+"""The kernel: fold the journal, decide the next action, ingest payloads.
 
-No other module decides state. `fold` is a pure function over the journal;
-`emit_next` reads that state and produces exactly one typed action plus a
-minted payload slot; `ingest` validates a payload and appends its event.
+fold       pure: journal -> state. The only interpretation of events.
+emit_next  decides exactly one action and writes only when the run moves: a
+           phase is entered, a gate opens, a worker is dispatched, a dispatch
+           is abandoned, a preflight verdict is recorded, or the run escalates.
+           A repeated poll returns the same instruction and writes nothing.
+ingest     validates one payload against the schema, the state, the open
+           dispatch it answers and git, then commits exactly one event. A
+           rejection writes nothing.
+check      read-only audit of the chain, edges, liveness, dispatches and layout.
+
+Every write holds the store lock from the first read of the journal to the
+last write, so the state a payload is validated against is the state it is
+committed against.
 """
 from __future__ import annotations
 
-import json
+import calendar
+import contextlib
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 
-from . import __version__
-from .paths import is_dispatch_id
+from .paths import (artifact_file, audit_file, classify, dispatch_id,
+                    dispatches_dir, docs_artifact_file, docs_artifact_md,
+                    docs_init_dir, docs_plan_file, docs_plan_md, docs_root,
+                    fix_package_file, fix_report_file, is_dispatch_id,
+                    payload_file, plan_audit_file, plan_file, plan_repair_file,
+                    preflight_file, prompt_file, repair_file,
+                    review_package_file, run_root, state_file,
+                    task_impl_report, verdict_file)
 from .schemas import ARTIFACT_KINDS, schema_for, validate
-from .store import (ExecError, Initiative, Rejection, StoreLock,
-                    append_event, docs_artifact_file, docs_artifact_md,
-                    docs_plan_file, docs_plan_md, docs_root, make_event,
-                    mint_slot, now_iso, open_slots, prompt_file, read_json,
-                    save_slot, sha256, state_file, verify_chain, write_json)
+from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
+                    append_event, atomic_write, init_store, make_event,
+                    next_seq, read_json, scan_journal, sha256, verify_chain,
+                    write_json)
+from .views import render_all
 
-INGEST_RETRY_CAP = 2
-MAX_FIX_ROUNDS = 5
-NO_PROGRESS_LIMIT = 3      # same action over unchanged state → livelock
-SUSPECT_S = 1800          # no heartbeat this long → suspect warning
-DEADLINE_S = 3600        # dispatch lease before _dead() sweeps
+MAX_FIX_ROUNDS = 5        # fix dispatches per task before the run escalates
+MAX_AUDIT_ROUNDS = 5      # audit rounds per artifact or plan before escalation
+MAX_EVIDENCE_TRIES = 5    # evidence attempts per criterion before escalation
+SPAWN_RETRY_CAP = 2       # lost dispatches per entity and schema (spawn error or abandon)
+SUSPECT_S = 1800          # silence before check warns about a dispatch
+DEADLINE_S = 3600         # silence after which the next poll abandons a dispatch
 
-# in-process serialization for the dedup+mint+commit critical section.
-# Cross-process pump runs are one-pump-per-initiative by contract.
-_DISPATCH_LOCK = __import__("threading").Lock()
+# A human sends these: a worker cannot approve its own gate or rule on its own concern.
+HUMAN_KINDS = frozenset({"gate_decision", "ruling", "resume"})
+# While the run is halted only these may land: a human ending the halt, or the
+# ruling the halt may be waiting on.
+HALT_OPEN_KINDS = frozenset({"ruling", "resume"})
+# Kinds that answer no dispatch: human decisions, halts and the merge record.
+SLOT_FREE_KINDS = HUMAN_KINDS | {"halt", "merge"}
+# Kinds the engine writes itself; a worker can never produce these.
+ENGINE_KINDS = frozenset({"created", "phase_entered", "gate_opened",
+                          "task_dispatched", "abandon", "preflight"})
+WORKER_KINDS = (frozenset({"report", "heartbeat", "verdict", "spawn_error",
+                           "needs_context", "evidence", "audit", "repair"})
+                | frozenset(ARTIFACT_KINDS))
+KNOWN_KINDS = ENGINE_KINDS | SLOT_FREE_KINDS | WORKER_KINDS
+# Events that carry a dispatch id but do not close that dispatch.
+NON_ANSWERING = frozenset({"heartbeat", "task_dispatched"})
+# Schemas whose payload must echo the engine-minted round.
+ROUND_SCHEMAS = frozenset({"verdict", "audit", "repair"})
 
-# Actions the pump can see, and the payload kind each expects.
-ROLE_SCHEMA = {"impl": "report", "fix": "report", "audit": "audit",
-               "reaudit": "audit", "repair": "repair", "author": "artifact",
-               "review": "verdict", "evidence": "evidence",
-               "supervisor": "ruling"}
-
-# Which artifact kinds each authoring phase produces.
 PHASE_ARTIFACTS = {
     "intake": ["charter"], "discovery": ["options", "brainstorm"],
     "architecture": ["arch", "adr", "ifce"],
@@ -46,61 +74,87 @@ PHASE_ARTIFACTS = {
     "planning": ["plan"], "execution": [], "review": [],
     "plan_regression": [], "verification": [], "handoff": []}
 
+_AKIND = {"charter": "CHTR-01", "options": "OPTS-01", "brainstorm": "BRN-01",
+          "arch": "ARCH-01", "adr": "ADR-01", "ifce": "IFCE-01",
+          "design": "DSGN-01", "spec": "SPEC-01", "risk": "RISK-01",
+          "vrfy": "VRFY-01"}
+_CLEAN_QUALITY = ("APPROVED", "APPROVED_WITH_ROUTED_RESIDUALS")
 
-# ------------------------------------------------------------ git helpers
+_held = threading.local()
 
-def git(root: Path, *args: str) -> str:
-    r = subprocess.run(["git", "-C", str(root), *args],
-                       capture_output=True, text=True)
+
+# ------------------------------------------------------------ locking
+
+@contextlib.contextmanager
+def _exclusive(idir: Path):
+    """The store lock, re-entrant within a thread so helpers that write may run
+    inside an outer locked section. Other threads and processes wait for the
+    whole outer section."""
+    key = str(idir)
+    if getattr(_held, "key", None) == key:
+        yield
+        return
+    with StoreLock(idir):
+        _held.key = key
+        try:
+            yield
+        finally:
+            _held.key = None
+
+
+# ------------------------------------------------------------ git
+
+def _git(root: Path, *args: str) -> str:
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
-        raise ExecError(f"git {' '.join(args)}: {r.stderr.strip()}",
+        raise ExecError(f"git {' '.join(args)} failed: {r.stderr.strip()}",
                         "git_error")
-    return r.stdout.strip()
+    return r.stdout
+
+
+def _safe_rev(rev) -> bool:
+    """Agent-supplied revisions reach git as arguments: a leading '-' would be
+    read as an option, and anything outside a plain rev charset is refused."""
+    return (isinstance(rev, str) and not rev.startswith("-")
+            and re.fullmatch(r"[A-Za-z0-9._/~^@{}-]+", rev) is not None)
 
 
 def rev_exists(root: Path, rev: str) -> bool:
-    return subprocess.run(
-        ["git", "-C", str(root), "cat-file", "-e", rev],
+    return _safe_rev(rev) and subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{rev}^{{commit}}"],
         capture_output=True).returncode == 0
 
 
 def path_at_rev(root: Path, rev: str, path: str) -> bool:
-    return subprocess.run(
-        ["git", "-C", str(root), "cat-file", "-e", f"{rev}:{path}"],
-        capture_output=True).returncode == 0
+    return (_safe_rev(rev) and not path.startswith("-")
+            and subprocess.run(["git", "-C", str(root), "cat-file", "-e",
+                                f"{rev}:{path}"],
+                               capture_output=True).returncode == 0)
 
 
-def changed_files(root: Path, base: str, head: str) -> list[str]:
-    return git(root, "diff", "--name-only", base, head).splitlines()
-
-
-def branch_head(root: Path, branch: str) -> str:
-    return git(root, "rev-parse", "--short", branch)
+def _head(root: Path) -> str:
+    return _git(root, "rev-parse", "HEAD").strip()
 
 
 # ------------------------------------------------------------ fold
 
-# A heartbeat only proves liveness and a dispatch event is the question, not
-# the answer: neither closes the dispatch it carries.
-NON_ANSWERING = frozenset({"heartbeat", "task_dispatched"})
-CLEAN_QUALITY = ("APPROVED", "APPROVED_WITH_ROUTED_RESIDUALS")
-
-
 def fold(events: list[dict]) -> dict:
-    """Pure: journal → folded state. The single source of truth.
+    """Pure: journal -> folded state. The single source of truth.
 
-    `answered` maps each dispatch id to the digest of the payload that
-    answered it, so whether a dispatch is still open is a fact of the journal,
-    not of a mutable file that a crash can leave behind."""
+    `answered` maps each dispatch id to the digest of the payload that closed
+    it (None when the engine closed it without an answer). Openness, base and
+    context of a dispatch live in the journal too, so a lost file costs nothing."""
     s: dict = {
         "phase": "intake", "phase_state": {},
         "artifacts": {}, "critiques": {},
         "plans": {}, "plan_order": [],
         "tasks": {}, "verdicts": {}, "reports": {},
-        "rulings": [], "evidence": {}, "dispatches": {}, "answered": {},
-        "needs_ruling": [], "questions": [], "model_deviations": [],
+        "rulings": [], "evidence": {},
+        "dispatches": {}, "answered": {}, "lost": {},
+        "needs_ruling": [], "questions": [],
         "halt": None, "done": False, "entities": {}, "edges": [],
-        "seq": len(events), "last_emit": None, "emit_streak": 0,
+        "seq": len(events),
     }
     for ev in events:
         _apply(s, ev)
@@ -108,8 +162,8 @@ def fold(events: list[dict]) -> dict:
 
 
 def _crit_key(s: dict, target: str) -> str:
-    """Critiques are per phase: plan_regression re-audits what planning
-    already cleared, and must not find that old verdict standing in its way."""
+    """Critiques belong to the phase they happened in: plan_regression re-audits
+    what planning already cleared, and must not inherit that verdict."""
     return f"{s['phase']}:{target}"
 
 
@@ -127,10 +181,6 @@ def _apply(s: dict, ev: dict) -> None:
         s["phase_state"][d["phase"]] = "gate_pending"
     elif k == "gate_decision":
         _apply_gate(s, d)
-    elif k == "phase_passed":
-        s["phase_state"][d["phase"]] = "passed"
-    elif k == "phase_skipped":
-        s["phase_state"][d["phase"]] = "skipped"
     elif k == "halt":
         s["halt"] = d.get("reason", "halted")
     elif k == "resume":
@@ -141,20 +191,21 @@ def _apply(s: dict, ev: dict) -> None:
         _apply_audit(s, d)
     elif k == "repair":
         c = s["critiques"].get(_crit_key(s, d["target"]))
-        if c is not None:
+        if c is not None and c["status"] == "fail":
             c["status"] = "repaired"
     elif k == "task_dispatched":
         _apply_dispatch(s, ev, d)
+    elif k == "abandon":
+        _apply_lost(s, did, "abandoned", d.get("reason", "abandoned"))
+    elif k == "spawn_error":
+        _apply_lost(s, did, "spawn_error", d["error_class"])
     elif k == "report":
         _apply_report(s, e, d)
     elif k == "heartbeat":
-        t = s["tasks"].get(e)
-        if t is not None:
-            t["last_beat"] = ev["ts"]
+        if did in s["dispatches"]:
+            s["dispatches"][did]["last_beat"] = ev["ts"]
     elif k == "verdict":
         _apply_verdict(s, e, d)
-    elif k == "spawn_error":
-        _apply_spawn_error(s, did, d)
     elif k == "needs_context":
         t = s["tasks"].get(e)
         if t is not None:
@@ -163,21 +214,13 @@ def _apply(s: dict, ev: dict) -> None:
                                "ruled": False})
     elif k == "ruling":
         _apply_ruling(s, d)
+    elif k == "preflight":
+        _apply_preflight(s, d)
     elif k == "evidence":
         s["evidence"].setdefault(d["criterion"], []).append(d)
-    elif k == "plan_started":
-        s["plans"].setdefault(d["plan"], {"status": "running"})\
-            .update(status="running")
-    elif k in ("plan_merged", "merge"):
-        p = s["plans"].setdefault(d["plan"], {"status": "draft", "round": 0})
-        p.update(status="merged", merge=d.get("merge_sha") or d.get("merge"))
-    elif k == "emit":
-        # streak on identical action over unchanged state (v1 exec-step)
-        key = f"{d.get('action')}:{d.get('key', '')}"
-        if key == s.get("last_emit"):
-            s["emit_streak"] = s.get("emit_streak", 0) + 1
-        else:
-            s["last_emit"], s["emit_streak"] = key, 0
+    elif k == "merge":
+        s["plans"].setdefault(d["plan"], {"status": "draft"}).update(
+            status="merged", merge_sha=d["merge_sha"])
 
 
 def _apply_gate(s: dict, d: dict) -> None:
@@ -197,8 +240,11 @@ def _apply_artifact(s: dict, kind: str, aid: str, d: dict) -> None:
     _node(s, aid, "artifact")
     for c in d.get("cites", []):
         _edge(s, aid, c, "cites")
+    crit = s["critiques"].get(_crit_key(s, aid))
+    if crit is not None and crit["status"] == "fail":
+        crit["status"] = "repaired"          # a re-drafted artifact is a repair
     if kind == "plan":
-        s["plans"].setdefault(aid, {"status": "draft", "round": 0})
+        s["plans"].setdefault(aid, {"status": "draft"})
         if aid not in s["plan_order"]:
             s["plan_order"].append(aid)
         _apply_plan_tasks(s, aid, d.get("tasks", []))
@@ -206,8 +252,7 @@ def _apply_artifact(s: dict, kind: str, aid: str, d: dict) -> None:
 
 def _apply_plan_tasks(s: dict, pid: str, rows: list[dict]) -> None:
     """A redrafted plan updates the tasks that have not started and drops the
-    ones it no longer lists; a task already under way keeps its contract and
-    its state."""
+    ones it no longer lists. A task already under way keeps its contract."""
     wanted = {f"{pid}-{t['id']}": t for t in rows}
     for tid, t in list(s["tasks"].items()):
         if t["plan"] == pid and tid not in wanted and t["state"] == "pending":
@@ -218,8 +263,8 @@ def _apply_plan_tasks(s: dict, pid: str, rows: list[dict]) -> None:
                   "depends_on": row.get("depends_on", [])}
         cur = s["tasks"].get(tid)
         if cur is None:
-            s["tasks"][tid] = {"state": "pending", "round": 0,
-                               "fix_rounds": 0, "plan": pid, **fields}
+            s["tasks"][tid] = {"state": "pending", "round": 0, "fix_rounds": 0,
+                               "plan": pid, "base": None, **fields}
             _node(s, tid, "task")
             _edge(s, pid, tid, "contains")
         elif cur["state"] == "pending":
@@ -247,16 +292,32 @@ def _apply_audit(s: dict, d: dict) -> None:
 def _apply_dispatch(s: dict, ev: dict, d: dict) -> None:
     did, e = ev["dispatch_id"], ev["entity"]
     s["dispatches"][did] = {"entity": e, "role": d["role"],
-                            "schema": d["schema"], "at": ev["ts"],
-                            "respond_to": d["respond_to"]}
+                            "schema": d["schema"],
+                            "respond_to": d["respond_to"],
+                            "base": d.get("base"),
+                            "context": d.get("context") or {}, "at": ev["ts"]}
     if d["schema"] in ARTIFACT_KINDS:
-        _node(s, e, "artifact")         # the artifact this dispatch will author
+        _node(s, e, "artifact")          # the artifact this dispatch authors
     t = s["tasks"].get(e)
     if t is not None:
-        t.update(state="dispatched", role=d["role"], dispatch_id=did,
-                 model=d.get("model"), dispatched_at=ev["ts"],
-                 last_beat=ev["ts"], base=d.get("base"))
+        t.update(prior_state=t["state"], state="dispatched", role=d["role"],
+                 schema=d["schema"], dispatch_id=did, base=d.get("base"))
     _edge(s, did, e, "dispatched")
+
+
+def _apply_lost(s: dict, did: str | None, key: str, value: str) -> None:
+    """A dispatch closed without an answer: the worker never started (spawn
+    error) or went silent past its deadline (abandon). The task returns to the
+    state it was dispatched from, and the loss counts against the retry cap."""
+    dsp = s["dispatches"].get(did)
+    if dsp is None:
+        return
+    dsp[key] = value
+    lk = f"{dsp['entity']}:{dsp['schema']}"
+    s["lost"][lk] = s["lost"].get(lk, 0) + 1
+    t = s["tasks"].get(dsp["entity"])
+    if t is not None:
+        t["state"] = t.get("prior_state", "pending")
 
 
 def _apply_report(s: dict, tid: str, d: dict) -> None:
@@ -264,16 +325,14 @@ def _apply_report(s: dict, tid: str, d: dict) -> None:
     s["reports"][tid] = d
     if t is not None:
         t["state"] = "blocked" if d["result"] == "BLOCKED" else "reported"
+        if d["result"] == "BLOCKED":
+            t["question"] = f"BLOCKED: {d['summary']}"
     for concern in d.get("concerns", []):
         s["needs_ruling"].append({"task": tid, "concern": concern,
                                   "ruled": False})
     if d["result"] == "BLOCKED":
         s["needs_ruling"].append({"task": tid, "ruled": False,
                                   "concern": f"BLOCKED: {d['summary']}"})
-    if d.get("model_actual") and t and t.get("model") \
-            and d["model_actual"] != t["model"]:
-        s["model_deviations"].append({"task": tid, "expected": t["model"],
-                                      "got": d["model_actual"]})
 
 
 def _apply_verdict(s: dict, tid: str, d: dict) -> None:
@@ -283,23 +342,16 @@ def _apply_verdict(s: dict, tid: str, d: dict) -> None:
         return
     t["round"] = d["round"]
     clean = (d["spec_verdict"] == "PASS"
-             and d["quality_verdict"] in CLEAN_QUALITY)
+             and d["quality_verdict"] in _CLEAN_QUALITY)
     t["state"] = "complete" if clean else "fix_needed"
     if not clean:
         t["fix_rounds"] += 1
 
 
-def _apply_spawn_error(s: dict, did: str | None, d: dict) -> None:
-    dsp = s["dispatches"].get(did)
-    if dsp is None:
-        return
-    dsp["spawn_error"] = d["error_class"]
-    t = s["tasks"].get(dsp["entity"])
-    if t is not None:
-        t["state"] = "spawn_error"
-
-
 def _apply_ruling(s: dict, d: dict) -> None:
+    """A ruling clears the concerns it names and frees the task it is about.
+    A freed task resumes the state it was in before the question, so a question
+    raised during review resumes review, not implementation."""
     s["rulings"].append(d)
     if d.get("stop"):
         s["halt"] = d["decision"]
@@ -315,7 +367,16 @@ def _apply_ruling(s: dict, d: dict) -> None:
     for tid in freed:
         t = s["tasks"].get(tid)
         if t is not None and t["state"] in ("blocked", "needs_context"):
-            t["state"] = "pending"
+            t["state"] = t.get("prior_state", "pending")
+
+
+def _apply_preflight(s: dict, d: dict) -> None:
+    pid = d["plan"]
+    s["plans"].setdefault(pid, {"status": "draft"})["preflight"] = d["verdict"]
+    for c in d.get("conflicts", []):
+        s["needs_ruling"].append({"task": pid, "ruled": False,
+                                  "concern": f"file overlap: {c['tasks']} "
+                                             f"share {c['files']}"})
 
 
 def _node(s: dict, nid: str, ntype: str) -> None:
@@ -328,432 +389,542 @@ def _edge(s: dict, a: str, b: str, kind: str) -> None:
         s["edges"].append(edge)
 
 
-# ------------------------------------------------------------ emit next
+# ------------------------------------------------------------ small helpers
 
-def emit_next(init: Initiative) -> dict:
-    """Read folded state, emit exactly one action plus a resume manifest.
-
-    The manifest is the anti-context-loss contract: a cold pump can read it
-    and resume without carrying any history — it names the phase, the last
-    event, the action to take, and the exact input the action expects.
-    """
-    s = fold(init.events)
-    act = _compute(init, s)
-    act["resume"] = {
-        "initiative": init.id,
-        "phase": s["phase"],
-        "phase_state": s["phase_state"].get(s["phase"], "—"),
-        "last_event": init.events[-1]["kind"] if init.events else None,
-        "last_seq": len(init.events),
-        "open_concerns": sum(1 for n in s.get("needs_ruling", [])
-                             if not n.get("ruled")),
-        "tasks_done": sum(1 for t in s["tasks"].values()
-                          if t["state"] == "complete"),
-        "tasks_total": len(s["tasks"]),
-    }
-    _record_emit(init, s, act)
-    return act
-
-
-def _record_emit(init: Initiative, s: dict, act: dict) -> None:
-    """Record this emit with a state digest. The no-progress detector
-    streaks only when the same action fires over an unchanged state —
-    actual progress mutates the digest and resets the streak."""
-    if act["action"] in ("WAIT", "HALT", "DONE"):
-        return
-    digest = sha256({
-        "a": act["action"],
-        "k": act.get("entity") or act.get("phase") or "",
-        "ts": sorted((t, s["tasks"][t]["state"]) for t in s["tasks"]),
-        "cs": sorted((c, s["critiques"][c].get("status", ""))
-                     for c in s["critiques"]),
-        "ph": s["phase"], "ps": s["phase_state"].get(s["phase"]),
-    })
-    _commit(init, "engine", "emit", init.id,
-            {"action": act["action"], "key": digest})
-
-
-def _compute(init: Initiative, s: dict) -> dict:
-    if s["halt"]:
-        return _action("HALT", init.id, reason=s["halt"])
-    if s["done"]:
-        return _action("DONE", init.id)
-    if s["emit_streak"] and s["emit_streak"] >= NO_PROGRESS_LIMIT:
-        return _action("ESCALATE", init.id,
-                       reason=f"no progress after {s['emit_streak']} emits")
-    ph = s["phase"]
-    pstate = s["phase_state"].get(ph)
-
-    # halt-style pending questions/rulings that block everything
-    if s.get("needs_ruling") and any(not n.get("ruled")
-                                     for n in s["needs_ruling"]):
-        return _action("ASK", init.id,
-                       topic="open concerns need rulings")
-
-    if pstate == "passed":
-        nxt = _advance(s)
-        if nxt is None:
-            return _action("DONE", init.id)
-        return _phase_enter(init, nxt)
-
-    if pstate is None:
-        return _phase_enter(init, ph)
-
-    # ----- authoring phases: artifact → critique → gate
-    if ph in PHASE_ARTIFACTS and PHASE_ARTIFACTS[ph]:
-        for kind in PHASE_ARTIFACTS[ph]:
-            if not _artifacts_present(s, ph, kind):
-                eid = (f"{init.id}-P{len(s['plan_order']) + 1:02d}"
-                       if kind == "plan" else f"{init.id}-{_akind(kind)}")
-                return _dispatch(init, s, "author", eid,
-                                 schema=kind, role_detail=kind)
-        # critique stage — audit each drafted artifact until it clears
-        for aid in _phase_artifacts(s, ph):
-            c = s["critiques"].get(_crit_key(s, aid), {})
-            if c.get("status") in (None, "repaired"):
-                rnd = c.get("round", 0) + 1
-                return _dispatch(init, s, "audit", aid,
-                                 schema="audit", role_detail=str(rnd))
-            if c.get("status") == "fail":
-                return _dispatch(init, s, "repair", aid,
-                                 schema="repair", role_detail=str(c["round"]))
-        # all artifacts cleared → gate
-        return _action("GATE", init.id, phase=ph)
-
-    # ----- plan_regression: audit every plan, loop
-    if ph == "plan_regression":
-        for pid in s["plan_order"]:
-            c = s["critiques"].get(_crit_key(s, pid), {})
-            if c.get("status") in (None, "repaired"):
-                return _dispatch(init, s, "audit", pid, schema="audit",
-                                 role_detail=str(c.get("round", 0) + 1))
-            if c.get("status") == "fail":
-                return _dispatch(init, s, "repair", pid, schema="repair",
-                                 role_detail=str(c["round"]))
-        return _action("GATE", init.id, phase=ph)
-
-    # ----- execution: task machine per plan
-    if ph == "execution":
-        for pid in s["plan_order"]:
-            act = _plan_step(init, s, pid)
-            if act:
-                return act
-        # all plans merged
-        return _action("GATE", init.id, phase=ph)
-
-    # ----- verification: evidence per criterion
-    if ph == "verification":
-        pending = [c for c in _criteria(s)
-                   if c not in s["evidence"]]
-        if pending:
-            return _dispatch(init, s, "evidence", pending[0],
-                             schema="evidence")
-        return _action("GATE", init.id, phase=ph)
-
-    if ph == "handoff":
-        return _action("GATE", init.id, phase=ph)
-
-    # phases with no artifacts (design/design etc. skipped handling)
-    if not PHASE_ARTIFACTS.get(ph):
-        return _action("GATE", init.id, phase=ph)
-
-    return _action("WAIT", init.id, reason="no actionable transition")
-
-
-def _merge_action(init: Initiative, s, pid: str) -> dict:
-    """MERGE: the pump runs the merge, then ingests a merge payload."""
-    slot = mint_slot(init.idir, "merge", pid, "merge")
-    save_slot(init.idir, slot)
-    _commit(init, "engine", "task_dispatched", pid,
-            {"task": pid, "role": "merge",
-             "respond_to": slot["respond_to"], "schema": "merge"},
-            dispatch_id=slot["dispatch_id"])
-    write_json(state_file(init.idir),
-               fold(init.events) | {"last_seq": len(init.events)})
-    return _action("MERGE", init.id, plan=pid,
-                   run=f"git merge --no-ff task/{pid}",
-                   respond_to=slot["respond_to"],
-                   dispatch_id=slot["dispatch_id"])
-
-
-def _plan_step(init, s, pid) -> dict | None:
-    plan = s["plans"].get(pid)
-    if not plan or plan["status"] == "merged":
-        return None
-    tasks = [tid for tid, t in s["tasks"].items() if t["plan"] == pid]
-    tasks.sort()
-    for tid in tasks:
-        t = s["tasks"][tid]
-        st = t["state"]
-        if st == "pending":
-            deps = [f"{pid}-{d}" for d in t.get("depends_on", [])]
-            if all(s["tasks"].get(dd, {}).get("state") == "complete"
-                   for dd in deps):
-                return _dispatch(init, s, "impl", tid, schema="report",
-                                 base=_plan_base(init, s, pid))
-        elif st == "dispatched":
-            if _dead(s, t):
-                return _action("ESCALATE", init.id,
-                               reason=f"{tid} past deadline, rungs spent")
-            # else still running — pump waits; heartbeat keeps it alive
-            continue
-        elif st == "spawn_error":
-            return _action("REDISPATCH", init.id, task=tid)
-        elif st == "needs_context":
-            return _action("ASK", init.id, topic=t.get("question", tid))
-        elif st == "reported":
-            rnd = t.get("round", 0) + 1
-            return _dispatch(init, s, "review", tid, schema="verdict",
-                             role_detail=str(rnd),
-                             base=_plan_base(init, s, pid))
-        elif st == "fix_needed":
-            if t.get("fix_rounds", 0) >= MAX_FIX_ROUNDS:
-                return _action("ESCALATE", init.id,
-                               reason=f"{tid} hit fix-round cap")
-            return _dispatch(init, s, "fix", tid, schema="report",
-                             base=_plan_base(init, s, pid))
-    if all(s["tasks"][tid]["state"] == "complete" for tid in tasks):
-        return _merge_action(init, s, pid)
-    return None
-
-
-def _dead(s, t) -> bool:
-    # heartbeat-aware: a live beat resets the clock; sweep the slot first
-    import time as _t
-    try:
-        last = t.get("last_beat") or t.get("dispatched_at") or ""
-        age = _t.time() - _iso2epoch(last) if last else 0
-        return age > DEADLINE_S
-    except Exception:
-        return False
+def _clock(now: float | None) -> float:
+    return time.time() if now is None else now
 
 
 def _iso2epoch(ts: str) -> float:
-    """UTC ts → epoch. mktime() would read it as local time — wrong on
-    every non-UTC host and DST-broken on the rest. timegm is exact."""
-    import calendar
-    import time as _t
+    """UTC ISO timestamp to epoch seconds. timegm reads it as UTC; mktime would
+    read it as local time and drift on every non-UTC host."""
     try:
-        return calendar.timegm(_t.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
-    except Exception:
-        return 0
+        return float(calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")))
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def _plan_base(init, s, pid) -> str:
-    # rolling merge base: previous task's merge head, else the plan base
-    done = [tid for tid, t in s["tasks"].items()
-            if t["plan"] == pid and t["state"] == "complete"]
-    if done:
-        last = max(done)
-        head = s["verdicts"].get(f"{last}-R{s['tasks'][last]['round']:02d}",
-                               {}).get("commit_head")
-        if head:
-            return head
-    return branch_head(init.root, "HEAD")
+def _silent_for(dsp: dict, now: float) -> float:
+    return now - _iso2epoch(dsp.get("last_beat") or dsp["at"])
 
 
-def _advance(s) -> str | None:
-    from .store import PHASES
-    i = PHASES.index(s["phase"])
-    while i + 1 < len(PHASES):
-        nxt = PHASES[i + 1]
-        if s["phase_state"].get(nxt) != "skipped":
-            return nxt
-        i += 1
-    return None
+def _next_phase(ph: str) -> str | None:
+    i = PHASES.index(ph) + 1
+    return PHASES[i] if i < len(PHASES) else None
+
+
+def _criteria_defs(s: dict) -> list[dict]:
+    out: list[dict] = []
+    for a in s["artifacts"].values():
+        if a["kind"] == "vrfy":
+            out.extend(a["data"].get("criteria", []))
+    return out
+
+
+def _last_findings(s: dict, tid: str) -> list[dict]:
+    mine = [v for v in s["verdicts"].values() if v["task"] == tid]
+    return mine[-1].get("findings", []) if mine else []
+
+
+def _action(word: str, init_id: str, **kw) -> dict:
+    return {"action": word, "initiative": init_id, **kw}
+
+
+def _known_ids(s: dict) -> set[str]:
+    """Ids a citation may name: an authored artifact, a task, a plan, a
+    criterion, or a requirement or constraint inside an authored artifact. A
+    dispatch that has not produced its artifact yet is not a citable id."""
+    known = set(s["artifacts"]) | set(s["tasks"]) | set(s["plans"])
+    for a in s["artifacts"].values():
+        for key in ("requirements", "constraints", "criteria"):
+            known |= {x["id"] for x in a["data"].get(key, [])}
+    return known
+
+
+def _kind_of(s: dict, aid: str) -> str:
+    return "plan" if aid in s["plan_order"] else s["artifacts"][aid]["kind"]
 
 
 def _phase_artifacts(s: dict, ph: str) -> list[str]:
-    """Artifact ids owned by a phase — kind maps to phase via
-    PHASE_ARTIFACTS, so no stored phase is needed."""
     kinds = set(PHASE_ARTIFACTS.get(ph, []))
     return [aid for aid, a in s["artifacts"].items() if a["kind"] in kinds]
 
 
-def _artifacts_present(s: dict, ph: str, kind: str) -> bool:
-    return any(a["kind"] == kind for a in s["artifacts"].values())
+def _write_text(path: Path, text: str) -> None:
+    atomic_write(path, text.encode("utf-8"))
 
 
-_AKIND = {"charter": "CHTR-01", "options": "OPTS-01", "brainstorm": "BRN-01",
-          "arch": "ARCH-01", "adr": "ADR-01", "ifce": "IFCE-01",
-          "design": "DSGN-01", "spec": "SPEC-01", "risk": "RISK-01",
-          "vrfy": "VRFY-01", "plan": None}
+# ------------------------------------------------------------ journal writes
+
+def _checked_event(init: Initiative, actor: str, kind: str, entity: str,
+                   data: dict, dispatch_id_: str | None = None,
+                   payload_sha: str | None = None) -> dict:
+    """Build the next chained event and dry-run the fold over it. An event the
+    fold cannot apply is refused before anything reaches the journal, so the
+    journal stays replayable."""
+    ev = make_event(init.idir, actor, kind, entity, data,
+                    dispatch_id=dispatch_id_, payload_sha=payload_sha)
+    try:
+        fold(init.events + [ev])
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
+        raise Rejection("apply_failed", "$", "an event the fold accepts",
+                        f"{kind}: {exc}") from exc
+    return ev
 
 
-def _akind(kind: str) -> str:
-    return _AKIND.get(kind, kind.upper() + "-01")
+def _append(init: Initiative, ev: dict) -> dict:
+    append_event(init.idir, ev)
+    init.events.append(ev)
+    return ev
 
 
-def _criteria(s) -> list[str]:
-    out = []
-    for aid, a in s["artifacts"].items():
-        if a["kind"] == "vrfy":
-            for c in a["data"].get("criteria", []):
-                out.append(c["id"])
-    return out
+def _record(init: Initiative, actor: str, kind: str, entity: str, data: dict,
+            dispatch_id_: str | None = None) -> dict:
+    """An engine write: the caller holds the lock."""
+    return _append(init, _checked_event(init, actor, kind, entity, data,
+                                        dispatch_id_))
 
 
-def _phase_enter(init: Initiative, phase: str) -> dict:
-    _commit(init, "engine", "phase_entered", init.id, {"phase": phase})
-    write_json(state_file(init.idir), fold(init.reload().events)
-               | {"last_seq": len(init.events)})
+def _project(init: Initiative) -> None:
+    """Refresh the fold cache and every projection after a journal change."""
+    s = fold(init.events)
+    write_json(state_file(init.idir), s | {"last_seq": len(init.events)})
+    render_all(init)
+
+
+# ------------------------------------------------------------ dispatches
+
+def _open_slots(s: dict) -> list[dict]:
+    """Dispatches the journal records and nothing has answered, in id order.
+    Openness, base and context come from the journal alone."""
+    return [{"dispatch_id": did, "entity": d["entity"], "schema": d["schema"],
+             "role": d["role"], "respond_to": d["respond_to"],
+             "base": d["base"], "context": d["context"]}
+            for did, d in sorted(s["dispatches"].items())
+            if did not in s["answered"]]
+
+
+def _open_for(s: dict, entity: str, schema: str | None = None) -> dict | None:
+    for sl in _open_slots(s):
+        if sl["entity"] == entity and (schema is None or sl["schema"] == schema):
+            return sl
+    return None
+
+
+def _dispatch_action(init: Initiative, sl: dict) -> dict:
+    return _action("DISPATCH", init.id, entity=sl["entity"], role=sl["role"],
+                   schema=sl["schema"], dispatch_id=sl["dispatch_id"],
+                   respond_to=sl["respond_to"], cwd=str(init.root),
+                   prompt=str(prompt_file(init.idir, sl["dispatch_id"])),
+                   base=sl["base"], context=sl["context"])
+
+
+# ------------------------------------------------------------ emit next
+
+def emit_next(init: Initiative, now: float | None = None) -> dict:
+    """Decide exactly one action, plus a resume manifest. Idempotent: while a
+    dispatch is open, polling returns the same instruction and writes nothing."""
+    with _exclusive(init.idir):
+        init.reload()
+        before = len(init.events)
+        act = _decide(init, fold(init.events), _clock(now))
+        if len(init.events) != before:
+            _project(init)
+        act["resume"] = _manifest(init, fold(init.events))
+        return act
+
+
+def _manifest(init: Initiative, s: dict) -> dict:
+    """What a cold pump needs to resume with no history."""
+    return {
+        "initiative": init.id,
+        "phase": s["phase"],
+        "phase_state": s["phase_state"].get(s["phase"], "-"),
+        "last_event": init.events[-1]["kind"] if init.events else None,
+        "last_seq": len(init.events),
+        "open_concerns": sum(1 for n in s["needs_ruling"] if not n["ruled"]),
+        "open_slots": len(_open_slots(s)),
+        "tasks_done": sum(1 for t in s["tasks"].values()
+                          if t["state"] == "complete"),
+        "tasks_total": len(s["tasks"]),
+    }
+
+
+def _decide(init: Initiative, s: dict, now: float) -> dict:
+    if s["halt"]:
+        return _action("HALT", init.id, reason=s["halt"])
+    if s["done"]:
+        return _action("DONE", init.id)
+    unruled = [n for n in s["needs_ruling"] if not n["ruled"]]
+    if unruled:
+        return _action("ASK", init.id, topic=unruled[0]["concern"],
+                       task=unruled[0]["task"])
+    ph = s["phase"]
+    pstate = s["phase_state"].get(ph)
+    if pstate == "passed":
+        nxt = _next_phase(ph)
+        return _enter(init, nxt) if nxt else _action("DONE", init.id)
+    if pstate is None:
+        return _enter(init, ph)
+    if pstate == "gate_pending":
+        return _action("GATE", init.id, phase=ph)
+    work = _phase_work(init, s, ph, now)
+    return work if work is not None else _open_gate(init, ph)
+
+
+def _enter(init: Initiative, phase: str) -> dict:
+    _record(init, "engine", "phase_entered", init.id, {"phase": phase})
     return _action("PHASE-ENTER", init.id, phase=phase)
 
 
+def _open_gate(init: Initiative, ph: str) -> dict:
+    _record(init, "engine", "gate_opened", init.id, {"phase": ph})
+    return _action("GATE", init.id, phase=ph)
 
 
-def _dispatch(init: Initiative, s, role: str, entity: str, schema: str,
-              role_detail: str = "", base: str | None = None) -> dict:
-    """dedup + mint + commit are one critical section: two threads must
-    never mint the same dispatch_id or double-dispatch one entity.
-    Cross-process pump runs stay operator-serialized (one pump per
-    initiative) — the lock is the in-process guarantee."""
-    with _DISPATCH_LOCK:
-        for sl in open_slots(init.idir):
-            if sl["entity"] == entity and sl["schema"] == schema \
-                    and not sl.get("consumed"):
-                return _action(
-                    "DISPATCH", init.id, entity=entity, role=role,
-                    role_detail=role_detail,
-                    dispatch_id=sl["dispatch_id"],
-                    respond_to=sl["respond_to"],
-                    prompt=str(prompt_file(init.idir,
-                                           sl["dispatch_id"])))
-        slot = mint_slot(init.idir, role, entity, schema)
-        save_slot(init.idir, slot)
-        data = {"task": entity, "role": role, "role_detail": role_detail,
-                "respond_to": slot["respond_to"], "schema": schema}
-        if base:
-            data["base"] = base
-        _commit(init, "engine", "task_dispatched", entity, data,
-                dispatch_id=slot["dispatch_id"])
-        _write_prompt(init, slot, s)
-        write_json(state_file(init.idir), fold(init.events)
-                   | {"last_seq": len(init.events)})
-        return _action("DISPATCH", init.id, entity=entity, role=role,
-                       role_detail=role_detail,
-                       dispatch_id=slot["dispatch_id"],
-                       respond_to=slot["respond_to"],
-                       cwd=str(init.root),
-                       prompt=str(prompt_file(init.idir,
-                                              slot["dispatch_id"])))
+def _escalate(init: Initiative, reason: str) -> dict:
+    """Escalation latches: the halt is a journal event, so every later poll
+    returns HALT until a human sends a resume. The engine never retries past a
+    cap by itself."""
+    _record(init, "engine", "halt", init.id, {"reason": reason,
+                                              "source": "engine"})
+    return _action("ESCALATE", init.id, reason=reason)
 
 
-def _write_prompt(init: Initiative, slot: dict, s: dict) -> None:
-    """Every prompt carries the full working set: location invariant, task
-    contract, prior findings. Context loss is the norm, not the edge
-    case — a cold agent must not need to recover anything by memory."""
-    body = [f"# {slot['action'].upper()} — {slot['entity']}",
-            "",
-            f"**Dispatch id:** `{slot['dispatch_id']}`  ",
-            f"**Write your JSON to:** `{slot['respond_to']}`  ",
-            f"**Schema kind:** `{slot['schema']}`  ",
-            f"**Repo root:** `{init.root}`  ",
-            f"**Workdir:** `{init.root}` (cd here first — relative "
-            "paths resolve against the repo root, NOT a worktree)", ""]
-    t = s["tasks"].get(slot["entity"])
-    if t:
-        body += ["## Task", f"- {t['title']}", f"- {t['goal']}", "",
-                 "## Files you may touch", *[f"- `{f}`" for f in t["files"]],
-                 "", "## Accept when", *[f"- {a}" for a in t["accepts"]], ""]
-    # context-loss mitigation: embed prior findings for this entity
-    prior = [v for v in s["verdicts"].values()
-             if v.get("task") == slot["entity"]]
-    if prior and slot["schema"] in ("verdict", "report"):
-        last = prior[-1]
-        body += ["## Prior round findings — confirm or refute each",
-                 *[f"- {f['id']} ({f['severity']}): {f['claim']}"
-                   for f in last.get("findings", [])], ""]
-    crit = s["critiques"].get(_crit_key(s, slot["entity"]))
-    if crit and crit.get("open") and slot["schema"] == "repair":
-        body += ["## Open findings you must close",
-                 *[f"- {f.get('id','?')} ({f.get('severity','?')}): "
-                   f"{f.get('claim') or f.get('title','')}"
-                   for f in crit["open"]], ""]
-    if slot["schema"] == "verdict":
-        body += ["## Review",
-                 "You receive a review package with the diff and the prior "
-                 "round's findings. Confirm or refute each prior finding "
-                 "before hunting new ones.",
-                 "- Emit `round` exactly as minted.",
-                 "- `reviewed_package_sha` = the sha of this package.", ""]
-    body += ["## Output",
-             "Emit only JSON matching the schema for `kind: "
-             f"{slot['schema']}`. Prose goes in string fields; structure is "
-             "yours to fill, not to invent."]
-    prompt_file(init.idir, slot["dispatch_id"]).write_text(
-        "\n".join(body), encoding="utf-8")
+def _phase_work(init: Initiative, s: dict, ph: str, now: float):
+    """The next dispatch, ask or escalation for this phase; None when the phase
+    has nothing left to do and its gate may open."""
+    if ph == "execution":
+        return _execution(init, s, now)
+    if ph == "verification":
+        return _verification(init, s, now)
+    for kind in PHASE_ARTIFACTS.get(ph, []):
+        if not any(a["kind"] == kind for a in s["artifacts"].values()):
+            return _author(init, s, kind, now)
+    targets = (list(s["plan_order"]) if ph == "plan_regression"
+               else _phase_artifacts(s, ph))
+    for tgt in targets:
+        c = s["critiques"].get(_crit_key(s, tgt))
+        rnd = c["round"] if c else 0
+        if c is None or c["status"] == "repaired":
+            if rnd >= MAX_AUDIT_ROUNDS:
+                return _escalate(init, f"{tgt} not cleared after "
+                                       f"{MAX_AUDIT_ROUNDS} audit rounds")
+            return _dispatch(init, s, "audit", tgt, "audit", now=now,
+                             context={"round": rnd + 1})
+        if c["status"] == "fail":
+            return _dispatch(init, s, "repair", tgt, _kind_of(s, tgt), now=now,
+                             context={"round": rnd, "findings": c["open"]})
+    return None
 
 
-def _action(word: str, init_id: str, **kw) -> dict:
-    a = {"action": word, "initiative": init_id}
-    a.update(kw)
-    return a
+def _author(init: Initiative, s: dict, kind: str, now: float) -> dict:
+    eid = (f"{init.id}-P{len(s['plan_order']) + 1:02d}" if kind == "plan"
+           else f"{init.id}-{_AKIND[kind]}")
+    return _dispatch(init, s, "author", eid, kind, now=now)
 
 
-# ------------------------------------------------------------ commit
+def _verification(init: Initiative, s: dict, now: float):
+    for crit in _criteria_defs(s):
+        runs = s["evidence"].get(crit["id"], [])
+        if runs and runs[-1]["verdict"] == "proven":
+            continue
+        if len(runs) >= MAX_EVIDENCE_TRIES:
+            return _escalate(init, f"{crit['id']} not proven after "
+                                   f"{MAX_EVIDENCE_TRIES} attempts")
+        return _dispatch(init, s, "evidence", crit["id"], "evidence", now=now,
+                         context={"criterion": crit["criterion"],
+                                  "procedure": crit["procedure"]})
+    return None
 
-def _commit(init: Initiative, actor: str, kind: str, entity: str,
-            data: dict, dispatch_id: str | None = None,
-            payload_sha: str | None = None) -> dict:
-    """Serialize the journal write: lock → dedup → make → append → reload.
-    Nobody may call make_event/append_event without the lock — the v1
-    store raced exactly here (concurrent appends wrote duplicate seq +
-    identical prev_sha and silently broke the chain). Dedup lives inside
-    the lock too, or two ingests of one payload both pass the check."""
-    with StoreLock(init.idir):
-        init.reload()
-        if payload_sha and _duplicate(init, payload_sha):
-            return {"deduplicated": True}
-        ev = make_event(init.idir, actor, kind, entity, data,
-                        dispatch_id=dispatch_id, payload_sha=payload_sha)
-        append_event(init.idir, ev)
-        init.reload()
-        return ev
+
+def _execution(init: Initiative, s: dict, now: float):
+    pending = [pid for pid in s["plan_order"]
+               if s["plans"][pid]["status"] != "merged"]
+    if not pending:
+        return None
+    for pid in pending:
+        act = _plan_step(init, s, pid, now)
+        if act is not None:
+            return act
+    return _escalate(init, "no dispatchable work: every pending task is blocked "
+                           "or its dependencies can never complete")
+
+
+def _plan_step(init: Initiative, s: dict, pid: str, now: float):
+    tids = sorted(tid for tid, t in s["tasks"].items() if t["plan"] == pid)
+    for tid in tids:
+        t = s["tasks"][tid]
+        st = t["state"]
+        if st == "dispatched":
+            sl = _open_for(s, tid)
+            if sl is None:
+                return _escalate(init, f"{tid} is dispatched with no open "
+                                       f"dispatch on record")
+            return _dispatch(init, s, sl["role"], tid, sl["schema"], now=now,
+                             base=sl["base"], context=sl["context"])
+        if st == "pending":
+            if not all(s["tasks"].get(f"{pid}-{dep}", {}).get("state")
+                       == "complete" for dep in t["depends_on"]):
+                continue
+            pre = _preflight(init, s, pid)
+            if pre is not None:
+                return pre
+            return _dispatch(init, s, "impl", tid, "report", now=now,
+                             base=_head(init.root))
+        if st in ("needs_context", "blocked"):
+            return _action("ASK", init.id, topic=t.get("question", tid),
+                           task=tid)
+        if st == "reported":
+            return _review(init, s, tid, now)
+        if st == "fix_needed":
+            if t["fix_rounds"] >= MAX_FIX_ROUNDS:
+                return _escalate(init, f"{tid} hit the fix-round cap "
+                                       f"({MAX_FIX_ROUNDS})")
+            return _dispatch(init, s, "fix", tid, "report", now=now,
+                             base=t["base"],
+                             context={"round": t["fix_rounds"],
+                                      "findings": _last_findings(s, tid)})
+    if tids and all(s["tasks"][tid]["state"] == "complete" for tid in tids):
+        return _merge(init, s, pid)
+    return None
+
+
+def _review(init: Initiative, s: dict, tid: str, now: float) -> dict:
+    t = s["tasks"][tid]
+    return _dispatch(init, s, "review", tid, "verdict", now=now,
+                     base=t["base"],
+                     context={"round": t["round"] + 1,
+                              "findings": _last_findings(s, tid)})
+
+
+def _merge(init: Initiative, s: dict, pid: str) -> dict:
+    """The pump performs the merge and ingests the merge record. Nothing is
+    journaled here: a repeated poll returns the same MERGE instruction."""
+    heads = {}
+    for tid in sorted(tid for tid, t in s["tasks"].items() if t["plan"] == pid):
+        commits = s["reports"].get(tid, {}).get("commits") or []
+        heads[tid] = commits[-1] if commits else None
+    return _action("MERGE", init.id, plan=pid, heads=heads)
+
+
+def _preflight(init: Initiative, s: dict, pid: str):
+    """File-ownership scan, once per plan before its first dispatch. Two tasks
+    that share a file and have no dependency path between them are a plan
+    defect: the verdict is recorded and each overlap becomes a ruling to make."""
+    path = preflight_file(init.idir, pid)
+    if path.exists():
+        return None
+    tasks = {tid: t for tid, t in s["tasks"].items() if t["plan"] == pid}
+    conflicts = []
+    ids = sorted(tasks)
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            if _ordered(tasks, a, b):
+                continue
+            shared = sorted(set(tasks[a]["files"]) & set(tasks[b]["files"]))
+            if shared:
+                conflicts.append({"tasks": [a, b], "files": shared})
+    verdict = "conflict" if conflicts else "clear"
+    write_json(path, {"plan": pid, "verdict": verdict,
+                      "conflicts": conflicts})
+    _record(init, "engine", "preflight", pid,
+            {"plan": pid, "verdict": verdict, "conflicts": conflicts})
+    if conflicts:
+        return _action("ASK", init.id, task=pid,
+                       topic=f"{pid}: file ownership overlaps between "
+                             f"unordered tasks: {conflicts}")
+    return None
+
+
+def _ordered(tasks: dict, a: str, b: str) -> bool:
+    """True when a depends on b or b on a, directly or through the plan."""
+    return _reaches(tasks, a, b) or _reaches(tasks, b, a)
+
+
+def _reaches(tasks: dict, src: str, dst: str) -> bool:
+    seen, todo = set(), [src]
+    while todo:
+        cur = todo.pop()
+        for dep in tasks.get(cur, {}).get("depends_on", []):
+            nxt = f"{tasks[cur]['plan']}-{dep}"
+            if nxt == dst:
+                return True
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return False
+
+
+def _review_package(init: Initiative, s: dict, tid: str, rnd: int,
+                    base: str | None) -> dict | None:
+    """What the reviewer must see: the range from the task's base to what the
+    worker reported, the changed files, the diff itself and the prior findings.
+    The package sha is what the verdict must echo back."""
+    commits = (s["reports"].get(tid) or {}).get("commits") or []
+    head = commits[-1] if commits else _head(init.root)
+    base = base or _head(init.root)
+    if base == head:
+        return None
+    diff = _git(init.root, "diff", "--no-color", base, head)
+    names = _git(init.root, "diff", "--name-only", base, head).splitlines()
+    core = {"task": tid, "round": rnd, "base": base, "head": head,
+            "changed_files": names, "diff_sha256": sha256(diff),
+            "prior_findings": _last_findings(s, tid)}
+    return {**core, "diff": diff, "package_sha": sha256(core)}
+
+
+def _dispatch(init: Initiative, s: dict, role: str, entity: str, schema: str,
+              *, now: float, base: str | None = None,
+              context: dict | None = None) -> dict:
+    """Journal a dispatch and write what the worker needs. An open dispatch for
+    the same entity and schema is re-emitted, never duplicated; one silent past
+    the deadline is abandoned first. The dispatch id is the seq of the event
+    that records it, so the id and the journal cannot disagree."""
+    open_sl = _open_for(s, entity, schema)
+    if open_sl is not None:
+        if _silent_for(s["dispatches"][open_sl["dispatch_id"]], now) <= DEADLINE_S:
+            return _dispatch_action(init, open_sl)
+        _record(init, "engine", "abandon", entity,
+                {"reason": f"silent past {DEADLINE_S}s"},
+                dispatch_id_=open_sl["dispatch_id"])
+        s = fold(init.events)
+    lost = s["lost"].get(f"{entity}:{schema}", 0)
+    if lost > SPAWN_RETRY_CAP:
+        return _escalate(init, f"{entity}: {schema} dispatch lost {lost} times")
+    ctx = dict(context or {})
+    package = None
+    if role == "review":
+        package = _review_package(init, s, entity, ctx["round"], base)
+        if package is None:
+            return _escalate(init, f"{entity}: nothing to review, base equals head")
+        ctx.update(package_sha=package["package_sha"], base=package["base"],
+                   head=package["head"])
+    did = dispatch_id(next_seq(init.events))
+    sl = {"dispatch_id": did, "entity": entity, "role": role,
+          "schema": schema,
+          "respond_to": payload_file(init.idir, did).relative_to(
+              init.root).as_posix(),
+          "base": base, "context": ctx}
+    if package is not None:
+        write_json(review_package_file(init.idir, entity, ctx["round"]), package)
+    if role == "fix":
+        write_json(fix_package_file(init.idir, entity, ctx["round"]),
+                   {"task": entity, "findings": ctx.get("findings", []),
+                    "base": base})
+    _write_text(prompt_file(init.idir, did), _render_prompt(init, s, sl))
+    _record(init, "engine", "task_dispatched", entity,
+            {"role": role, "schema": schema, "respond_to": sl["respond_to"],
+             "base": base, "context": ctx}, dispatch_id_=did)
+    return _dispatch_action(init, sl)
+
+
+def _render_prompt(init: Initiative, s: dict, sl: dict) -> str:
+    """Everything a cold worker needs: where to write, what kind to emit, the
+    task contract, the findings to answer and, for review, the package."""
+    ctx = sl["context"]
+    e = sl["entity"]
+    lines = [f"# {sl['role'].upper()} - {e}", "",
+             f"Dispatch id: `{sl['dispatch_id']}`",
+             f"Write your JSON payload to: `{sl['respond_to']}`",
+             f"Payload kind: `{sl['schema']}` (emit exactly this kind)",
+             f"Working directory: `{init.root}` (cd here; paths are "
+             f"repo-relative)", ""]
+    if "round" in ctx:
+        echo = (" (echo it in the `round` field)"
+                if sl["schema"] in ROUND_SCHEMAS else "")
+        lines += [f"Round: `{ctx['round']}`{echo}", ""]
+    t = s["tasks"].get(e)
+    if t is not None:
+        lines += ["## Task", f"- id: `{e}`", f"- {t['title']}", f"- {t['goal']}",
+                  "", "## Files you may touch",
+                  *[f"- `{f}`" for f in t["files"]], "",
+                  "## Accept when", *[f"- {a}" for a in t["accepts"]], ""]
+    if "criterion" in ctx:
+        lines += ["## Criterion", f"- {ctx['criterion']}",
+                  f"- procedure: {ctx['procedure']}", ""]
+    if sl["role"] == "review":
+        pkg = review_package_file(init.idir, e, ctx["round"])
+        lines += ["## Review package",
+                  f"Read `{pkg}` first. It holds the diff from `{ctx['base']}` "
+                  f"to `{ctx['head']}`, the changed files and the prior "
+                  f"findings. Confirm or refute each prior finding before "
+                  f"hunting new ones.",
+                  f"Set `reviewed_package_sha` to `{ctx['package_sha']}`, "
+                  f"`commit_base` to `{ctx['base']}` and `commit_head` to "
+                  f"`{ctx['head']}`.", ""]
+    if ctx.get("findings"):
+        lines += ["## Findings to address",
+                  *[f"- {f.get('id', '?')} ({f.get('severity', '?')}): "
+                    f"{f.get('claim', '')}" for f in ctx["findings"]], ""]
+    req = schema_for(sl["schema"]).get("required", [])
+    lines += ["## Output",
+              f"Emit only JSON for `kind: {sl['schema']}`. Required keys: "
+              + ", ".join(f"`{k}`" for k in req)
+              + ". Prose goes in string fields; structure is yours to fill, "
+                "not to invent."]
+    return "\n".join(lines) + "\n"
 
 
 # ------------------------------------------------------------ ingest
 
 def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
-    """Validate a payload, append its event, re-render. Returns the event
-    or raises Rejection. Nothing is written on rejection."""
+    """Validate one payload against the schema, the state, the open dispatch
+    it answers and git, then commit exactly one event. Returns the event, or
+    {"deduplicated": True} when the payload is a redelivery of an answer already
+    accepted. Raises Rejection and writes nothing otherwise. Human-only kinds
+    need actor "human"."""
+    kind = _validated_kind(payload)
+    with _exclusive(init.idir):
+        init.reload()
+        _authorize(kind, actor)
+        s = fold(init.events)
+        if s["halt"] and kind not in HALT_OPEN_KINDS:
+            raise Rejection("halted", "$.kind", "ruling or resume while halted",
+                            kind, f"run is halted: {s['halt']}")
+        digest = sha256(payload)
+        if kind in SLOT_FREE_KINDS:
+            entity = _check_free(init, s, payload)
+            ev = _checked_event(init, actor, kind, entity, _data_for(payload),
+                                payload_sha=digest)
+        else:
+            try:
+                sl = _bind(s, payload)
+            except Rejection:
+                if _duplicate(init, digest):
+                    return {"deduplicated": True}
+                raise
+            entity = _check(init, s, payload, sl)
+            ev = _checked_event(init, actor, kind, entity, _data_for(payload),
+                                dispatch_id_=sl["dispatch_id"],
+                                payload_sha=digest)
+            _effects(init, s, payload, sl)
+        _append(init, ev)
+        _project(init)
+        return ev
+
+
+def _validated_kind(payload) -> str:
     if not isinstance(payload, dict):
         raise Rejection("type", "$", "object", type(payload).__name__)
-    kind = payload.get("kind")
-    if not kind:
+    if "kind" not in payload:
         raise Rejection("required", "$.kind", "present", "missing")
-    schema = schema_for(kind)
-    validate(payload, schema)
-    s = fold(init.events)
-    _semantic(init, s, payload)
-    ev = _commit(init, actor, kind,
-                 _entity_for(init, payload), _data_for(payload),
-                 dispatch_id=payload.get("dispatch_id"),
-                 payload_sha=sha256(payload))
-    if ev.get("deduplicated"):
-        return ev
-    _after(init, s, ev, payload)
-    write_json(state_file(init.idir), fold(init.events)
-               | {"last_seq": len(init.events)})
-    return ev
+    if not isinstance(payload["kind"], str):
+        raise Rejection("type", "$.kind", "string",
+                        type(payload["kind"]).__name__)
+    validate(payload, schema_for(payload["kind"]))
+    return payload["kind"]
 
 
-def _duplicate(init: Initiative, payload_sha: str) -> bool:
-    return any(e.get("payload_sha") == payload_sha
-               for e in init.events)
+def _authorize(kind: str, actor: str) -> None:
+    if kind in HUMAN_KINDS and actor != "human":
+        raise Rejection("unauthorized", "$.kind", "actor human",
+                        f"actor {actor}",
+                        f"{kind} is human-only; pass --actor human")
 
 
-def _entity_for(init: Initiative, p: dict) -> str:
-    if p["kind"] in ARTIFACT_KINDS:
-        return p.get("id") or p.get("plan_id") or init.id
-    for k in ("task", "target", "criterion", "phase", "plan"):
-        if p.get(k):
-            base = p[k]
-            if p["kind"] in ("report", "verdict") and \
-                    not base.startswith("INIT-"):
-                return f"{init.id}-{base}"
-            return base
-    return init.id
+def _duplicate(init: Initiative, digest: str) -> bool:
+    return any(e.get("payload_sha") == digest for e in init.events)
 
 
 def _data_for(p: dict) -> dict:
@@ -761,221 +932,385 @@ def _data_for(p: dict) -> dict:
             if k not in ("kind", "v", "engine_version", "dispatch_id")}
 
 
-def _semantic(init: Initiative, s: dict, p: dict) -> None:
-    """Checks beyond the schema — over live state and git."""
+def _bind(s: dict, p: dict) -> dict:
+    """The open dispatch a slot-bearing payload answers. A payload that answers
+    none is unsolicited and is refused: the engine decides what is asked."""
+    kind = p["kind"]
+    open_ = _open_slots(s)
+    if kind == "spawn_error":
+        cands = [x for x in open_ if x["dispatch_id"] == p.get("dispatch_id")]
+    elif kind in ("heartbeat", "needs_context"):
+        cands = [x for x in open_ if x["entity"] == p["task"]]
+    elif kind == "repair":
+        cands = [x for x in open_ if x["entity"] == p["target"]
+                 and x["role"] == "repair"]
+    else:
+        entity = _entity_for(p)
+        cands = [x for x in open_ if x["entity"] == entity
+                 and x["schema"] == kind]
+    did = p.get("dispatch_id")
+    if did is not None and kind != "spawn_error":
+        cands = [x for x in cands if x["dispatch_id"] == did]
+    if not cands:
+        expected = "; ".join(sorted({f"{x['schema']} for {x['entity']}"
+                                     for x in open_})) or "none"
+        raise Rejection("no_open_slot", "$",
+                        f"an open dispatch answered by {kind}",
+                        f"{kind} for {did or _entity_for(p)}",
+                        f"open: {expected}")
+    return cands[0]
+
+
+def _entity_for(p: dict) -> str:
+    """The entity a slot-bearing payload speaks for, read from the payload."""
     k = p["kind"]
-    if k == "verdict":
-        task = _resolve_task(init, s, p["task"])
-        t = s["tasks"].get(task)
-        if not t:
-            raise Rejection("unknown_entity", "$.task", "a known task",
-                            p["task"])
-        want = t.get("round", 0) + 1
-        if p["round"] != want:
-            raise Rejection("round_mismatch", "$.round", str(want),
-                            str(p["round"]),
-                            "the engine mints rounds; do not set your own")
-        if not rev_exists(init.root, p["commit_base"]):
-            raise Rejection("unknown_rev", "$.commit_base",
-                            "a resolvable git rev", p["commit_base"])
-        if not rev_exists(init.root, p["commit_head"]):
-            raise Rejection("unknown_rev", "$.commit_head",
-                            "a resolvable git rev", p["commit_head"])
-        if p["commit_base"] == p["commit_head"]:
-            raise Rejection("empty_range", "$.commit_head",
-                            "head != base", "base == head (empty diff)")
-        if t.get("slot") and p.get("reviewed_package_sha") is None:
-            raise Rejection("required", "$.reviewed_package_sha",
-                            "present", "missing")
-        for f in p.get("findings", []):
-            ev = f.get("evidence", "")
-            for path in re.findall(r"[\w./-]+\.\w+", ev):
-                if "/" in path and not path_at_rev(
-                        init.root, p["commit_head"], path):
-                    raise Rejection("missing_evidence", "$.findings",
-                                    f"path exists at {p['commit_head']}",
-                                    f"{path} not found")
-        if t.get("model") and p.get("model_actual") \
-                and p["model_actual"] != t["model"]:
-            pass  # recorded by fold as model_deviation
-    elif k == "report":
-        task = _resolve_task(init, s, p["task"])
-        t = s["tasks"].get(task)
-        if not t:
-            raise Rejection("unknown_entity", "$.task", "a known task",
-                            p["task"])
+    if k in ARTIFACT_KINDS:
+        return p["id"]
+    if k in ("report", "verdict", "heartbeat", "needs_context"):
+        return p["task"]
+    if k == "evidence":
+        return p["criterion"]
+    if k in ("audit", "repair"):
+        return p["target"]
+    return p.get("dispatch_id", "-")
+
+
+def _check(init: Initiative, s: dict, p: dict, sl: dict) -> str:
+    """Semantic checks for slot-bearing kinds over live state and git. Returns
+    the entity the event is recorded against."""
+    k = p["kind"]
+    if k in ARTIFACT_KINDS:
+        _check_artifact(s, p)
+        return p["id"]
+    if k == "report":
         for c in p.get("commits", []):
             if not rev_exists(init.root, c):
                 raise Rejection("unknown_rev", "$.commits",
                                 "resolvable commit(s)", c)
-    elif k == "evidence":
-        if p["criterion"] not in _criteria(s):
-            raise Rejection("unknown_entity", "$.criterion",
-                            "a VRFY criterion id", p["criterion"])
-        if not rev_exists(init.root, p["state_commit"]):
-            raise Rejection("unknown_rev", "$.state_commit",
-                            "a resolvable commit", p["state_commit"])
-        for a in p.get("artifacts", []):
-            if not path_at_rev(init.root, p["state_commit"], a):
-                raise Rejection("missing_evidence", "$.artifacts",
-                                f"path exists at {p['state_commit']}",
-                                f"{a} not found")
-    elif k in ARTIFACT_KINDS:
-        # cite integrity: every cites: id must exist already
-        known = set(s["entities"]) | set(s["artifacts"])
-        for c in p.get("cites", []):
-            if c not in known:
-                raise Rejection("dangling_ref", "$.cites",
-                                "an existing id", c,
-                                "reference must resolve — no danglings")
-    elif k == "gate_decision":
-        if p.get("by") == "human":
-            pass  # actor asserted at CLI boundary (human runs ingest)
-    elif k == "spawn_error":
-        if p["dispatch_id"] not in s["dispatches"]:
-            raise Rejection("unknown_entity", "$.dispatch_id",
-                            "an open dispatch", p["dispatch_id"])
-    elif k == "merge":
-        if p["plan"] not in s["plans"]:
-            raise Rejection("unknown_entity", "$.plan", "a known plan",
-                            p["plan"])
-        if not rev_exists(init.root, p["merge_sha"]):
-            raise Rejection("unknown_rev", "$.merge_sha",
-                            "a resolvable merge commit", p["merge_sha"])
+        if p["result"] != "BLOCKED":
+            _check_advances(init, s, p, sl)
+        return p["task"]
+    if k == "verdict":
+        _check_verdict(init, p, sl)
+        return p["task"]
+    if k == "evidence":
+        _check_evidence(init, s, p)
+        return p["criterion"]
+    if k == "audit":
+        _check_audit(s, p, sl)
+        return p["target"]
+    if k == "repair":
+        _check_repair(p, sl)
+        return p["target"]
+    if k == "spawn_error":
+        return sl["entity"]
+    return p["task"]          # heartbeat, needs_context
 
 
-def _resolve_task(init: Initiative, s: dict, t: str) -> str:
-    if t in s["tasks"]:
-        return t
-    cand = f"{init.id}-{t}" if not t.startswith("INIT-") else t
-    return cand if cand in s["tasks"] else t
+def _check_free(init: Initiative, s: dict, p: dict) -> str:
+    """Checks for kinds that answer no dispatch."""
+    k = p["kind"]
+    if k == "gate_decision":
+        if p["phase"] != s["phase"] or \
+                s["phase_state"].get(p["phase"]) != "gate_pending":
+            raise Rejection("no_open_gate", "$.phase",
+                            f"{s['phase']} with its gate pending", p["phase"])
+        return p["phase"]
+    if k == "resume":
+        if not s["halt"]:
+            raise Rejection("not_halted", "$.kind", "a halted run", "running")
+        return init.id
+    if k == "ruling":
+        tgt = p.get("for_task")
+        if tgt and tgt not in s["tasks"] and tgt not in s["plans"]:
+            raise Rejection("unknown_entity", "$.for_task",
+                            "a known task or plan", tgt)
+        return tgt or init.id
+    if k == "merge":
+        _check_merge(init, s, p)
+        return p["plan"]
+    return init.id            # halt
 
 
-def _after(init: Initiative, s: dict, ev: dict, p: dict) -> None:
-    """Post-ingest side effects: consume the matching slot, write the
-    artifact file, re-render. Slot match is by dispatch_id when the agent
-    echoed it, else by entity+schema — an agent won't reliably echo ids."""
-    target = ev.get("dispatch_id")
-    ent = ev["entity"]
-    for x in open_slots(init.idir):
-        match = (x["dispatch_id"] == target) if target else \
-                (x["entity"] == ent and x["schema"] == p["kind"])
-        if match:
-            x["consumed"] = True
-            save_slot(init.idir, x)
-            break
-    if p["kind"] in ARTIFACT_KINDS:
-        _commit_artifact(init, p)
-    _render(init)
-
-
-def _commit_artifact(init: Initiative, p: dict) -> None:
-    """Write the committed thinking-store .json + rendered .md, nested."""
-    aid = p.get("id") or p.get("plan_id")
+def _check_artifact(s: dict, p: dict) -> None:
+    known = _known_ids(s)
+    for c in p.get("cites", []):
+        if c not in known:
+            raise Rejection("dangling_ref", "$.cites", "an authored id", c,
+                            "cite only artifacts, tasks or criteria that exist")
     if p["kind"] == "plan":
+        if p.get("plan_id") != p["id"]:
+            raise Rejection("mismatch", "$.plan_id", p["id"],
+                            str(p.get("plan_id")))
+        ids = [t["id"] for t in p["tasks"]]
+        if len(set(ids)) != len(ids):
+            raise Rejection("duplicate", "$.tasks", "unique task ids",
+                            "duplicate id")
+        for t in p["tasks"]:
+            for dep in t.get("depends_on", []):
+                if dep not in ids:
+                    raise Rejection("dangling_ref",
+                                    f"$.tasks.{t['id']}.depends_on",
+                                    "a task id in this plan", dep)
+    if p["kind"] == "vrfy":
+        ids = [c["id"] for c in p["criteria"]]
+        if len(set(ids)) != len(ids):
+            raise Rejection("duplicate", "$.criteria", "unique criterion ids",
+                            "duplicate id")
+
+
+def _resolve(root: Path, rev: str) -> str:
+    return _git(root, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
+
+
+def _is_ancestor(root: Path, a: str, b: str) -> bool:
+    return subprocess.run(["git", "-C", str(root), "merge-base",
+                           "--is-ancestor", a, b],
+                          capture_output=True).returncode == 0
+
+
+def _check_advances(init: Initiative, s: dict, p: dict, sl: dict) -> None:
+    """A worker that reports work must have moved the branch past what it
+    started from. A fix is measured from the head of the report it answers,
+    an implementation from the base it was dispatched on."""
+    ref = sl["base"]
+    if sl["role"] == "fix":
+        prior = (s["reports"].get(p["task"]) or {}).get("commits") or []
+        ref = prior[-1] if prior else ref
+    commits = p.get("commits") or []
+    if not commits:
+        raise Rejection("empty_range", "$.commits", "at least one commit",
+                        "none", "commit the change before reporting it")
+    head = _resolve(init.root, commits[-1])
+    if ref is not None:
+        base = _resolve(init.root, ref)
+        if head == base or _is_ancestor(init.root, head, base):
+            raise Rejection("empty_range", "$.commits",
+                            f"a commit after {base[:12]}", head[:12],
+                            "the change is not in the repository yet")
+
+
+def _check_verdict(init: Initiative, p: dict, sl: dict) -> None:
+    ctx = sl["context"]
+    if p["round"] != ctx.get("round"):
+        raise Rejection("round_mismatch", "$.round", str(ctx.get("round")),
+                        str(p["round"]), "the engine mints rounds")
+    if p["reviewed_package_sha"] != ctx.get("package_sha"):
+        raise Rejection("package_mismatch", "$.reviewed_package_sha",
+                        str(ctx.get("package_sha")), p["reviewed_package_sha"],
+                        "review the package the engine wrote for this round")
+    if (p["commit_base"], p["commit_head"]) != (ctx.get("base"), ctx.get("head")):
+        raise Rejection("range_mismatch", "$.commit_base",
+                        f"{ctx.get('base')}..{ctx.get('head')}",
+                        f"{p['commit_base']}..{p['commit_head']}",
+                        "the range is the package's, not yours to choose")
+    for f in p.get("findings", []):
+        for path in re.findall(r"[\w./-]+\.\w+", f.get("evidence", "")):
+            if "/" in path and not path_at_rev(init.root, p["commit_head"], path):
+                raise Rejection("missing_evidence", "$.findings",
+                                f"path exists at {p['commit_head']}",
+                                f"{path} not found")
+
+
+def _check_evidence(init: Initiative, s: dict, p: dict) -> None:
+    if p["criterion"] not in {c["id"] for c in _criteria_defs(s)}:
+        raise Rejection("unknown_entity", "$.criterion", "a VRFY criterion id",
+                        p["criterion"])
+    if not rev_exists(init.root, p["state_commit"]):
+        raise Rejection("unknown_rev", "$.state_commit",
+                        "a resolvable commit", p["state_commit"])
+    for a in p.get("artifacts", []):
+        if not path_at_rev(init.root, p["state_commit"], a):
+            raise Rejection("missing_evidence", "$.artifacts",
+                            f"path exists at {p['state_commit']}", a)
+
+
+def _check_audit(s: dict, p: dict, sl: dict) -> None:
+    if p["target"] not in s["artifacts"] and p["target"] not in s["plans"]:
+        raise Rejection("unknown_entity", "$.target",
+                        "an authored artifact or plan", p["target"])
+    if p["round"] != sl["context"].get("round"):
+        raise Rejection("round_mismatch", "$.round",
+                        str(sl["context"].get("round")), str(p["round"]),
+                        "the engine mints audit rounds")
+
+
+def _check_repair(p: dict, sl: dict) -> None:
+    if p["round"] != sl["context"].get("round"):
+        raise Rejection("round_mismatch", "$.round",
+                        str(sl["context"].get("round")), str(p["round"]),
+                        "repair the audited round")
+
+
+def _check_merge(init: Initiative, s: dict, p: dict) -> None:
+    pl = s["plans"].get(p["plan"])
+    if pl is None:
+        raise Rejection("unknown_entity", "$.plan", "a known plan", p["plan"])
+    if pl["status"] == "merged":
+        raise Rejection("already_merged", "$.plan", "an unmerged plan", p["plan"])
+    open_tasks = sorted(tid for tid, t in s["tasks"].items()
+                        if t["plan"] == p["plan"] and t["state"] != "complete")
+    if open_tasks:
+        raise Rejection("incomplete", "$.plan", "every task complete",
+                        ", ".join(open_tasks))
+    if not rev_exists(init.root, p["merge_sha"]):
+        raise Rejection("unknown_rev", "$.merge_sha",
+                        "a resolvable merge commit", p["merge_sha"])
+
+
+def _effects(init: Initiative, s: dict, p: dict, sl: dict) -> None:
+    """Canonical files for a payload that is about to be committed. Runs before
+    the event is appended, so a payload that is rejected leaves no files, and a
+    file written before a crash is overwritten identically on retry."""
+    k = p["kind"]
+    if k in ARTIFACT_KINDS:
+        _write_artifact(init, p)
+    elif k == "audit":
+        f = (plan_audit_file(init.idir, p["target"], p["round"])
+             if p["target"] in s["plans"]
+             else audit_file(init.idir, p["target"], p["round"]))
+        write_json(f, p)
+    elif k == "repair":
+        f = (plan_repair_file(init.idir, p["target"], p["round"])
+             if p["target"] in s["plans"]
+             else repair_file(init.idir, p["target"], p["round"]))
+        write_json(f, p)
+    elif k == "report":
+        if sl["role"] == "fix":
+            write_json(fix_report_file(init.idir, p["task"],
+                                       sl["context"]["round"]), p)
+        else:
+            write_json(task_impl_report(init.idir, p["task"],
+                                        sl["dispatch_id"]), p)
+    elif k == "verdict":
+        write_json(verdict_file(init.idir, p["task"], p["round"]), p)
+
+
+def _write_artifact(init: Initiative, p: dict) -> None:
+    """Run-store copy of the latest payload, plus the committed thinking store:
+    canonical JSON and rendered markdown, both deterministic."""
+    aid = p["id"]
+    if p["kind"] == "plan":
+        write_json(plan_file(init.idir, aid), p)
         jf = docs_plan_file(init.root, init.id, aid)
         mf = docs_plan_md(init.root, init.id, aid)
     else:
+        write_json(artifact_file(init.idir, aid), p)
         jf = docs_artifact_file(init.root, init.id, aid)
         mf = docs_artifact_md(init.root, init.id, aid)
-    jf.parent.mkdir(parents=True, exist_ok=True)
-    jf.write_text(json.dumps(p, indent=2, ensure_ascii=False) + "\n",
-                  encoding="utf-8")
-    mf.write_text(_render_doc(p, init), encoding="utf-8")
+    write_json(jf, p)
+    _write_text(mf, _render_doc(p))
 
 
-def _render_doc(p: dict, init: Initiative) -> str:
-    """Canonical .md render of an artifact — fixed skeleton, filled values."""
-    aid = p.get("id") or p.get("plan_id", init.id)
-    out = [f"# {aid} — {p.get('title', '')}",
-           "",
-           f"*{p.get('summary', '')}*",
-           ""]
+def _render_doc(p: dict) -> str:
+    out = [f"# {p['id']} — {p.get('title', '')}", "", f"*{p.get('summary', '')}*", ""]
     for r in p.get("requirements", []):
-        out.append(f"### {r['id']} — {r['requirement']}")
-        out.append(f"*observable:* {r.get('observable', '')}")
-        out.append("")
+        out += [f"### {r['id']} — {r['requirement']}",
+                f"*observable:* {r.get('observable', '')}", ""]
     for c in p.get("constraints", []):
-        out.append(f"**{c['id']}** {c['constraint']}  ")
-        out.append(f"*observable:* {c.get('observable', '')}  ")
-        out.append("")
-    for s_ in p.get("sections", []):
-        out.append(f"## {s_['title']}")
-        out.append(s_.get("body", ""))
-        out.append("")
+        out += [f"**{c['id']}** {c['constraint']}  ",
+                f"*observable:* {c.get('observable', '')}  ", ""]
+    for sec in p.get("sections", []):
+        out += [f"## {sec['title']}", sec.get("body", ""), ""]
     for c in p.get("criteria", []):
-        out.append(f"### {c['id']}")
-        out.append(f"{c['criterion']}  ")
-        out.append(f"*procedure:* {c['procedure']}  ")
-        out.append("")
+        out += [f"### {c['id']}", f"{c['criterion']}  ",
+                f"*procedure:* {c['procedure']}  ", ""]
     for t in p.get("tasks", []):
-        out.append(f"## {t['id']} — {t['title']}")
-        out.append(t.get("goal", ""))
-        out.append("")
-        out.append("**files:** " + ", ".join(f"`{f}`" for f in t["files"]))
-        out.append("")
-        out.append("**accepts:**")
-        out.extend(f"- {a}" for a in t["accepts"])
-        out.append("")
-    out.append(f"<!-- generated {now_iso()} engine {__version__} -->")
+        out += [f"## {t['id']} — {t['title']}", t.get("goal", ""), "",
+                "**files:** " + ", ".join(f"`{f}`" for f in t["files"]), "",
+                "**accepts:**", *[f"- {a}" for a in t["accepts"]], ""]
     return "\n".join(out) + "\n"
 
 
-def _render(init: Initiative) -> None:
-    """Re-render projections: state views + index. Cheap, always fresh."""
-    from .views import render_all
-    render_all(init)
+# ------------------------------------------------------------ initiatives
+
+def _next_init_id(root: Path) -> str:
+    nums = [int(d.name.split("-")[1]) for d in run_root(root).glob("INIT-*")
+            if d.is_dir() and d.name.split("-")[1].isdigit()]
+    return f"INIT-{max(nums, default=0) + 1:04d}"
+
+
+def create_initiative(root: Path, title: str) -> Initiative:
+    """Scaffold a new initiative and journal its creation under the lock."""
+    iid = _next_init_id(root)
+    idir = init_store(root, iid, title)
+    init = Initiative(iid, root, idir)
+    with _exclusive(idir):
+        init.reload()
+        _record(init, "engine", "created", iid, {"title": title})
+        _project(init)
+    return init
 
 
 # ------------------------------------------------------------ check
 
-def check(init: Initiative) -> dict:
-    """Re-fold the journal, verify the hash chain, audit integrity."""
-    init.reload()
-    chain_problems = verify_chain(init.events)
-    problems = list(chain_problems)
-    s = fold(init.events)
-    # dangling edges: every edge endpoint must be a known entity
-    known = set(s["entities"]) | set(s["artifacts"]) | set(s["tasks"]) | {
-        x["id"] for a in s["artifacts"].values()
-        for x in (a["data"].get("requirements", [])
-                  + a["data"].get("constraints", [])
-                  + a["data"].get("criteria", []))}
-    for ed in s["edges"]:
-        for end in (ed["from"], ed["to"]):
-            if end not in known and not is_dispatch_id(end):
-                problems.append(f"dangling edge {ed['kind']}: {end}")
-    saved = read_json(state_file(init.idir)) or {}
-    if saved.get("last_seq") != len(init.events):
-        problems.append(
-            f"state.json stale: last_seq {saved.get('last_seq')} "
-            f"!= journal {len(init.events)} — run `executor check` "
-            f"to refold")
-        write_json(state_file(init.idir), s | {"last_seq": len(init.events)})
-    # liveness ladder: an open slot whose task hasn't beaten in SUSPECT_S
-    # is suspect (early warning); past DEADLINE_S it's dead.
-    import time as _t
-    for x in open_slots(init.idir):
-        t = s["tasks"].get(x["entity"]) or s["dispatches"].get(
-            x["dispatch_id"])
-        if t:
-            last = t.get("last_beat") or t.get("dispatched_at") or ""
-            age = _t.time() - _iso2epoch(last) if last else 0
-            if SUSPECT_S < age <= DEADLINE_S:
-                problems.append(f"suspect dispatch: {x['dispatch_id']} "
-                                f"silent {int(age)}s")
-    # layout drift: every file under idir must live under a canonical dir.
-    # INIT-0002 shipped a stray `prompts/` dir this way.
-    canonical = {"meta", "journal", "dispatches", "artifacts", "plans",
-                 "tasks", "fixes", "reviews", "views", ".lock"}
-    for f in init.idir.rglob("*"):
-        if not f.is_file() or f.name in (".gitignore", ".DS_Store"):
-            continue
-        if f.relative_to(init.idir).parts[0] not in canonical:
-            problems.append(f"non-canonical file: "
-                            f"{f.relative_to(init.idir)}")
-    open_s = open_slots(init.idir)
-    return {"initiative": init.id, "events": len(init.events),
-            "chain": "broken" if chain_problems else "ok",
-            "problems": problems, "open_slots": len(open_s),
-            "dangling": [p for p in problems if "dangling" in p]}
+def check(init: Initiative, now: float | None = None) -> dict:
+    """Read-only audit. Writes nothing, so it is safe at any time. A stale fold
+    cache is reported; the next write refreshes it."""
+    with _exclusive(init.idir):
+        events, torn = scan_journal(init.idir)
+        chain = verify_chain(events)
+        problems = list(chain)
+        if torn:
+            problems.append(f"{torn} unparseable journal line(s) skipped")
+        unknown = sorted({str(e.get("kind")) for e in events} - KNOWN_KINDS)
+        if unknown:
+            problems.append(f"unknown event kind(s): {', '.join(unknown)}")
+        try:
+            s = fold(events)
+        except (KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
+            problems.append(f"fold failed: {exc}")
+            return _report(init, events, chain, problems, [])
+        known = _known_ids(s) | set(s["entities"]) | {init.id}
+        for ed in s["edges"]:
+            for end in (ed["from"], ed["to"]):
+                if end not in known and not is_dispatch_id(end):
+                    problems.append(f"dangling edge {ed['kind']}: {end}")
+        cache = read_json(state_file(init.idir)) or {}
+        if cache.get("last_seq") != len(events):
+            problems.append(f"state cache stale: last_seq "
+                            f"{cache.get('last_seq')} != journal {len(events)} "
+                            f"(the next write refreshes it)")
+        clock = _clock(now)
+        open_ = _open_slots(s)
+        for sl in open_:
+            silent = _silent_for(s["dispatches"][sl["dispatch_id"]], clock)
+            if silent > DEADLINE_S:
+                problems.append(f"dead dispatch {sl['dispatch_id']}: silent "
+                                f"{int(silent)}s (the next poll abandons it)")
+            elif silent > SUSPECT_S:
+                problems.append(f"suspect dispatch {sl['dispatch_id']}: silent "
+                                f"{int(silent)}s")
+        ddir = dispatches_dir(init.idir)
+        if ddir.exists():
+            for d in sorted(ddir.iterdir()):
+                if d.name not in s["dispatches"]:
+                    problems.append(f"orphan dispatch directory {d.name}: "
+                                    f"never journaled")
+        problems += _layout_problems(init)
+        return _report(init, events, chain, problems,
+                       [sl["dispatch_id"] for sl in open_])
+
+
+def _layout_problems(init: Initiative) -> list[str]:
+    out = []
+    run = run_root(init.root)
+    for f in sorted(init.idir.rglob("*")):
+        if f.is_file() and classify(f.relative_to(run), "run") is None:
+            out.append(f"non-canonical file: {f.relative_to(run).as_posix()}")
+    docs = docs_init_dir(init.root, init.id)
+    if docs.exists():
+        for f in sorted(docs.rglob("*")):
+            if f.is_file() and classify(f.relative_to(docs_root(init.root)),
+                                        "docs") is None:
+                out.append(f"non-canonical committed file: "
+                           f"{f.relative_to(docs_root(init.root)).as_posix()}")
+    return out
+
+
+def _report(init: Initiative, events: list[dict], chain: list[str],
+            problems: list[str], open_ids: list[str]) -> dict:
+    return {"initiative": init.id, "events": len(events),
+            "chain": "broken" if chain else "ok", "problems": problems,
+            "open_slots": len(open_ids), "open_dispatch_ids": open_ids,
+            "dangling": [p for p in problems if p.startswith("dangling")]}

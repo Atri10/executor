@@ -131,12 +131,6 @@ class PhaseTests(unittest.TestCase):
                          ev("gate_opened", INIT, {"phase": "intake"})))
         self.assertEqual(s["phase_state"]["intake"], "gate_pending")
 
-    def test_phase_passed_and_skipped_events_set_their_state(self):
-        s = fold(journal(ev("phase_passed", INIT, {"phase": "intake"}),
-                         ev("phase_skipped", INIT, {"phase": "discovery"})))
-        self.assertEqual(s["phase_state"], {"intake": "passed",
-                                            "discovery": "skipped"})
-
 
 class GateDecisionTests(unittest.TestCase):
     def decide(self, phase: str, decision: str, note: str | None = None):
@@ -246,7 +240,7 @@ class PlanTests(unittest.TestCase):
         rows = [PL.task_row("T01"), PL.task_row("T02", depends_on=["T01"])]
         s = with_plan(rows)
         self.assertEqual(s["plan_order"], [PLAN])
-        self.assertEqual(s["plans"][PLAN], {"status": "draft", "round": 0})
+        self.assertEqual(s["plans"][PLAN], {"status": "draft"})
         t2 = s["tasks"][f"{PLAN}-T02"]
         self.assertEqual((t2["state"], t2["round"], t2["fix_rounds"]),
                          ("pending", 0, 0))
@@ -399,7 +393,7 @@ class DispatchTests(unittest.TestCase):
                                     did="D00003")))
         self.assertEqual(s["dispatches"]["D00003"], {
             "entity": f"{INIT}-CHTR-01", "role": "author",
-            "schema": "charter", "at": T0,
+            "schema": "charter", "at": T0, "base": None, "context": {},
             "respond_to": "/x/D00003/payload.json"})
         self.assertIn({"from": "D00003", "to": f"{INIT}-CHTR-01",
                        "kind": "dispatched"}, s["edges"])
@@ -409,13 +403,14 @@ class DispatchTests(unittest.TestCase):
         s = with_plan(None, dispatched(TASK, "impl", "report", "D00007",
                                        base="abc1234"))
         t = s["tasks"][TASK]
-        self.assertEqual((t["state"], t["role"], t["dispatch_id"],
-                          t["dispatched_at"], t["base"]),
-                         ("dispatched", "impl", "D00007", T0, "abc1234"))
+        self.assertEqual((t["state"], t["role"], t["dispatch_id"], t["base"]),
+                         ("dispatched", "impl", "D00007", "abc1234"))
+        self.assertEqual(s["dispatches"]["D00007"]["at"], T0)
 
     def test_the_task_clock_starts_at_the_dispatch(self):
-        t = with_plan(None, dispatched(TASK, "impl", "report"))["tasks"][TASK]
-        self.assertEqual(t["last_beat"], T0)
+        s = with_plan(None, dispatched(TASK, "impl", "report", "D00004"))
+        self.assertEqual(s["dispatches"]["D00004"]["at"], T0)
+        self.assertNotIn("last_beat", s["dispatches"]["D00004"])
 
     def test_an_authoring_dispatch_registers_the_artifact_it_will_produce(
             self):
@@ -425,11 +420,6 @@ class DispatchTests(unittest.TestCase):
         s = fold(journal(created(), entered("intake"),
                          dispatched(aid, "author", "charter")))
         self.assertEqual(s["entities"][aid], {"type": "artifact"})
-
-    def test_a_task_dispatch_records_the_model_it_was_given(self):
-        t = with_plan(None, dispatched(TASK, "impl", "report",
-                                       model="alpha"))["tasks"][TASK]
-        self.assertEqual(t["model"], "alpha")
 
 
 class ReportTests(unittest.TestCase):
@@ -463,31 +453,13 @@ class ReportTests(unittest.TestCase):
         self.assertIn("INIT-0001-P09-T09", s["reports"])
         self.assertEqual(s["tasks"], {})
 
-    def test_a_report_from_another_model_than_dispatched_is_a_deviation(self):
-        s = with_plan(None,
-                      dispatched(TASK, "impl", "report", model="alpha"),
-                      ev("report", TASK,
-                         data_of(PL.report(model_actual="beta"))))
-        self.assertEqual(s["model_deviations"],
-                         [{"task": TASK, "expected": "alpha", "got": "beta"}])
-
-    def test_the_expected_model_or_no_claim_is_not_a_deviation(self):
-        for dispatch, claim in (({"model": "alpha"}, {"model_actual": "alpha"}),
-                                ({}, {"model_actual": "beta"}),
-                                ({"model": "alpha"}, {})):
-            with self.subTest(dispatch=dispatch, claim=claim):
-                s = with_plan(None,
-                              dispatched(TASK, "impl", "report", **dispatch),
-                              ev("report", TASK, data_of(PL.report(**claim))))
-                self.assertEqual(s["model_deviations"], [])
-
 
 class HeartbeatTests(unittest.TestCase):
-    def test_a_heartbeat_moves_the_task_clock(self):
+    def test_a_heartbeat_moves_the_dispatch_clock(self):
         later = "2026-01-01T00:20:00Z"
-        s = with_plan(None, dispatched(TASK, "impl", "report"),
-                      ev("heartbeat", TASK, {"task": TASK}, ts=later))
-        self.assertEqual(s["tasks"][TASK]["last_beat"], later)
+        s = with_plan(None, dispatched(TASK, "impl", "report", "D00004"),
+                      ev("heartbeat", TASK, {"task": TASK}, ts=later, did="D00004"))
+        self.assertEqual(s["dispatches"]["D00004"]["last_beat"], later)
         self.assertEqual(s["tasks"][TASK]["state"], "dispatched")
 
     def test_a_heartbeat_for_an_unknown_task_is_ignored(self):
@@ -539,13 +511,14 @@ class SpawnErrorTests(unittest.TestCase):
                          ev("spawn_error", TASK,
                             {"error_class": "rate_limit"}, did="D00005"))
 
-    def test_a_spawn_error_marks_the_dispatch_and_the_task(self):
+    def test_a_spawn_error_marks_the_dispatch_and_returns_the_task(self):
         """The dispatch id is on the event, not in data: reading it from data
-        crashed the fold after the event was already committed."""
+        crashed the fold after the event was already committed. The task goes
+        back to the state it was dispatched from, and the loss is counted."""
         s = self.failed()
-        self.assertEqual(s["dispatches"]["D00005"]["spawn_error"],
-                         "rate_limit")
-        self.assertEqual(s["tasks"][TASK]["state"], "spawn_error")
+        self.assertEqual(s["dispatches"]["D00005"]["spawn_error"], "rate_limit")
+        self.assertEqual(s["tasks"][TASK]["state"], "pending")
+        self.assertEqual(s["lost"], {f"{TASK}:report": 1})
 
     def test_a_spawn_error_for_an_unknown_dispatch_is_ignored(self):
         s = fold(journal(created(), ev("spawn_error", TASK,
@@ -667,21 +640,12 @@ class MergeTests(unittest.TestCase):
         s = with_plan(None, ev("merge", PLAN, {"plan": PLAN,
                                                "merge_sha": "abc1234"}))
         self.assertEqual(s["plans"][PLAN]["status"], "merged")
-        self.assertEqual(s["plans"][PLAN]["merge"], "abc1234")
+        self.assertEqual(s["plans"][PLAN]["merge_sha"], "abc1234")
 
     def test_a_merge_of_an_unplanned_plan_still_records_it(self):
         s = fold(journal(ev("merge", "INIT-0001-P09",
                             {"plan": "INIT-0001-P09", "merge_sha": "abc1234"})))
         self.assertEqual(s["plans"]["INIT-0001-P09"]["status"], "merged")
-
-    def test_the_older_plan_merged_spelling_is_understood_too(self):
-        s = with_plan(None, ev("plan_merged", PLAN,
-                               {"plan": PLAN, "merge": "feed123"}))
-        self.assertEqual(s["plans"][PLAN]["merge"], "feed123")
-
-    def test_plan_started_marks_a_plan_running(self):
-        s = with_plan(None, ev("plan_started", PLAN, {"plan": PLAN}))
-        self.assertEqual(s["plans"][PLAN]["status"], "running")
 
 
 class AnsweredTests(unittest.TestCase):

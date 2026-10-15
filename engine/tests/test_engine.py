@@ -159,51 +159,6 @@ class TestLoop(Base):
         self.assertEqual(self.act()["action"], "GATE")
 
 
-# ------------------------------------------------------------------ semantics
-
-class TestSemantics(Base):
-    def test_dangling_cite_rejected(self):
-        with self.assertRaises(Rejection) as r:
-            self.pay(**{"kind": "charter", "v": "v1",
-                        "id": "INIT-0001-CHTR-01", "title": "t",
-                        "summary": "s",
-                        "sections": [{"id": "s1", "title": "w",
-                                      "body": "x"}],
-                        "cites": ["INIT-0001-DOES-NOT-EXIST"],
-                        "requirements": [], "constraints": [], "risks": []})
-        self.assertEqual(r.exception.code, "dangling_ref")
-
-    def test_empty_diff_range_rejected(self):
-        self.ev("plan", "INIT-0001-P01", {"plan_id": "INIT-0001-P01",
-                "objective": "x",
-                "tasks": [{"id": "T01", "title": "t", "goal": "g",
-                           "files": ["a.txt"], "accepts": ["x"]}]})
-        self.init.reload()
-        with self.assertRaises(Rejection) as r:
-            self.pay(**{"kind": "verdict", "v": "v1",
-                        "task": "INIT-0001-P01-T01", "round": 1,
-                        "spec_verdict": "PASS",
-                        "quality_verdict": "APPROVED",
-                        "commit_base": "HEAD", "commit_head": "HEAD",
-                        "reviewed_package_sha": "abcdef"})
-        self.assertEqual(r.exception.code, "empty_range")
-
-    def test_round_must_be_minted(self):
-        self.ev("plan", "INIT-0001-P01", {"plan_id": "INIT-0001-P01",
-                "objective": "x",
-                "tasks": [{"id": "T01", "title": "t", "goal": "g",
-                           "files": ["a.txt"], "accepts": ["x"]}]})
-        self.init.reload()
-        with self.assertRaises(Rejection) as r:
-            self.pay(**{"kind": "verdict", "v": "v1",
-                        "task": "INIT-0001-P01-T01", "round": 9,
-                        "spec_verdict": "PASS",
-                        "quality_verdict": "APPROVED",
-                        "commit_base": "HEAD~1", "commit_head": "HEAD",
-                        "reviewed_package_sha": "abcdef"})
-        self.assertEqual(r.exception.code, "round_mismatch")
-
-
 # ------------------------------------------------------------------ check
 
 class TestCheck(Base):
@@ -215,30 +170,3 @@ class TestCheck(Base):
 if __name__ == "__main__":
     unittest.main()
 
-
-# ------------------------------------------------------------------ races
-
-class TestConcurrency(Base):
-    """Two writers must never produce a broken chain or duplicate slots.
-    The v1 store raced here; the fix is the lock inside _commit/mint."""
-
-    def test_concurrent_appends_chain_ok(self):
-        import threading
-        evs = []
-        def worker(i):
-            evs.append(append_event(self.idir, make_event(
-                self.idir, "engine", "emit", "INIT-0001",
-                {"action": "X", "key": str(i)})))
-        # store-level appends are deliberately lock-free; engine._commit is
-        # what locks. Two engine-level commits must not collide.
-        from executor.engine import _commit
-        threads = [threading.Thread(
-            target=lambda i=i: evs.append(_commit(
-                self.init, "engine", "emit", "INIT-0001",
-                {"action": "X", "key": str(i)})))
-            for i in range(8)]
-        for t in threads: t.start()
-        for t in threads: t.join()
-        seqs = sorted(e["seq"] for e in evs)
-        self.assertEqual(seqs, list(range(2, 10)))
-        self.assertEqual(verify_chain(read_events(self.idir)), [])

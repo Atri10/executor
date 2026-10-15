@@ -59,6 +59,7 @@ REQUIRED = {
     "spawn_error": {"kind", "v", "dispatch_id", "error_class"},
     "needs_context": {"kind", "v", "task", "question"},
     "merge": {"kind", "v", "plan", "merge_sha"},
+    "resume": {"kind", "v", "reason"},
 }
 EXTRA_KEYS = {
     **{k: ART_KEYS for k in ("options", "brainstorm", "adr", "ifce")},
@@ -87,10 +88,11 @@ EXTRA_KEYS = {
     "spawn_error": BASE_KEYS | {"error_class", "detail"},
     "needs_context": BASE_KEYS | {"task", "question", "for_role"},
     "merge": BASE_KEYS | {"plan", "merge_sha", "branch"},
+    "resume": BASE_KEYS | {"reason"},
 }
 RUNTIME_KINDS = ["report", "verdict", "heartbeat", "evidence",
                  "gate_decision", "ruling", "audit", "repair", "halt",
-                 "spawn_error", "needs_context", "merge"]
+                 "spawn_error", "needs_context", "merge", "resume"]
 
 
 class SchemaCase(unittest.TestCase):
@@ -480,11 +482,15 @@ class IdAnchoringTests(SchemaCase):
         for kind, key in cases.items():
             payload = {**GOOD[kind], key: TASK}
             validate(payload, schema_for(kind))
-            for bad in ("T01", "P01-T01", f"x{TASK}", f"{TASK}x",
-                        f"{INIT}-P01-T1", f"{INIT}-P01-T001", PLAN, ""):
+            bad_values = ["T01", "P01-T01", f"x{TASK}", f"{TASK}x",
+                          f"{INIT}-P01-T1", f"{INIT}-P01-T001", ""]
+            if kind != "ruling":        # a ruling may also name a plan
+                bad_values.append(PLAN)
+            for bad in bad_values:
                 with self.subTest(kind=kind, value=bad):
                     self.kind_rejects({**payload, key: bad}, "pattern",
                                       f"$.{key}")
+        validate({**GOOD["ruling"], "for_task": PLAN}, schema_for("ruling"))
 
     def test_criterion_ids_are_anchored(self):
         for good in ("V1", "V12", "V007"):
@@ -938,6 +944,7 @@ BOUNDS = {
     ("evidence", "state_commit", "minLength"): 4,
     ("ruling", "decision", "minLength"): 1,
     ("ruling", "why", "minLength"): 1,
+    ("resume", "reason", "minLength"): 1,
     ("audit", "round", "minimum"): 1,
     ("audit", "findings[].id", "minLength"): 1,
     ("audit", "findings[].claim", "minLength"): 1,
@@ -955,6 +962,7 @@ CONSTRAINTS = ("minLength", "maxLength", "minItems", "minimum")
 # fails test_every_pattern_in_use_has_a_sample_value.
 PATTERN_SAMPLES = {
     P.TASK_ID: TASK, P.PLAN_ID: PLAN, P.DISPATCH_ID: "D00001",
+    f"(?:{P.TASK_ID}|{P.PLAN_ID})": TASK,
     S.ARTIFACT_OR_PLAN: PLAN, S.TASK_LOCAL: "T01",
     r"R\d+": "R1", r"C\d+": "C1", r"V\d+": "V1",
     **{P.artifact_pattern(k): f"{INIT}-{seg}-01"

@@ -331,7 +331,7 @@ RULING = _obj({
     "answered": _str(),
     "unsolicited": _str(),
     "stop": {"type": "boolean"},
-    "for_task": _str(pattern=TASK_ID),
+    "for_task": _str(pattern=f"(?:{TASK_ID}|{PLAN_ID})"),
 }, req=["kind", "v", "decision", "why"])
 
 AUDIT = _obj({
@@ -378,6 +378,12 @@ MERGE = _obj({
     "branch": _str(),
 }, req=["kind", "v", "plan", "merge_sha"])
 
+RESUME = _obj({
+    **_base("resume"),
+    "reason": _str(minLength=1),
+}, req=["kind", "v", "reason"])
+
+
 SCHEMAS = {
     "report": REPORT,
     "verdict": VERDICT,
@@ -391,6 +397,7 @@ SCHEMAS = {
     "audit": AUDIT,
     "repair": REPAIR,
     "merge": MERGE,
+    "resume": RESUME,
 }
 
 

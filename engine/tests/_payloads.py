@@ -135,4 +135,5 @@ GOOD: dict[str, dict] = {
     "spawn_error": spawn_error(),
     "needs_context": needs_context(),
     "merge": merge(),
+    "resume": {"kind": "resume", "v": "v1", "reason": "client confirmed"},
 }
