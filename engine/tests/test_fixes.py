@@ -9,9 +9,12 @@ from pathlib import Path
 
 import _payloads as PL
 from _live import Live
-from executor.engine import MAX_FIX_ROUNDS, ingest
+from executor.engine import ingest
+from executor.policy import DEFAULTS
 from executor.paths import fix_package_file, fix_report_file
 from executor.store import read_json
+
+MAX_FIX_ROUNDS = DEFAULTS["max_fix_rounds"]
 
 
 def _json(path: Path) -> dict:

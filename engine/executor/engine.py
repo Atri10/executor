@@ -35,6 +35,7 @@ from .paths import (artifact_file, audit_file, classify, dispatch_id,
                     plan_audit_file, plan_file, plan_repair_file, preflight_file,
                     prompt_file, repair_file, review_package_file, run_root,
                     state_file, task_impl_report, verdict_file)
+from .policy import default_state, load_policy, policy_sha
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
                     append_event, atomic_write, init_store, make_event,
@@ -43,13 +44,6 @@ from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
 from .views import (render_all, render_handoff_index, render_handoff_md,
                     render_report_md, render_verdict_md)
 
-MAX_FIX_ROUNDS = 5        # fix dispatches per task before the run escalates
-MAX_AUDIT_ROUNDS = 5      # audit rounds per artifact or plan before escalation
-MAX_EVIDENCE_TRIES = 5    # evidence attempts per criterion before escalation
-MAX_PLANS = 9             # plans per initiative (ids run P01..P09)
-SPAWN_RETRY_CAP = 2       # lost dispatches per entity and schema (spawn error or abandon)
-SUSPECT_S = 1800          # silence before check warns about a dispatch
-DEADLINE_S = 3600         # silence after which the next poll abandons a dispatch
 
 # A human sends these: a worker cannot approve its own gate or rule on its own concern.
 HUMAN_KINDS = frozenset({"gate_decision", "ruling", "resume"})
@@ -60,7 +54,7 @@ HALT_OPEN_KINDS = frozenset({"ruling", "resume"})
 SLOT_FREE_KINDS = HUMAN_KINDS | {"halt", "merge"}
 # Kinds the engine writes itself; a worker can never produce these.
 ENGINE_KINDS = frozenset({"created", "phase_entered", "gate_opened",
-                          "task_dispatched", "abandon", "preflight"})
+                          "task_dispatched", "abandon", "preflight", "policy"})
 WORKER_KINDS = (frozenset({"report", "heartbeat", "verdict", "spawn_error",
                            "needs_context", "evidence", "audit"})
                 | frozenset(ARTIFACT_KINDS))
@@ -81,7 +75,6 @@ _AKIND = {"charter": "CHTR-01", "options": "OPTS-01", "brainstorm": "BRN-01",
           "arch": "ARCH-01", "adr": "ADR-01", "ifce": "IFCE-01",
           "design": "DSGN-01", "spec": "SPEC-01", "risk": "RISK-01",
           "vrfy": "VRFY-01"}
-_CLEAN_QUALITY = ("APPROVED", "APPROVED_WITH_ROUTED_RESIDUALS")
 
 _held = threading.local()
 
@@ -167,6 +160,7 @@ def fold(events: list[dict]) -> dict:
         "dispatches": {}, "answered": {}, "lost": {},
         "needs_ruling": [], "questions": [],
         "halt": None, "done": False, "entities": {}, "edges": [],
+        "policy": default_state(),
         "seq": len(events),
     }
     for ev in events:
@@ -227,6 +221,8 @@ def _apply(s: dict, ev: dict) -> None:
         _apply_preflight(s, d)
     elif k == "evidence":
         s["evidence"].setdefault(d["criterion"], []).append(d)
+    elif k == "policy":
+        s["policy"] = {**d, "recorded": True}
     elif k == "merge":
         s["plans"].setdefault(d["plan"], {"status": "draft"}).update(
             status="merged", merge_sha=d["merge_sha"])
@@ -351,7 +347,7 @@ def _apply_verdict(s: dict, tid: str, d: dict) -> None:
         return
     t["round"] = d["round"]
     clean = (d["spec_verdict"] == "PASS"
-             and d["quality_verdict"] in _CLEAN_QUALITY)
+             and d["quality_verdict"] in s["policy"]["values"]["clean_quality"])
     t["state"] = "complete" if clean else "fix_needed"
     if not clean:
         t["fix_rounds"] += 1
@@ -493,6 +489,19 @@ def _record(init: Initiative, actor: str, kind: str, entity: str, data: dict,
     return _append(init, _event(init, actor, kind, entity, data, dispatch_id_))
 
 
+def _sync_policy(init: Initiative) -> dict:
+    """Journal the effective policy when it differs from the one in force. The
+    caller holds the lock. Ingest calls this only after every check has passed,
+    so a rejected payload journals no policy change."""
+    values, sources = load_policy(init.root, init.id)
+    sha = policy_sha(values)
+    state = fold(init.events)["policy"]
+    if not state["recorded"] or state["sha"] != sha:
+        _record(init, "engine", "policy", init.id,
+                {"values": values, "sources": sources, "sha": sha})
+    return values
+
+
 def _project(init: Initiative) -> None:
     """Refresh the fold cache and every projection after a journal change. Once
     the handoff gate is approved, the committed handoff files follow."""
@@ -556,6 +565,7 @@ def emit_next(init: Initiative, now: float | None = None) -> dict:
     with _exclusive(init.idir):
         init.reload()
         before = len(init.events)
+        _sync_policy(init)
         act = _decide(init, fold(init.events), _clock(now))
         if len(init.events) != before:
             _project(init)
@@ -628,9 +638,10 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
     if ph == "verification":
         return _verification(init, s, now)
     if ph == "planning" and _more_plans_wanted(s):
-        if len(s["plan_order"]) >= MAX_PLANS:
+        cap = s["policy"]["values"]["max_plans"]
+        if len(s["plan_order"]) >= cap:
             return _escalate(init, f"the planner asked for more than "
-                                   f"{MAX_PLANS} plans")
+                                   f"{cap} plans")
         return _author(init, s, "plan", now)
     for kind in PHASE_ARTIFACTS.get(ph, []):
         if not any(a["kind"] == kind for a in s["artifacts"].values()):
@@ -641,9 +652,10 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
         c = s["critiques"].get(_crit_key(s, tgt))
         if c is None or c["status"] == "repaired":
             rnd = _audit_rounds(s, tgt)
-            if rnd >= MAX_AUDIT_ROUNDS:
+            cap = s["policy"]["values"]["max_audit_rounds"]
+            if rnd >= cap:
                 return _escalate(init, f"{tgt} not cleared after "
-                                       f"{MAX_AUDIT_ROUNDS} audit rounds")
+                                       f"{cap} audit rounds")
             return _dispatch(init, s, "audit", tgt, "audit", now=now,
                              context={"round": rnd + 1})
         if c["status"] == "fail":
@@ -671,9 +683,10 @@ def _verification(init: Initiative, s: dict, now: float):
         runs = s["evidence"].get(crit["id"], [])
         if runs and runs[-1]["verdict"] == "proven":
             continue
-        if len(runs) >= MAX_EVIDENCE_TRIES:
+        cap = s["policy"]["values"]["max_evidence_tries"]
+        if len(runs) >= cap:
             return _escalate(init, f"{crit['id']} not proven after "
-                                   f"{MAX_EVIDENCE_TRIES} attempts")
+                                   f"{cap} attempts")
         return _dispatch(init, s, "evidence", crit["id"], "evidence", now=now,
                          context={"criterion": crit["criterion"],
                                   "procedure": crit["procedure"]})
@@ -720,9 +733,10 @@ def _plan_step(init: Initiative, s: dict, pid: str, now: float):
         if st == "reported":
             return _review(init, s, tid, now)
         if st == "fix_needed":
-            if t["fix_rounds"] >= MAX_FIX_ROUNDS:
+            cap = s["policy"]["values"]["max_fix_rounds"]
+            if t["fix_rounds"] >= cap:
                 return _escalate(init, f"{tid} hit the fix-round cap "
-                                       f"({MAX_FIX_ROUNDS})")
+                                       f"({cap})")
             return _dispatch(init, s, "fix", tid, "report", now=now,
                              base=t["base"],
                              context={"round": t["fix_rounds"],
@@ -819,16 +833,17 @@ def _dispatch(init: Initiative, s: dict, role: str, entity: str, schema: str,
     the same entity and schema is re-emitted, never duplicated; one silent past
     the deadline is abandoned first. The dispatch id is the seq of the event
     that records it, so the id and the journal cannot disagree."""
+    pol = s["policy"]["values"]
     open_sl = _open_for(s, entity, schema)
     if open_sl is not None:
-        if _silent_for(s["dispatches"][open_sl["dispatch_id"]], now) <= DEADLINE_S:
+        if _silent_for(s["dispatches"][open_sl["dispatch_id"]], now) <= pol["deadline_s"]:
             return _dispatch_action(init, open_sl)
         _record(init, "engine", "abandon", entity,
-                {"reason": f"silent past {DEADLINE_S}s"},
+                {"reason": f"silent past {pol['deadline_s']}s"},
                 dispatch_id_=open_sl["dispatch_id"])
         s = fold(init.events)
     lost = s["lost"].get(f"{entity}:{schema}", 0)
-    if lost > SPAWN_RETRY_CAP:
+    if lost > pol["spawn_retry_cap"]:
         return _escalate(init, f"{entity}: {schema} dispatch lost {lost} times")
     ctx = dict(context or {})
     package = None
@@ -922,6 +937,7 @@ def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
         digest = sha256(payload)
         if kind in SLOT_FREE_KINDS:
             entity = _check_free(init, s, payload)
+            _sync_policy(init)
             ev = _event(init, actor, kind, entity, _data_for(payload),
                         payload_sha=digest)
         else:
@@ -932,6 +948,7 @@ def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
                     return {"deduplicated": True}
                 raise
             entity = _check(init, s, payload, sl)
+            _sync_policy(init)
             ev = _event(init, actor, kind, entity, _data_for(payload),
                         dispatch_id_=sl["dispatch_id"], payload_sha=digest)
             _effects(init, s, payload, sl)
@@ -1261,6 +1278,7 @@ def create_initiative(root: Path, title: str) -> Initiative:
     with _exclusive(idir):
         init.reload()
         _record(init, "engine", "created", iid, {"title": title})
+        _sync_policy(init)
         _project(init)
     return init
 
@@ -1294,14 +1312,23 @@ def check(init: Initiative, now: float | None = None) -> dict:
             problems.append(f"state cache stale: last_seq "
                             f"{cache.get('last_seq')} != journal {len(events)} "
                             f"(the next write refreshes it)")
+        pol = s["policy"]["values"]
+        try:
+            files, _ = load_policy(init.root, init.id)
+            if policy_sha(files) != s["policy"]["sha"]:
+                problems.append("policy drift: the policy files differ from the "
+                                "journal's last policy event (the next poll or "
+                                "ingest records them)")
+        except ExecError as exc:
+            problems.append(f"policy invalid: {exc}")
         clock = _clock(now)
         open_ = _open_slots(s)
         for sl in open_:
             silent = _silent_for(s["dispatches"][sl["dispatch_id"]], clock)
-            if silent > DEADLINE_S:
+            if silent > pol["deadline_s"]:
                 problems.append(f"dead dispatch {sl['dispatch_id']}: silent "
                                 f"{int(silent)}s (the next poll abandons it)")
-            elif silent > SUSPECT_S:
+            elif silent > pol["suspect_s"]:
                 problems.append(f"suspect dispatch {sl['dispatch_id']}: silent "
                                 f"{int(silent)}s")
         ddir = dispatches_dir(init.idir)

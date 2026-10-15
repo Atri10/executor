@@ -10,9 +10,13 @@ import unittest
 
 import _payloads as PL
 from _live import Live
-from executor.engine import DEADLINE_S, SUSPECT_S, check
+from executor.engine import check
+from executor.policy import DEFAULTS
 from executor.paths import docs_init_dir, journal_file
 from executor.store import append_event, make_event
+
+DEADLINE_S = DEFAULTS["deadline_s"]
+SUSPECT_S = DEFAULTS["suspect_s"]
 
 INIT = PL.INIT
 

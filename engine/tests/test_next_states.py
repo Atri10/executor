@@ -8,8 +8,11 @@ import unittest
 
 import _payloads as PL
 from _live import Live
-from executor.engine import MAX_EVIDENCE_TRIES, ingest, open_dispatches
+from executor.engine import ingest, open_dispatches
+from executor.policy import DEFAULTS
 from executor.store import append_event, make_event
+
+MAX_EVIDENCE_TRIES = DEFAULTS["max_evidence_tries"]
 
 
 class LiveCase(unittest.TestCase):

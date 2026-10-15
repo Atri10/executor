@@ -9,7 +9,8 @@ from pathlib import Path
 
 import _payloads as PL
 from _live import Live
-from executor.engine import MAX_PLANS, check, fold, ingest
+from executor.engine import check, fold, ingest
+from executor.policy import DEFAULTS
 from executor.paths import (artifact_file, audit_file, docs_artifact_file,
                             docs_export_journal, docs_index_file, docs_index_md,
                             docs_plan_file, docs_report_file, docs_verdict_file,
@@ -17,6 +18,8 @@ from executor.paths import (artifact_file, audit_file, docs_artifact_file,
                             preflight_file, repair_file, review_package_file,
                             task_impl_report, verdict_file)
 from executor.store import read_json, sha256
+
+MAX_PLANS = DEFAULTS["max_plans"]
 
 INIT = PL.INIT
 CHARTER = f"{INIT}-CHTR-01"

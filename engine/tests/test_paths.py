@@ -168,6 +168,12 @@ SPEC = {
     "docs_export_journal": (lambda: P.docs_export_journal(ROOT, INIT),
                             f"{D}/export/events.jsonl",
                             ("docs", "docs_export", {"init": INIT})),
+    "project_policy_file": (lambda: P.project_policy_file(ROOT),
+                            "docs/executor/config.json",
+                            ("docs", "docs_project_policy", {})),
+    "initiative_policy_file": (lambda: P.initiative_policy_file(ROOT, INIT),
+                               f"{D}/meta/policy.json",
+                               ("docs", "docs_initiative_policy", {"init": INIT})),
 }
 
 # Grammar utilities that are not path helpers.

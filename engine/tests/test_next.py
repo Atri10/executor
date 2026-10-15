@@ -9,9 +9,13 @@ import unittest
 
 import _payloads as PL
 from _live import Live
-from executor.engine import (DEADLINE_S, MAX_AUDIT_ROUNDS, SPAWN_RETRY_CAP,
-                             check, ingest, open_dispatches)
+from executor.engine import check, ingest, open_dispatches
+from executor.policy import DEFAULTS
 from executor.store import PHASES, verify_chain
+
+DEADLINE_S = DEFAULTS["deadline_s"]
+MAX_AUDIT_ROUNDS = DEFAULTS["max_audit_rounds"]
+SPAWN_RETRY_CAP = DEFAULTS["spawn_retry_cap"]
 
 
 class LiveCase(unittest.TestCase):

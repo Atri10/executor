@@ -322,6 +322,16 @@ def docs_export_journal(root: _P, init_id: str) -> _P:
     return docs_init_dir(root, init_id) / "export" / "events.jsonl"
 
 
+def project_policy_file(root: _P) -> _P:
+    """The committed project policy: engine tunables every initiative inherits."""
+    return docs_root(root) / "config.json"
+
+
+def initiative_policy_file(root: _P, init_id: str) -> _P:
+    """An initiative's committed policy; its keys override the project file."""
+    return docs_init_dir(root, init_id) / "meta" / "policy.json"
+
+
 # ---------------------------------------------------------------- grammar
 # Each row is (kind, pattern). A pattern describes a file path relative to its
 # store root. Back-references tie every nested id to its owner, so an artifact
@@ -378,6 +388,8 @@ _RUN_ROWS = (
 )
 
 _DOCS_ROWS = (
+    ("docs_project_policy", r"config\.json"),
+    ("docs_initiative_policy", _I + r"/meta/policy\.json"),
     ("docs_index_json", _I + r"/meta/index\.json"),
     ("docs_index_md", _I + r"/meta/index\.md"),
     ("docs_artifact_json", _I + r"/artifacts/" + _ART + r"/artifact\.json"),

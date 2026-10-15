@@ -283,13 +283,15 @@ REPORT = _obj({
     "model_actual": _str(),
 }, req=["kind", "v", "task", "result", "summary", "commits"])
 
+QUALITY_VERDICTS = ("APPROVED", "NEEDS_FIXES", "APPROVED_WITH_ROUTED_RESIDUALS")
+
+
 VERDICT = _obj({
     **_base("verdict"),
     "task": _str(pattern=TASK_ID),
     "round": _int(minimum=1),
     "spec_verdict": _enum("PASS", "FAIL"),
-    "quality_verdict": _enum("APPROVED", "NEEDS_FIXES",
-                             "APPROVED_WITH_ROUTED_RESIDUALS"),
+    "quality_verdict": _enum(*QUALITY_VERDICTS),
     "findings": _arr(FINDING),
     "model_actual": _str(),
     "commit_base": _str(minLength=4),
@@ -374,6 +376,19 @@ RESUME = _obj({
     **_base("resume"),
     "reason": _str(minLength=1),
 }, req=["kind", "v", "reason"])
+
+
+POLICY = _obj({
+    "v": _enum("v1"),
+    "max_fix_rounds": _int(),
+    "max_audit_rounds": _int(),
+    "max_evidence_tries": _int(),
+    "max_plans": _int(),
+    "spawn_retry_cap": _int(),
+    "suspect_s": _int(),
+    "deadline_s": _int(),
+    "clean_quality": _arr(_enum(*QUALITY_VERDICTS), minItems=1),
+}, req=["v"])
 
 
 SCHEMAS = {
