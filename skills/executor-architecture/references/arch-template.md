@@ -22,16 +22,41 @@ describe") rather than being cut.
  "interfaces": ["INIT-0004-IFCE-01"],
  "decisions": ["INIT-0004-ADR-01", "INIT-0004-ADR-02"],
  "sections": [
-   {"id": "context", "title": "Context and forces", "body": "…"},
-   {"id": "inventory", "title": "Component inventory", "body": "…"},
-   {"id": "boundaries", "title": "Boundaries", "body": "…"},
-   {"id": "dataflow", "title": "Data flow", "body": "…"},
-   {"id": "failures", "title": "Failure modes", "body": "…"},
-   {"id": "deployment", "title": "Deployment shape", "body": "…"},
-   {"id": "nondecisions", "title": "What this document does not decide", "body": "…"},
-   {"id": "produced", "title": "Decisions and interfaces produced", "body": "…"}
+   {"id": "context", "title": "Context and forces",
+    "prose": "…",
+    "tables": [{"caption": "The forces, and where each comes from",
+                "columns": ["Force", "Source", "Consequence for structure"],
+                "rows": [["p99 under 200ms at 10k tenants", "charter criteria", "Placement cannot call the network per request"]]}]},
+   {"id": "inventory", "title": "Component inventory",
+    "tables": [{"columns": ["Component", "Responsibility (one line)", "Layer"],
+                "rows": [["placement-service", "Chooses the cell a tenant belongs to", "policy"]]}]},
+   {"id": "boundaries", "title": "Boundaries",
+    "prose": "Dependencies point inward toward policy; frameworks, databases, transports, and vendors stay replaceable details at the edge.",
+    "tables": [{"columns": ["Component", "May depend on", "Must not depend on", "Enforced by"],
+                "rows": [["placement-service", "placement-rules, CellStore port", "Any adapter, any SQL, any HTTP type", "No imports outside core/, import lint rule"]]}],
+    "code": [{"lang": "mermaid", "source": "flowchart LR\n    H[http-edge] --> UC[placement-service]\n    SQ[sqlite-cell-store] -->|implements| SP[CellStore port]"}]},
+   {"id": "dataflow", "title": "Data flow",
+    "prose": "…",
+    "tables": [{"columns": ["Step", "From", "To", "Data"],
+                "rows": [["1", "http-edge", "admission-control", "PlacementRequest"]]}]},
+   {"id": "failures", "title": "Failure modes",
+    "tables": [{"columns": ["Failure", "Detected by", "Blast radius", "Response", "Designed or accepted"],
+                "rows": [["Cell store unreachable", "CellStore call raises StoreUnavailable", "All placements for that cell", "Fail the request, retry-after", "designed"]]}]},
+   {"id": "deployment", "title": "Deployment shape",
+    "bullets": ["One process per region.", "Cell stores are local files on the same node."]},
+   {"id": "nondecisions", "title": "What this document does not decide",
+    "bullets": ["Cell sizing policy — deferred to INIT-0004-SPEC-01."]},
+   {"id": "produced", "title": "Decisions and interfaces produced",
+    "tables": [{"columns": ["ID", "Kind", "Covers"],
+                "rows": [["INIT-0004-ADR-01", "adr", "Per-cell SQLite over a shared cluster"]]}]}
  ]}
 ```
+
+**The tables in this document are the content your payload's `tables[]`
+carries** — `columns` plus `rows`, one cell per column. A Markdown
+diagram is `code` with `lang: "mermaid"`, not a fence in a string: a pipe
+table, a fence, or a heading inside `prose` is a schema rejection,
+because the engine renders every `.md` from this data.
 
 `interfaces` and `decisions` are filled as those artifacts are written —
 every ID begins with this initiative's ID, no exceptions.

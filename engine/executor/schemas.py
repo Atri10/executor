@@ -64,6 +64,17 @@ def validate(obj, schema: dict, field: str = "$") -> None:
                             f"len<={schema['maxLength']}", f"len={len(obj)}")
         if "pattern" in schema and not re.fullmatch(schema["pattern"], obj):
             raise Rejection("pattern", field, schema["pattern"], obj[:60])
+        if "notMatch" in schema:
+            for rule in schema["notMatch"]:
+                if re.search(rule, obj):
+                    raise Rejection("notMatch", field,
+                                    f"no match for {rule}", obj[:60])
+        if schema.get("nonBlank") and not obj.strip():
+            # Whitespace is not content: it passes minLength and renders
+            # an empty paragraph, a list item with no text, or a blank
+            # table cell — a payload that looks answered and is not.
+            raise Rejection("nonBlank", field, "non-whitespace text",
+                            repr(obj[:20]))
     if stype == "integer":
         if "minimum" in schema and obj < schema["minimum"]:
             raise Rejection("minimum", field, f">={schema['minimum']}",
@@ -88,6 +99,12 @@ def validate(obj, schema: dict, field: str = "$") -> None:
         for k, sub in props.items():
             if k in obj:
                 validate(obj[k], sub, f"{field}.{k}")
+        # An object-level invariant no per-property check can express: the
+        # named function reads several fields at once and rejects with the
+        # field path of the offending member.
+        shape = schema.get("shape")
+        if shape:
+            SHAPES[shape](obj, field)
     if stype == "array":
         if "minItems" in schema and len(obj) < schema["minItems"]:
             raise Rejection("minItems", field,
@@ -119,9 +136,12 @@ BASE = {
 }
 
 
-def _obj(props, req=None, extra=False):
-    return {"type": "object", "properties": props,
-            "required": req or [], "additionalProperties": extra}
+def _obj(props, req=None, extra=False, shape=None):
+    d = {"type": "object", "properties": props,
+         "required": req or [], "additionalProperties": extra}
+    if shape:
+        d["shape"] = shape
+    return d
 
 
 def _arr(items, **kw):
@@ -153,29 +173,103 @@ def _base(kind: str) -> dict:
 
 # ------------------------------------------------------------ artifacts
 
+# A payload carries DATA; the engine renders markdown. These patterns exist
+# so a payload cannot become a second renderer: a pipe table, a fence, or a
+# heading inside a string is formatting the caller was supposed to leave to
+# views._render_doc, and two renderers drift.
+MD_TABLE = r"(?m)^\s*\|"
+MD_FENCE = r"```"
+MD_HEAD = r"(?m)^#{1,6}\s"
+MD_BULLET = r"(?m)^\s*[-*+]\s"
+MD_RULE = r"(?m)^\s*(?:-{3,}|\*{3,}|_{3,})\s*$"
+# What any prose-ish string may not contain: the three markdown constructs
+# that have a structured home in the payload.
+NO_MD = [MD_TABLE, MD_FENCE, MD_HEAD]
+# A table cell becomes one rendered cell: a pipe would end the row early and
+# a newline would end the table, so neither is data.
+NO_CELL_MD = [r"\|", r"[\r\n]"]
+
+
+def _table_rows_match_columns(obj: dict, field: str) -> None:
+    """Every row carries one cell per column: a short row renders a table
+    whose cells shift under a reader's eye, and a long one is silently
+    truncated by the renderer. Neither is acceptable in the thinking store."""
+    width = len(obj["columns"])
+    for i, row in enumerate(obj.get("rows", [])):
+        if len(row) != width:
+            raise Rejection(
+                "row_width", f"{field}.rows[{i}]",
+                f"{width} cells (one per column)", f"{len(row)} cells")
+
+
+def _section_has_content(obj: dict, field: str) -> None:
+    """A section with no shape is a heading promising text that is not
+    there: prose, bullets, tables, or code — at least one, or it is a
+    title with nothing under it."""
+    if not any(obj.get(k) for k in ("prose", "bullets", "tables", "code")):
+        raise Rejection("empty_section", field,
+                        "prose, bullets, tables, or code", "none present")
+
+
+SHAPES = {"table": _table_rows_match_columns,
+          "section": _section_has_content}
+
+
+def _prose(**kw):
+    """Paragraph text: content, not formatting."""
+    return _str(nonBlank=True, notMatch=NO_MD, **kw)
+
+
+def _cell(**kw):
+    """One rendered table cell."""
+    return _str(nonBlank=True, notMatch=NO_CELL_MD, **kw)
+
+
+def _bullet_list(**kw):
+    return _arr(_str(nonBlank=True, notMatch=NO_MD + [MD_BULLET], **kw))
+
+
+TABLE = _obj({
+    "caption": _str(maxLength=200),
+    "columns": _arr(_cell(minLength=1), minItems=1),
+    "rows": _arr(_arr(_cell(minLength=1), minItems=1), minItems=1),
+}, req=["columns", "rows"], shape="table")
+
+CODE = _obj({
+    "lang": _str(),
+    "source": _str(minLength=1),
+}, req=["source"])
+
+# A section is structured content: prose paragraphs, bullet items, tables,
+# and code blocks are four shapes, each with a typed home, so the renderer
+# never guesses. At least one shape must be present — an empty section is a
+# heading in the store promising text that is not there.
 SECTION = _obj({
     "id": _str(minLength=1),
     "title": _str(minLength=1),
-    "body": _str(minLength=1, maxLength=12000),
-}, req=["id", "title", "body"])
+    "prose": _prose(minLength=1, maxLength=12000),
+    "bullets": _bullet_list(minLength=1),
+    "tables": _arr(TABLE, minItems=1),
+    "code": _arr(CODE, minItems=1),
+}, req=["id", "title"], shape="section")
 
 REQUIREMENT = _obj({
     "id": _str(pattern=r"R\d+"),
-    "requirement": _str(minLength=1),
-    "observable": _str(),
+    "requirement": _prose(minLength=1),
+    "observable": _prose(),
     "cites": _arr(_str()),
 }, req=["id", "requirement", "observable"])
 
 CONSTRAINT = _obj({
     "id": _str(pattern=r"C\d+"),
-    "constraint": _str(minLength=1),
-    "observable": _str(),
+    "constraint": _prose(minLength=1),
+    "observable": _prose(),
 }, req=["id", "constraint", "observable"])
 
 CRITERION = _obj({
     "id": _str(pattern=r"V\d+"),
-    "criterion": _str(minLength=1),
-    "procedure": _str(minLength=1),
+    "criterion": _prose(minLength=1),
+    "procedure": _prose(minLength=1),
     "cites": _arr(_str()),
 }, req=["id", "criterion", "procedure"])
 
@@ -186,7 +280,7 @@ TASK_LOCAL = r"T\d{2}"
 TASK = _obj({
     "id": _str(pattern=TASK_LOCAL),
     "title": _str(minLength=1),
-    "goal": _str(minLength=1),
+    "goal": _prose(minLength=1),
     "files": _arr(_str(minLength=1), minItems=1),
     "accepts": _arr(_str(minLength=1), minItems=1),
     "provides": _arr(_str()),
@@ -197,8 +291,8 @@ TASK = _obj({
 FINDING = _obj({
     "id": _str(minLength=1),
     "severity": _enum("critical", "important", "minor", "info"),
-    "claim": _str(minLength=1),
-    "evidence": _str(),
+    "claim": _prose(minLength=1),
+    "evidence": _prose(),
     "fix_scope": _enum("instance", "class"),
     "class_hint": _str(),
     "status": _enum("open", "fixed", "waived", "routed"),
@@ -212,7 +306,7 @@ def artifact_schema(artifact_kind: str) -> dict:
     props = {
         "id": _str(pattern=artifact_pattern(artifact_kind)),
         "title": _str(minLength=1),
-        "summary": _str(minLength=1),
+        "summary": _prose(minLength=1),
         "sections": _arr(SECTION),
         "cites": _arr(_str()),
     }

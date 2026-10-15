@@ -156,7 +156,9 @@ Tasks are `T01`…`Tnn` **per plan**, local ids. `P02` starts again at
 ### `objective` and `sections`
 
 `objective` is the one-sentence goal. The `sections` carry the plan's
-contract prose, in this order:
+contract prose, in this order — each section as `prose` or `bullets`,
+each grid as a `tables[]` entry with `columns` plus `rows`; the engine
+renders the `.md`, so no payload ever carries formatting:
 
 | Section | Contains |
 |---|---|

@@ -243,6 +243,13 @@ class Internals(LiveCase):
         be read: an unreadable one contributes zero seconds of silence."""
         self.assertEqual(_silent_for({"at": "not a timestamp"}, 10**9), 0.0)
 
+    def test_an_absent_stamp_counts_as_no_silence_too(self):
+        """The same rule covers a slot that carries no stamp at all: a
+        KeyError there would crash liveness judgement instead of reporting
+        the store as broken."""
+        self.assertEqual(_silent_for({}, 10**9), 0.0)
+        self.assertEqual(_silent_for({"at": None}, 10**9), 0.0)
+
     def test_entity_for_falls_back_to_the_dispatch_id_for_unknown_kinds(self):
         """Slot-bearing kinds map to their natural entity; a kind the mapper
         does not know yet still identifies itself by dispatch_id."""

@@ -47,6 +47,11 @@ Subagent (general-purpose):
     ## Identity
 
     **Session:** [SESSION_ID] — [SESSION_DIR]
+    **`dispatch_id`:** [the row the controller added to the session's
+    `Dispatch log`; your return echoes it]
+    **`respond_to`:** [OUTPUT_FILE — the payload path under
+    merges into the artifact's `sections` on commit]
+    **`kind`:** `brainstorm` (the artifact this section feeds)
     **Question:** [QUESTION]
     **Brief:** [BRIEF_FILE], section `## Brief`
     **Repository root:** [REPO_ROOT]
@@ -199,75 +204,78 @@ Subagent (general-purpose):
 
     ## Verification
 
-    1. Re-read [OUTPUT_FILE] from disk — every section below present,
-       `None.` under any empty one.
+    1. Re-read your payload from disk and parse it as JSON — a file that
+       does not parse is not a survey. Every `sections[]` id is present
+       and no body is empty (`None.` where nothing was found).
     2. Spot-check three cited `path:line` references by opening them;
        fix any that point at the wrong line.
-    3. Confirm `git status --short` shows [OUTPUT_FILE] as your only
-       change.
+    3. Confirm `git status --short` shows nothing but your payload file:
+       you are read-only on the repository besides it.
 
     ## The Output File
 
-    ```markdown
-    ---
-    kind: prior-art
-    session: [SESSION_ID]
-    question: [QUESTION]
-    title: Prior art for [SESSION_TOPIC]
-    created_at: <UTC from an executed command>
-    updated_at: <same>
-    ---
+    You write **one JSON file** to `respond_to` — never markdown. The
+    engine renders every `.md` a reader sees; a hand-written one is a
+    second source of truth that cannot be validated. Your `sections[]`
+    carry typed content — `prose`, `bullets`, `tables`, `code` — and the
+    controller merges them verbatim into the `brainstorm` artifact's own
+    `sections[]` before `executor ingest` checks the closed object. A
+    table is `columns` plus `rows`, never pipes in a string; a fence is
+    `code`, never backticks; the schema rejects all of those.
 
-    **Scout model:** <the model you are running as>
-
-    ## Reusable in this repo
-
-    | What | Where | Covers | Would need |
-    |---|---|---|---|
-
-    ## Conventions that constrain the design
-
-    | Convention | Instances |
-    |---|---|
-
-    ## Integration touchpoints
-
-    | Touchpoint | Where | Ripple |
-    |---|---|---|
-
-    ## Known external designs
-
-    | Design | Source | Why relevant |
-    |---|---|---|
-
-    ## Focus areas not found
-
-    An area named in [FOCUS_AREAS] that matched no part of
-    [REPO_ROOT]. `None.` if every area resolved.
-
-    | Area | What you searched | Nearest real names |
-    |---|---|---|
-
-    ## Gaps
-
-    | Needed | Search performed | Result |
-    |---|---|---|
-
-    ## Open questions for the controller
-
-    Numbered. `None.` if none.
+    ```json
+    {
+      "kind": "brainstorm",
+      "lane": "prior-art",
+      "session": "[SESSION_ID]",
+      "question": "[QUESTION]",
+      "supersedes": null,
+      "sections": [
+        {"id": "reusable", "title": "Reusable in this repo",
+         "tables": [{"caption": "One row per component the feature can reuse",
+                     "columns": ["What", "Where", "Covers", "Would need"],
+                     "rows": [["router", "services/router/", "request parse", "none"]]}]},
+        {"id": "conventions", "title": "Conventions that constrain the design",
+         "tables": [{"columns": ["Convention", "Instances"],
+                     "rows": [["errors are values, never thrown", "12"]]}]},
+        {"id": "touchpoints", "title": "Integration touchpoints",
+         "tables": [{"columns": ["Touchpoint", "Where", "Ripple"],
+                     "rows": [["POST /tenants", "http-edge", "response schema"]]}]},
+        {"id": "external", "title": "Known external designs",
+         "tables": [{"columns": ["Design", "Source", "Why relevant"],
+                     "rows": [["nomad binpack", "hashicorp docs", "scoring model"]]}]},
+        {"id": "unmatched", "title": "Focus areas not found",
+         "prose": "An area named in [FOCUS_AREAS] that matched no part of [REPO_ROOT]. None. if every area resolved.",
+         "tables": [{"columns": ["Area", "What you searched", "Nearest real names"],
+                     "rows": [["billing events", "rg -l 'invoice'", "accounts/invoice.py"]]}]},
+        {"id": "gaps", "title": "Gaps",
+         "tables": [{"columns": ["Needed", "Search performed", "Result"],
+                     "rows": [["queue client", "rg -l 'QueueClient'", "not found"]]}]},
+        {"id": "questions", "title": "Open questions for the controller",
+         "bullets": ["None."]}
+      ],
+      "return": {
+        "REUSABLE": 0, "CONVENTIONS": 0, "TOUCHPOINTS": 0, "GAPS": 0,
+        "OPEN_QUESTIONS": 0, "AREAS_UNMATCHED": 0, "UNREACHED": 0,
+        "SUPERSEDES": null
+      }
+    }
     ```
 
-    **If [OUTPUT_FILE] already exists**, a scout for this session died
-    before it finished. Read it, then write your complete survey over
-    it — findings are re-derived here, not inherited from the abandoned
-    attempt — and put that attempt's `created_at:` in `SUPERSEDES:`
-    below. If the file on disk carries the front-matter above, this
-    same `session:`, and every section filled in, the survey is
-    finished: return `BLOCKED` naming it. A session has one map and
-    every concept is designed on it; a second scout's map silently
-    overwriting the first leaves those concepts grounded in evidence
-    nothing points to any more.
+    `created_at`/`updated_at` are not yours to write: the journal records
+    when the payload landed, and a timestamp an agent invents is a
+    timestamp a reader cannot check.
+
+    **If `respond_to` already exists**, a scout for this session died
+    before it finished. Read it, then write your complete survey over it
+    — findings are re-derived here, not inherited from the abandoned
+    attempt — and put that attempt's payload into `SUPERSEDES:` below. If
+    the file on disk carries a complete survey — same `session`, every
+    `sections[]` entry filled in — the survey is finished: return
+    `BLOCKED` naming it. A session has one map and every concept is
+    designed on it; a second scout's map silently overwriting the first
+    leaves those concepts grounded in evidence nothing points to any
+    more.
 
     ## What You Return
 
@@ -287,6 +295,16 @@ Subagent (general-purpose):
     ```
 ```
 
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
+
 **Placeholders — every one is required:**
 
 | Placeholder | Value |
@@ -299,7 +317,7 @@ Subagent (general-purpose):
 | `[BRIEF_FILE]` | the session's `session.md` |
 | `[REPO_ROOT]` | the repository root the feature lives in |
 | `[FOCUS_AREAS]` | 3–6 areas of the system the feature likely touches |
-| `[OUTPUT_FILE]` | `<session dir>/prior-art.md` |
+| `[OUTPUT_FILE]` | the `respond_to` payload path the engine minted, `dispatches/D<NNNNN>/payload.json` — JSON only |
 
 **Never** tell the scout which concept you favor, and **never** ask it to
 evaluate concepts — it runs before any exist.

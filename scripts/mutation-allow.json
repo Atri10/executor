@@ -28,5 +28,23 @@
     "code": "if not d.exists():",
     "mutation": "if-test -> False",
     "why": "Path.glob on a missing directory yields nothing, so the early return only skips a no-op."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "f\"no match for {rule}\", obj[:60])",
+    "mutation": "60 -> 61",
+    "why": "The number only truncates the value echoed in the rejection's `got` field; no consumer parses it, and pinning the exact cut would make the test brittle against a cosmetic change."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "repr(obj[:20]))",
+    "mutation": "20 -> 21",
+    "why": "Same as the notMatch echo: the slice length is diagnostic detail in `got`, not a contract any caller reads."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "if shape:",
+    "mutation": "if-test -> True",
+    "why": "_obj() stores a None shape only when the caller passed none, and validate() tests the stored value for truth before dispatching, so the extra dict entry is inert."
   }
 ]

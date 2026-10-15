@@ -28,7 +28,7 @@ Subagent (general-purpose):
     | Question | [QUESTION — verbatim, not paraphrased] |
     | Options | [OPTIONS — the defensible choices, with what each costs] |
     | Evidence | [the artifacts and journal excerpts you may read] |
-    | Respond to | [the payload path the controller gives you] |
+    | Respond to | [the `respond_to` payload path the engine minted for this dispatch, under `dispatches/D<NNNNN>/payload.json`] |
 
     Every ID above belongs to [INIT-NNNN]. Do not reference an ID from any
     other initiative anywhere in your work or your payload.

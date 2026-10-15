@@ -7,6 +7,49 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+### Changed — payloads carry data, the engine renders markdown
+
+A payload is machine-readable data and nothing else. Sections are four
+typed shapes — `prose`, `bullets`, `tables` (`columns` + `rows`), and
+`code` — and no string anywhere in a payload may carry markdown syntax.
+`_render_doc` builds every table, list, and fence from those fields, so
+the store has exactly one renderer and a reader can tell which file is
+authoritative.
+
+- **A markdown string is now a schema rejection.** `prose`, `summary`,
+  `goal`, `requirement`, `observable`, `constraint`, `criterion`,
+  `procedure`, `claim`, and `evidence` reject pipe tables, code fences,
+  and headings (`notMatch`). Table cells reject `|` and newlines; a
+  row's width must equal its column count (`row_width`); a cell or
+  bullet that is only whitespace is rejected (`nonBlank`).
+- **Validator features that make this enforceable.** `validate()` gains
+  `notMatch` for strings and `shape` for named object invariants through
+  a `SHAPES` registry (`table`, `section`), and `_obj()` accepts the
+  shape name.
+- **New `skills/executor/references/rejections.md`** — the authoritative
+  list of all 37 refusal codes, each with its field and the action that
+  clears it. `engine/tests/test_docs_agreement.py` walks the engine's
+  raise sites and the reference's tables and fails on either direction
+  of drift.
+- **Validator guards so this cannot regress.** Every skill file is
+  checked for a `sections[].body` example, every payload-writing prompt
+  for a markdown output template and for the refusal contract, and every
+  ID example for a segment the engine does not declare.
+- **Every skill, template and prompt converted.** Author, brainstorm,
+  critique, plan-regression, review and verification prompts; the ADR,
+  ARCH, IFCE and DSGN templates; frontmatter and intake references.
+
+### Fixed
+
+- A payload could cite its own ID; that is now `dangling_ref` with a
+  hint, because a self-citation is an artifact arguing from itself.
+- `_silent_for` raised `KeyError` on a dispatch carrying no stamp,
+  contradicting its own contract that an unreadable stamp counts as no
+  silence. A missing or empty stamp now returns 0.0.
+- `python -m executor` had no entry point;
+  `engine/executor/__main__.py` provides one, covered by tests that
+  also pin import inertness.
+
 ### Added — executor v2 engine (preview, alongside the v1 shell suite)
 
 A new Python engine under `engine/executor/` implements the executor

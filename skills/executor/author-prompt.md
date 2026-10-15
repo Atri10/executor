@@ -42,7 +42,10 @@ Subagent (general-purpose):
     ```json
     {"kind": "[ARTIFACT_KIND]", "v": "v1", "dispatch_id": "[D<NNNNN>]",
      "id": "[INIT-NNNN-<KIND>-NN]", "title": "…", "summary": "…",
-     "sections": [{"id": "…", "title": "…", "body": "…"}]}
+     "sections": [{"id": "…", "title": "…", "prose": "…",
+                   "bullets": ["…"], "tables": [{"caption": "…",
+                     "columns": ["…"], "rows": [["…"]]}],
+                   "code": [{"lang": "…", "source": "…"}]}]}
     ```
 
     `sections` carry the document body — one entry per required section of
@@ -50,6 +53,15 @@ Subagent (general-purpose):
     `[INIT-NNNN-<KIND>-NN] §S3`, not a page number. Add `cites`,
     `requirements` (`R<n>` rows), `constraints` (`C<n>` rows), and `risks`
     where the specification asks for them.
+
+    **A section is data, not markdown.** Four shapes carry content:
+    `prose` for paragraphs, `bullets` for lists, `tables` for grids
+    (`columns` plus `rows`, one cell per column), and `code` for samples.
+    The engine renders the `.md` a reader sees, deterministically, from
+    these fields — so a pipe table, a code fence, or a heading inside
+    any string is rejected as `notMatch`, and a table row whose cell
+    count differs from its columns is rejected as `row_width`. Write
+    the data; never write formatting for it.
 
     ## Your Specification Is the Phase Skill
 
@@ -77,10 +89,11 @@ Subagent (general-purpose):
 
     ## If the Specification Is Not Enough
 
-    Do not guess. Write what the specification determines, then list what it
-    left open in a trailing `## Open Questions` section of the payload's
-    `sections`. An unresolved question is a legitimate result; a plausible
-    invention is a defect that survives review.
+    Do not guess. Write what the specification determines, then add a
+    trailing section with `id: "open-questions"` to the payload's
+    `sections`, its `bullets` naming what the specification left open. An
+    unresolved question is a legitimate result; a plausible invention is
+    a defect that survives review.
 
     ## Self-Critique Before You Return
 
@@ -97,6 +110,16 @@ Subagent (general-purpose):
     `executor ingest`; the engine's validation is the contract, and your
     status is the event it journals — not anything you print.
 ```
+
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
 
 **Placeholders**
 

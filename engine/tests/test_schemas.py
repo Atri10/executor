@@ -713,29 +713,164 @@ class ArtifactPayloadTests(SchemaCase):
                           "pattern", "$.plan_id")
 
     def test_sections_are_validated_row_by_row(self):
-        row = {"id": "s", "title": "t", "body": "b"}
-        for key in row:
+        for key in ("id", "title"):
             with self.subTest(missing=key):
+                row = {"id": "s", "title": "t", "prose": "b"}
                 bad = {k: v for k, v in row.items() if k != key}
                 self.kind_rejects({**GOOD["charter"], "sections": [bad]},
                                   "required", f"$.sections[0].{key}")
-        self.kind_rejects({**GOOD["charter"], "sections": [{**row,
-                                                            "body": ""}]},
-                          "minLength", "$.sections[0].body")
+        self.kind_rejects({**GOOD["charter"], "sections": [
+            {"id": "s", "title": "t", "prose": ""}]},
+            "minLength", "$.sections[0].prose")
 
     def test_a_section_body_is_capped_at_twelve_thousand_characters(self):
         validate({**GOOD["charter"], "sections": [
-            {"id": "s", "title": "t", "body": "b" * 12000}]},
+            {"id": "s", "title": "t", "prose": "b" * 12000}]},
             schema_for("charter"))
         self.kind_rejects({**GOOD["charter"], "sections": [
-            {"id": "s", "title": "t", "body": "b" * 12001}]},
-            "maxLength", "$.sections[0].body")
+            {"id": "s", "title": "t", "prose": "b" * 12001}]},
+            "maxLength", "$.sections[0].prose")
 
     def test_title_and_summary_are_not_blank(self):
         for key in ("title", "summary"):
             self.kind_rejects({**GOOD["charter"], key: ""}, "minLength",
                               f"$.{key}")
 
+
+class StructuredSections(SchemaCase):
+    """A payload carries data, the engine renders markdown: tables, bullets
+    and fences are typed fields, and markdown smuggled into a string is a
+    second renderer waiting to drift."""
+
+    def charter(self, sections):
+        return {**GOOD["charter"], "sections": sections}
+
+    def test_every_shape_is_accepted_alone(self):
+        for only in ({"prose": "p"},
+                     {"bullets": ["b"]},
+                     {"tables": [{"columns": ["A"], "rows": [["1"]]}]},
+                     {"code": [{"lang": "ts", "source": "x"}]}):
+            with self.subTest(**only):
+                self.accepts(self.charter([{"id": "s", "title": "t",
+                                            **only}]),
+                             schema_for("charter"))
+
+    def test_a_section_with_no_shape_is_rejected(self):
+        self.kind_rejects(self.charter([{"id": "s", "title": "t"}]),
+                          "empty_section", "$.sections[0]")
+
+    def test_prose_carries_no_markdown_syntax(self):
+        for bad in ("| a | b |", "|--|", "```", "```ts", "## Heading",
+                    "# H", "text\n| a | b |"):
+            with self.subTest(prose=bad):
+                self.kind_rejects(self.charter(
+                    [{"id": "s", "title": "t", "prose": bad}]),
+                    "notMatch", "$.sections[0].prose")
+
+    def test_bullets_do_not_carry_their_own_markers(self):
+        for bad in ("- item", "* item", "+ item", "# item", "| a |"):
+            with self.subTest(bullet=bad):
+                self.kind_rejects(self.charter(
+                    [{"id": "s", "title": "t", "bullets": [bad]}]),
+                    "notMatch", "$.sections[0].bullets[0]")
+
+    def test_a_table_row_matches_its_column_count(self):
+        table = {"columns": ["A", "B"], "rows": [["1", "2"]]}
+        self.accepts(self.charter(
+            [{"id": "s", "title": "t", "tables": [table]}]),
+            schema_for("charter"))
+        self.kind_rejects(self.charter(
+            [{"id": "s", "title": "t",
+              "tables": [{**table, "rows": [["1"]]}]}]),
+            "row_width", "$.sections[0].tables[0].rows[0]")
+        self.kind_rejects(self.charter(
+            [{"id": "s", "title": "t",
+              "tables": [{**table, "rows": [["1", "2", "3"]]}]}]),
+            "row_width", "$.sections[0].tables[0].rows[0]")
+
+    def test_a_cell_cannot_end_the_row_or_the_table(self):
+        for bad in ("a|b", "a\nb", "a\r\nb"):
+            with self.subTest(cell=bad):
+                self.kind_rejects(self.charter(
+                    [{"id": "s", "title": "t",
+                      "tables": [{"columns": ["A"], "rows": [[bad]]}]}]),
+                    "notMatch", "$.sections[0].tables[0].rows[0][0]")
+
+    def test_a_table_needs_a_column_and_a_row(self):
+        for bad in ({"rows": [["1"]]}, {"columns": ["A"]},
+                    {"columns": [], "rows": [["1"]]},
+                    {"columns": ["A"], "rows": []}):
+            with self.subTest(table=bad):
+                self.kind_rejects(self.charter(
+                    [{"id": "s", "title": "t", "tables": [bad]}]),
+                    "required" if "rows" not in bad or
+                    "columns" not in bad else "minItems")
+
+    def test_whitespace_is_not_content(self):
+        """A blank string passes minLength and renders an empty paragraph,
+        an empty bullet, or a blank cell — a payload that looks answered
+        and is not."""
+        for sec in ({"id": "s", "title": "t", "prose": "   "},
+                    {"id": "s", "title": "t", "bullets": ["\t"]},
+                    {"id": "s", "title": "t",
+                     "tables": [{"columns": ["A"], "rows": [["  "]]}]}):
+            with self.subTest(**sec):
+                self.kind_rejects(self.charter([sec]), "nonBlank")
+
+    def test_a_caption_has_a_bounded_length(self):
+        self.accepts(self.charter(
+            [{"id": "s", "title": "t", "tables": [
+                {"caption": "c" * 200, "columns": ["A"], "rows": [["1"]]}]}]),
+            schema_for("charter"))
+        self.kind_rejects(self.charter(
+            [{"id": "s", "title": "t", "tables": [
+                {"caption": "c" * 201, "columns": ["A"],
+                 "rows": [["1"]]}]}]),
+            "maxLength", "$.sections[0].tables[0].caption")
+
+    def test_prose_fields_outside_sections_carry_no_markdown_either(self):
+        """Every free-text field the engine renders is prose: a table belongs
+        in tables[], code in code[], and a heading is the section title."""
+        top = (("charter", "summary", "$.summary"),
+               ("spec", "summary", "$.summary"),
+               ("vrfy", "summary", "$.summary"))
+        rows = (
+            ("spec", "requirements", {"id": "R1", "requirement": "r",
+                                      "observable": "o"}, "requirement",
+             "| r |"),
+            ("spec", "requirements", {"id": "R1", "requirement": "r",
+                                      "observable": "o"}, "observable",
+             "# obs"),
+            ("spec", "constraints", {"id": "C1", "constraint": "c",
+                                     "observable": "o"}, "constraint",
+             "```c"),
+            ("vrfy", "criteria", {"id": "V1", "criterion": "c",
+                                  "procedure": "p"}, "criterion", "| c |"),
+            ("vrfy", "criteria", {"id": "V1", "criterion": "c",
+                                  "procedure": "p"}, "procedure", "# proc"),
+            ("plan", "tasks", {"id": "T01", "title": "t", "goal": "g",
+                               "files": ["a"], "accepts": ["b"]}, "goal",
+             "```\nx\n```"),
+        )
+        for kind, key, path in top:
+            with self.subTest(kind=kind, key=key):
+                self.kind_rejects({**GOOD[kind], key: "| a | b |"},
+                                  "notMatch", path)
+        for kind, coll, row, key, value in rows:
+            with self.subTest(kind=kind, key=key):
+                self.kind_rejects({**GOOD[kind], coll: [{**row, key: value}]},
+                                  "notMatch", f"$.{coll}[0].{key}")
+        for key, value in (("claim", "| f |"),
+                           ("evidence", "```e")):
+            with self.subTest(finding_key=key):
+                self.kind_rejects(
+                    {**GOOD["audit"], "findings": [
+                        {"id": "F1", "severity": "critical", "claim": "c",
+                         key: value}]},
+                    "notMatch", f"$.findings[0].{key}")
+
+
+class ArtifactCollections(SchemaCase):
     def test_a_kind_rejects_collections_that_belong_to_other_kinds(self):
         self.kind_rejects({**GOOD["options"], "requirements": []},
                           "additionalProperties", "$.requirements")
@@ -893,8 +1028,18 @@ BOUNDS = {
     ("artifact", "summary", "minLength"): 1,
     ("artifact", "sections[].id", "minLength"): 1,
     ("artifact", "sections[].title", "minLength"): 1,
-    ("artifact", "sections[].body", "minLength"): 1,
-    ("artifact", "sections[].body", "maxLength"): 12000,
+    ("artifact", "sections[].prose", "minLength"): 1,
+    ("artifact", "sections[].prose", "maxLength"): 12000,
+    ("artifact", "sections[].bullets[]", "minLength"): 1,
+    ("artifact", "sections[].tables", "minItems"): 1,
+    ("artifact", "sections[].tables[].columns", "minItems"): 1,
+    ("artifact", "sections[].tables[].columns[]", "minLength"): 1,
+    ("artifact", "sections[].tables[].rows", "minItems"): 1,
+    ("artifact", "sections[].tables[].rows[]", "minItems"): 1,
+    ("artifact", "sections[].code", "minItems"): 1,
+    ("artifact", "sections[].code[].source", "minLength"): 1,
+    ("artifact", "sections[].tables[].caption", "maxLength"): 200,
+    ("artifact", "sections[].tables[].rows[][]", "minLength"): 1,
     ("artifact", "requirements[].requirement", "minLength"): 1,
     ("artifact", "constraints[].constraint", "minLength"): 1,
     ("artifact", "criteria", "minItems"): 1,
@@ -935,6 +1080,7 @@ BOUNDS = {
     ("resume", "reason", "minLength"): 1,
     ("audit", "round", "minimum"): 1,
     ("audit", "findings[].id", "minLength"): 1,
+    ("policy", "clean_quality", "minItems"): 1,
     ("audit", "findings[].claim", "minLength"): 1,
     ("halt", "reason", "minLength"): 1,
     ("needs_context", "question", "minLength"): 1,
@@ -983,15 +1129,20 @@ def observed_bounds():
     rows, home, clashes = {}, {}, []
     groups = [("artifact", S.ARTIFACT_KINDS)] + \
              [(k, [k]) for k in RUNTIME_KINDS]
+    # The policy schema is validated by policy.py, not by the payload
+    # table, so its bounds are pinned under their own group. Walking it is
+    # what stops a tunable's bound from being changed silently.
+    groups.append(("policy", [None]))
     for group, kinds in groups:
         for kind in kinds:
-            for path, c, v in walk(schema_for(kind)):
+            schema = S.POLICY if kind is None else schema_for(kind)
+            for path, c, v in walk(schema):
                 d = dotted(path)
                 key = ("*", d, c) if d == "v" else (group, d, c)
                 if key in rows and rows[key] != v:
                     clashes.append((key, rows[key], v))
                 rows[key] = v
-                home.setdefault(key, kind)
+                home.setdefault(key, kind or "policy")
     return rows, home, clashes
 
 
@@ -1003,6 +1154,10 @@ def minimal(node: dict) -> Any:
     if kind == "string":
         if "pattern" in node:
             return PATTERN_SAMPLES[node["pattern"]]
+        # A `nonBlank` string refuses empty content, so its smallest
+        # accepted value is one character, not minLength's zero.
+        if node.get("nonBlank"):
+            return "x" * max(node.get("minLength", 0), 1)
         return "x" * node.get("minLength", 0)
     if kind == "integer":
         return node.get("minimum", 0)
@@ -1010,7 +1165,16 @@ def minimal(node: dict) -> Any:
         return False
     if kind == "array":
         return [minimal(node["items"]) for _ in range(node.get("minItems", 0))]
-    return {k: minimal(node["properties"][k]) for k in node.get("required", [])}
+    obj = {k: minimal(node["properties"][k]) for k in node.get("required", [])}
+    # A shape names fields a per-property check cannot require: seed the
+    # minimum content the invariant reads, so a minimal instance of a
+    # section carries one shape and a minimal table carries a grid.
+    if node.get("shape") == "section":
+        obj.setdefault("prose", "x")
+    elif node.get("shape") == "table":
+        obj.setdefault("columns", ["x"])
+        obj.setdefault("rows", [["x"]])
+    return obj
 
 
 def inject(node: dict, steps: list[str], value: Any) -> Any:
@@ -1079,7 +1243,10 @@ class BoundsContractTests(SchemaCase):
         _rows, home, _clashes = observed_bounds()
         self.assertGreater(len(BOUNDS), 50)
         for (group, path, constraint), value in BOUNDS.items():
-            schema = schema_for(home[(group, path, constraint)])
+            owner = home[(group, path, constraint)]
+            # The policy schema is not in the payload table; it is
+            # validated by policy.py against the same validator.
+            schema = S.POLICY if owner == "policy" else schema_for(owner)
             steps = steps_of(path)
             ok, bad = boundary(constraint, value, node_at(schema, steps))
             field = "$" + "".join("[0]" if s == "[]" else f".{s}"

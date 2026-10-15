@@ -115,7 +115,9 @@ payload carries:
 - `id` — `INIT-NNNN-SPEC-01`
 - `requirements[]` — `{id: "R01", requirement, observable, cites[]}`
 - `constraints[]` — `{id: "C01", constraint, observable}`
-- `sections[]` — the prose body
+- `sections[]` — the structured body: `prose`, `bullets`, `tables`
+  (`columns` + `rows`), and `code`. Never markdown in a string — the
+  engine renders the `.md`, and a pipe table or fence is a rejection
 - `cites[]` — the `arch`, `adr`, `ifce`, `design`, `brainstorm`, `vrfy`
   ids it argues from
 
@@ -494,6 +496,28 @@ implementation change? Then it is material. When unsure, supersede.
    re-argued against the new spec or explicitly confirmed unaffected —
    a `ruling` per plan records which. A plan mid-execution needs its
    controller told now, not at review.
+
+## Verification
+
+How you know the specification phase produced what a plan can be written
+against — run before routing to the gate:
+
+1. **The payloads validated.** Each artifact landed via `executor ingest`
+   with a named acceptance; a payload the schema rejected is not written,
+   it is fixed or re-authored. A rejection the thinking ignores is a
+   defect recorded, not a formality.
+2. **Coverage is closed.** Every charter goal is argued by at least one
+   `requirements` row; every row has a `criteria` entry in the `vrfy`
+   payload; every global constraint has one. `executor graph` shows the
+   subgraph — a goal with no requirement and a requirement with no
+   criterion are both visible as a missing edge, not a judgement call.
+3. **Every ID resolves.** Every `cites` entry names an artifact that
+   exists; a dangling reference is an audit finding before it is a human
+   one.
+4. **The secret scan passed.** `executor check --secrets` exit 0.
+5. **The gate opened.** `executor next` shows the `specification` gate
+   awaiting a decision; the payloads, not the reply text, are what the
+   human approves.
 
 ## Decisions Here Are ADRs
 

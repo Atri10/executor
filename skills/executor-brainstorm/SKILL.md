@@ -41,11 +41,16 @@ lands in the artifact's `sections` — the journal is the record, and the
 exported `artifact.md` is the document a reader sees.
 
 Worker outputs — the scout's map, each explorer's concept, the critic's
-critique — are session dispatches, not engine dispatches: they report
-to the controller, which merges them into the section they answer.
-Their prompts are in this directory ([prior-art-scout](prior-art-scout-prompt.md),
+critique — are session dispatches, not engine dispatches: each writes
+**one JSON payload** to its `respond_to` and reports a status line. The
+controller merges each payload's `sections[]` verbatim into the artifact's
+own `sections[]`. Nothing hand-writes markdown: a payload carries
+`prose`, `bullets`, `tables`, and `code` as typed fields, the schema
+rejects pipe tables and fences in strings, and the engine renders the
+`.md` a reader sees. Their prompts are in this directory
+([prior-art-scout](prior-art-scout-prompt.md),
 [concept-explorer](concept-explorer-prompt.md),
-[design-critic](design-critic-prompt.md)); each names the section its
+[design-critic](design-critic-prompt.md)); each names the sections its
 output joins.
 
 Outside an initiative there is no engine yet: run the session as a

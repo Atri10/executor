@@ -8,7 +8,7 @@ import unittest
 
 import _payloads as PL
 from _live import Live
-from executor.engine import fold, ingest
+from executor.engine import _render_doc, fold, ingest
 from executor.paths import views_dir
 from executor.views import (render_handoff_index, render_handoff_md,
                             render_report_md, render_verdict_md, status_card)
@@ -108,6 +108,76 @@ class EmptyState(unittest.TestCase):
     def test_an_empty_run_renders_its_empty_sections_as_none(self):
         md = render_handoff_md(INIT, fold([]))
         self.assertEqual(md.count("- none"), 2)  # plans and evidence; no task rows
+
+
+class EmptyState(unittest.TestCase):
+    def test_an_empty_run_renders_its_empty_sections_as_none(self):
+        md = render_handoff_md(INIT, fold([]))
+        self.assertEqual(md.count("- none"), 2)  # plans and evidence; no task rows
+
+
+class DocumentRendering(unittest.TestCase):
+    """The payload is data; this is the only place markdown is written. A
+    table in the store is rows plus columns, and the reader gets the same
+    table every time because nothing but this code formats it."""
+
+    def doc(self, **sections):
+        base = {"id": "INIT-0001-CHTR-01", "title": "Cells",
+                "summary": "One line."}
+        base.update(sections)
+        return _render_doc(base)
+
+    def test_a_section_renders_each_shape_in_order(self):
+        md = self.doc(sections=[{
+            "id": "s", "title": "Bounds",
+            "prose": "First paragraph.",
+            "bullets": ["one", "two"],
+            "tables": [{"caption": "Costs", "columns": ["A", "B"],
+                        "rows": [["x", "y"]]}],
+            "code": [{"lang": "ts", "source": "let a = 1"}],
+        }])
+        self.assertIn("## Bounds", md)
+        self.assertLess(md.index("First paragraph."), md.index("- one"))
+        self.assertLess(md.index("- one"), md.index("*Costs*"))
+        self.assertLess(md.index("*Costs*"), md.index("| A | B |"))
+        self.assertLess(md.index("| A | B |"), md.index("```ts"))
+        self.assertIn("| x | y |", md)
+        self.assertIn("| --- |", md)
+        self.assertIn("let a = 1", md)
+
+    def test_a_shape_that_is_absent_renders_nothing(self):
+        md = self.doc(sections=[{"id": "s", "title": "Only",
+                                 "prose": "Just text."}])
+        self.assertNotIn("| ", md)
+        self.assertNotIn("```", md)
+        self.assertNotIn("- ", md)
+
+    def test_a_code_block_with_no_language_still_fences(self):
+        md = self.doc(sections=[{"id": "s", "title": "C",
+                                 "code": [{"source": "raw"}]}])
+        self.assertIn("```\nraw\n```", md)
+
+    def test_rendering_is_deterministic(self):
+        payload = {"id": "INIT-0001-SPEC-01", "title": "S",
+                   "summary": "sum",
+                   "sections": [{"id": "r", "title": "Rows",
+                                 "tables": [{"columns": ["A"],
+                                             "rows": [["1"]]}]}],
+                   "requirements": [{"id": "R1", "requirement": "must",
+                                     "observable": "seen"}]}
+        self.assertEqual(_render_doc(payload), _render_doc(payload))
+
+    def test_a_payload_never_needs_its_own_markdown(self):
+        """Every construct the old `body` string carried has a typed home:
+        a heading is the title, a list is bullets, a grid is tables, and a
+        sample is code. The rendered doc is fully built from data."""
+        md = self.doc(sections=[
+            {"id": "a", "title": "T", "prose": "p", "bullets": ["b"],
+             "tables": [{"columns": ["c"], "rows": [["d"]]}],
+             "code": [{"source": "e"}]}])
+        self.assertNotIn("body", md)
+        for construct in ("#", "-", "|", "```"):
+            self.assertIn(construct, md)
 
 
 if __name__ == "__main__":

@@ -141,6 +141,13 @@ dispatch or an ingest — never you doing the work:
   `gate_decision`, `ruling`, `resume` — which the CLI stamps `actor: human`
   so a worker cannot claim them.
 
+A refused payload writes nothing, and every refusal names a code and a
+field path. [references/rejections.md](references/rejections.md) is the
+authoritative list: what each code means, and the action that clears it.
+Fix the named thing and re-ingest — never re-author the journal, never
+substitute a payload that happens to pass, and never ask the engine to
+accept it.
+
 The test: *would a subagent reading only its prompt know more than you do
 right now?* If yes, dispatch. If the prompt would just be a transcript of
 the payload you are about to ingest, ingest it.
@@ -310,8 +317,8 @@ One initiative, one namespace. IDs are structural, not decorative.
 ```text
 INIT-0004                      the initiative
 INIT-0004-CHTR-01              its charter
-INIT-0004-RSCH-02              a research note
 INIT-0004-OPTS-01              an options comparison
+INIT-0004-BRN-01               a brainstorm session
 INIT-0004-ARCH-01              an architecture document
 INIT-0004-ADR-03               a decision record
 INIT-0004-IFCE-01              an interface/contract document
@@ -323,13 +330,18 @@ INIT-0004-RISK-01              a risk register / pre-mortem
 INIT-0004-VRFY-01              a verification strategy
 INIT-0004-P01                  a plan
 INIT-0004-P01-T03              task 3 of that plan
-INIT-0004-P01-T03-R02          review round 2 of that task
+D00112                         the dispatch minted at journal seq 112
+R2                             review round 2 (an integer, paired with its task)
 ```
 
 **Grammar:** `INIT-<4-digit>` then `-<KIND>-<2-digit>`, plans as
 `-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<5-digit>`
 (seq-derived), review rounds as an integer `round` field paired with the
-task ID. Sequence within a kind is per-initiative and starts at `01`.
+task ID. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
+`IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
+`ARTIFACT_SEGMENTS` in `engine/executor/paths.py` defines them, and an ID
+carrying any other segment is a `pattern` rejection. Sequence within a
+kind is per-initiative and starts at `01`.
 
 Items *inside* a payload are addressable too: a spec's requirements as
 `-R<2-digit>` and its global constraints as `-C<2-digit>`, hanging off
@@ -485,6 +497,7 @@ template carries the same two sections for the agent's own output.
 Read the contract references before writing anything into either store:
 
 - [references/layout.md](references/layout.md) — exact directory structure
+- [references/rejections.md](references/rejections.md) — every refusal code, its field, and the action that clears it
 - [references/branches.md](references/branches.md) — the branch model: naming, fork rules, merge gates, edge cases
 - [references/frontmatter.md](references/frontmatter.md) — the payload identity contract
 - [references/indexes.md](references/indexes.md) — index formats and maintenance
