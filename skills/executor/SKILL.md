@@ -326,47 +326,42 @@ INIT-0004-P01-T03              task 3 of that plan
 INIT-0004-P01-T03-R02          review round 2 of that task
 ```
 
-**Grammar:** `INIT-<4-digit>` then `-<TYPE>-<2-digit>`, plans as
-`-P<2-digit>`, tasks as `-T<2-digit>`, review rounds as `-R<2-digit>`.
-Sequence within a type is per-initiative and starts at `01`.
+**Grammar:** `INIT-<4-digit>` then `-<KIND>-<2-digit>`, plans as
+`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<5-digit>`
+(seq-derived), review rounds as an integer `round` field paired with the
+task ID. Sequence within a kind is per-initiative and starts at `01`.
 
-Items *inside* a document are addressable too: a spec's requirements as
-`-R<2-digit>` and its global constraints as `-C<2-digit>`, hanging off the
-spec's own ID. A requirement token and a review-round token never collide,
-because a round always carries a `-T<2-digit>` segment before its `-R`
-(`…-P01-T03-R02`) while a requirement hangs directly off `…-SPEC-01-`.
+Items *inside* a payload are addressable too: a spec's requirements as
+`-R<2-digit>` and its global constraints as `-C<2-digit>`, hanging off
+the spec's own ID, and a document's sections by their `sections[].id`.
 
 Addressable requirements are what let a review finding name the exact
-contract it violates instead of gesturing at the spec, and what lets a plan
-task declare precisely which requirements it discharges.
+contract it violates instead of gesturing at the spec, and what lets a
+plan task declare precisely which requirements it discharges.
 
 ### The citation rule (hard)
 
-**A document MUST NOT cite an ID belonging to a different initiative.**
+**A payload MUST NOT cite an ID belonging to a different initiative.**
 
-Inside `INIT-0004`, every reference — `spec: INIT-0004-SPEC-01`,
+Inside `INIT-0004`, every reference — `cites: ["INIT-0004-SPEC-01"]`,
 `implements: INIT-0004-ARCH-02` — names an ID from `INIT-0004`. This is
 what makes an initiative readable on its own: open the folder, and every
 pointer resolves inside it.
 
-Cross-initiative relationships exist only at the initiative level, declared
-in the **charter's** frontmatter. Every Executor document carries
-frontmatter; the charter is the only one permitted to carry these four
-relationship fields. The handoff index (generated when the initiative
-finishes) mirrors them in its Dependencies section as prose:
+Cross-initiative relationships exist only at the initiative level,
+declared in the **charter's** `cites` — the charter payload is the only
+one permitted to carry another initiative's IDs. The handoff index
+(generated when the initiative finishes) mirrors them as prose.
 
 ```yaml
-depends_on: [INIT-0002]            # this initiative needs that one first
-supersedes_initiative: null        # this replaces that one wholesale
-superseded_by_initiative: null     # set on the replaced initiative's charter
-related: [INIT-0007]               # informational only
+cites: ["INIT-0002-CHTR-01"]   # the charter this initiative needs first
 ```
 
-These four fields are the entire cross-initiative vocabulary. Supersession
-is recorded on both sides: the replacement names its predecessor in
-`supersedes_initiative`, the predecessor names its replacement in
-`superseded_by_initiative`. A one-sided link leaves a reader who finds the
-old initiative first with no way forward.
+The `cites` list is the entire cross-initiative vocabulary. Supersession
+is recorded on both sides: the replacement's charter `cites` its
+predecessor, and the predecessor's charter `cites` its replacement. A
+one-sided link leaves a reader who finds the old initiative first with
+no way forward.
 
 A task, spec, or ADR that needs something from another initiative does not
 cite it. It states the requirement in its own words and, if the dependency
@@ -491,7 +486,7 @@ Read the contract references before writing anything into either store:
 
 - [references/layout.md](references/layout.md) — exact directory structure
 - [references/branches.md](references/branches.md) — the branch model: naming, fork rules, merge gates, edge cases
-- [references/frontmatter.md](references/frontmatter.md) — required fields per document type
+- [references/frontmatter.md](references/frontmatter.md) — the payload identity contract
 - [references/indexes.md](references/indexes.md) — index formats and maintenance
 - [references/safety.md](references/safety.md) — secret hygiene, required because `.executor/` may be committed
 
@@ -623,7 +618,7 @@ Run these at the start of every session and before every gate:
 | "I'll cite the other initiative's ADR, it's right there" | That coupling is what makes registries unreadable. State the requirement in your own words; declare the dependency at initiative level. |
 | "The workspace is scratch, I'll delete it when done" | The execution record is the point. Nothing deletes it. |
 | "I'll allocate the ID later" | IDs allocated retroactively collide and get invented. List, then write. |
-| "The ledger has the ruling, that's enough" | The ledger dies with the plan's relevance. Rulings go to `.local/decisions/` the moment they are made. |
+| "The ledger has the ruling, that's enough" | Unrecorded is undecided. A ruling lands in the journal the moment it is made — `executor decide`, not a note to self. |
 | "No secrets in this one, skipping the scan" | The scan is cheap and the failure is unrecoverable once pushed. Run it. |
 | "Phases are overhead, I'll write the plan directly" | A plan with no spec argues from nothing. If discovery and architecture are genuinely unnecessary, record them as skipped and say why. |
 | "I already read the indexes earlier this session" | Session memory is not state. The ritual runs every session; compaction and interruptions make stale confidence expensive. |

@@ -10,6 +10,14 @@ the concepts it attacks.
 real attack is earned; one that does not has just saved a spec and a plan
 built on it.
 
+**A brainstorm lane is a session dispatch, not an engine role.** The
+session is the context of the `brainstorm` artifact the phase authors;
+the deliverable is the session file `critique-R<nn>.md`, which lands in the
+artifact's `sections` when the phase commits it. The `kind` the payload
+carries is `brainstorm`. Session dispatches are recorded in a
+`Dispatch log` section the controller keeps — logged the same way the
+engine logs `D<NNNNN>` — not an engine slot.
+
 **Before dispatching:**
 
 1. Choose the leading 1–2 concepts from the session's `## Concepts`.
@@ -21,17 +29,17 @@ built on it.
    dispatch, and record in `## Stress test` that the round was
    single-concept, so the comparison it lacks is not read as a clean
    result.
-2. The output path is `<session dir>/critique-R<nn>.md`; a second stress
+2. The output is a session file, `critique-R<nn>.md`; a second stress
    round after a concept is revised is `R02`.
 3. Choose the model: top tier, and a different model from the explorers
    where one is available — a critic that shares the author's blind spots
    finds fewer of them.
-4. Append the dispatch row to `<session dir>/dispatches.md`.
+4. Record the dispatch in the session's `Dispatch log` section.
 
 ```
 Subagent (general-purpose):
   description: "Stress round [ROUND] for [SESSION_TOPIC]"
-  agent_identity: "[CRITIC-BRN<nn>-R<nn> — or CRITIC-<topic slug>-R<nn> for a pre-initiative session. Must match the session dispatches.md Agent cell.]"
+  agent_identity: "[CRITIC-BRN<nn>-R<nn> — or CRITIC-<topic slug>-R<nn> for a pre-initiative session. Must match the session Dispatch log row.]"
   model: [MODEL — REQUIRED: top tier, different from the explorers' model
          where available. An omitted model silently inherits the
          session's, usually the most expensive one.]
@@ -322,8 +330,8 @@ Subagent (general-purpose):
 |---|---|
 | `[MODEL]` | top tier, different from the explorers' where available |
 | `[SESSION_ID]` | `INIT-0004-BRN-01`, or the topic slug for a pre-initiative session |
-| `[SESSION_TOPIC]` | the session directory's topic |
-| `[SESSION_DIR]` | the session directory path |
+| `[SESSION_TOPIC]` | the session's topic |
+| `[SESSION_DIR]` | the session's working directory (scratch; its files merge into the artifact) |
 | `[QUESTION]` | the session's `question:` value |
 | `[SESSION_FILE]` | the session's `session.md` |
 | `[PRIOR_ART_FILE]` | `<session dir>/prior-art.md` |

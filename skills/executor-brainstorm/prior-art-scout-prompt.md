@@ -10,23 +10,31 @@ design on top of what exists instead of reinventing it, and so a concept
 that collides with an established convention is caught before the human
 picks it.
 
+**A brainstorm lane is a session dispatch, not an engine role.** The
+session is the context of the `brainstorm` artifact the phase authors;
+the scout's deliverable is the session file `prior-art.md`, which lands
+in the artifact's `sections` when the phase commits it. The `kind` the
+payload carries is `brainstorm`. Session dispatches are recorded in a
+`Dispatch log` section the controller keeps — logged the same way the
+engine logs `D<NNNNN>` — not an engine slot.
 **Before dispatching:**
 
 1. The session's `## Brief` section is written and the human agreed the
-   evaluation criteria. The scout reads the brief; it does not help write
-   it.
+   evaluation criteria. The scout reads the brief; it does not help
+   write it.
 2. Name 3–6 focus areas from the brief's actors, outcome, and
    constraints — the parts of the system the feature will most likely
    touch (e.g. "tenant provisioning", "billing events", "admin UI").
-3. The output path is `<session dir>/prior-art.md`.
+3. The output path is a session file, `prior-art.md` — the controller
+   merges it into the artifact's sections.
 4. Choose the model: mid tier for a small repo, top tier for a large or
    unfamiliar one.
-5. Append the dispatch row to `<session dir>/dispatches.md`.
+5. Record the dispatch in the session's `Dispatch log` section.
 
 ```
 Subagent (general-purpose):
   description: "Prior-art scout for [SESSION_TOPIC]"
-  agent_identity: "[SCOUT-BRN<nn> — or SCOUT-<topic slug> for a pre-initiative session. Must match the session dispatches.md Agent cell.]"
+  agent_identity: "[SCOUT-BRN<nn> — or SCOUT-<topic slug> for a pre-initiative session. Must match the session Dispatch log row.]"
   model: [MODEL — REQUIRED: mid tier for a small repo, top tier for a
          large or unfamiliar one. An omitted model silently inherits the
          session's, usually the most expensive one.]
@@ -285,8 +293,8 @@ Subagent (general-purpose):
 |---|---|
 | `[MODEL]` | mid tier for a small repo, top tier for a large or unfamiliar one |
 | `[SESSION_ID]` | `INIT-0004-BRN-01`, or the topic slug for a pre-initiative session |
-| `[SESSION_TOPIC]` | the session directory's topic |
-| `[SESSION_DIR]` | the session directory path |
+| `[SESSION_TOPIC]` | the session's topic |
+| `[SESSION_DIR]` | the session's working directory (scratch; its files merge into the artifact) |
 | `[QUESTION]` | the session's `question:` value |
 | `[BRIEF_FILE]` | the session's `session.md` |
 | `[REPO_ROOT]` | the repository root the feature lives in |

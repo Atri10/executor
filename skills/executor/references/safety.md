@@ -42,11 +42,12 @@ the failing request — headers included — into its report. The report is a
 file in `.executor/`. Dispatch prompts carry the no-secrets rule; reports
 get scanned before handoff.
 
-**2. Review diffs.** `exec-review-package` captures the literal diff. If a
-task accidentally committed a secret, the diff now contains it in a second
-place. The scan covers `reviews/diffs/` for exactly this reason — and a
-secret found in a diff means the secret is also in git history, which is a
-bigger problem than the diff.
+**2. Review diffs.** The engine's review package carries the literal diff
+from the task's base to its head. If a task accidentally committed a
+secret, the diff now contains it in a second place. The scan covers the
+task's `reviews/` directory for exactly this reason — and a secret found
+in a diff means the secret is also in git history, which is a bigger
+problem than the diff.
 
 **3. Tooling runtime state.** A tool that serves or persists something on the
 agent's behalf generates its own secrets — session keys, tokens, cookies,
@@ -58,22 +59,19 @@ known credential prefix.
 
 ## The required scan
 
-Run before any handoff, before committing `.executor/` if the user chooses
-to, and before marking an initiative complete:
-
-```bash
-../scripts/exec-scan-secrets                 # scans both stores
-../scripts/exec-scan-secrets .executor/INIT-0004
+```text
+executor check --secrets                 # scans both stores
 ```
 
-The script flags high-signal patterns: private key headers, common token
-prefixes (`sk-`, `ghp_`, `gho_`, `AKIA`, `xox[baprs]-`), `Authorization:`
-headers with values, connection strings with embedded credentials,
-assignments to names containing `secret`/`token`/`password`/`apikey` with a
-literal value, and `.env`-shaped blocks.
+The scan flags high-signal patterns: private key headers, AWS access key
+ids, GitHub and Slack token prefixes (`ghp_`, `github_pat_`, `xox[baprs]-`),
+OpenAI-style `sk-` keys, and assignments to names containing
+`secret`/`token`/`password`/`apikey`/`api_key` with a literal value.
 
-It reports file and line. It **never prints the matched value** — printing
-it would copy the secret into your context and the transcript.
+It reports the rule, the file and line, and an 8-character SHA of the
+match — enough to correlate a finding without ever echoing the secret
+itself. Printing it would copy the secret into your context and the
+transcript.
 
 ## When a secret has already landed
 

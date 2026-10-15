@@ -10,6 +10,14 @@ with four names.
 brief, so the human chooses between real alternatives instead of variants
 of the first idea anyone had.
 
+**A brainstorm lane is a session dispatch, not an engine role.** The
+session is the context of the `brainstorm` artifact the phase authors;
+the deliverable is the session file `concepts/<LETTER>-<lens>.md`, which lands in the
+artifact's `sections` when the phase commits it. The `kind` the payload
+carries is `brainstorm`. Session dispatches are recorded in a
+`Dispatch log` section the controller keeps — logged the same way the
+engine logs `D<NNNNN>` — not an engine slot.
+
 **Before dispatching:**
 
 1. The session's `## Brief` (problem, actors, outcome, measurable success
@@ -20,9 +28,9 @@ of the first idea anyone had.
 2. `prior-art.md` exists (the scout ran).
 3. Pick 3–4 lenses from the catalog below that pull in genuinely different
    directions for THIS brief, and give each a letter: A, B, C, D.
-4. Each explorer's output is `<session dir>/concepts/<LETTER>-<lens>.md`.
+4. Each explorer's output is a session file, `concepts/<LETTER>-<lens>.md`.
 5. Dispatch them together, in one batch, so none can see another's output.
-6. Append one dispatch row per explorer to `<session dir>/dispatches.md`.
+6. Record one row per explorer in the session's `Dispatch log` section.
 
 **Lens catalog:**
 
@@ -38,7 +46,7 @@ of the first idea anyone had.
 ```
 Subagent (general-purpose):
   description: "Concept [CONCEPT_LETTER] ([LENS]) for [SESSION_TOPIC]"
-  agent_identity: "[EXPLORE-BRN<nn>-<letter> — or EXPLORE-<topic slug>-<letter> for a pre-initiative session. Must match the session dispatches.md Agent cell.]"
+  agent_identity: "[EXPLORE-BRN<nn>-<letter> — or EXPLORE-<topic slug>-<letter> for a pre-initiative session. Must match the session Dispatch log row.]"
   model: [MODEL — REQUIRED: top tier; concept quality decides what the
          human can choose from. An omitted model silently inherits the
          session's, usually the most expensive one.]
@@ -224,8 +232,8 @@ Subagent (general-purpose):
 |---|---|
 | `[MODEL]` | top tier |
 | `[SESSION_ID]` | `INIT-0004-BRN-01`, or the topic slug for a pre-initiative session |
-| `[SESSION_TOPIC]` | the session directory's topic |
-| `[SESSION_DIR]` | the session directory path |
+| `[SESSION_TOPIC]` | the session's topic |
+| `[SESSION_DIR]` | the session's working directory (scratch; its files merge into the artifact) |
 | `[QUESTION]` | the session's `question:` value |
 | `[SESSION_FILE]` | the session's `session.md` |
 | `[PRIOR_ART_FILE]` | `<session dir>/prior-art.md` |
