@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-
-from .paths import initiative_policy_file, project_policy_file
+from .paths import autonomy_file, initiative_policy_file, project_policy_file
 from .schemas import POLICY, validate
-from .store import ExecError, Rejection, read_json, sha256
+from .store import PHASES, ExecError, Rejection, read_json, sha256
 
 DEFAULTS: dict = {
     "max_fix_rounds": 5,        # fix dispatches per task before the run escalates
@@ -52,10 +51,27 @@ def policy_sha(values: dict) -> str:
 
 
 def default_state() -> dict:
-    """The policy a journal is folded under before its first policy event."""
+    """The policy a journal is folded under before its first policy event. Autonomy
+    is fail-closed: every phase denied until a recorded policy says otherwise."""
     values = copy.deepcopy(DEFAULTS)
+    values["autonomy"] = normalize_autonomy({}, PHASES)
     return {"values": values, "sources": {key: "default" for key in DEFAULTS},
             "sha": policy_sha(values), "recorded": False}
+
+
+# Autonomy modes per phase. Fail closed: only the exact words allow or gate permit an
+# unattended pass. Anything else, including a misspelling, a non-string and a missing
+# phase, is deny. A pick-class phase is handled by the engine, never by this table.
+AUTONOMY_MODES = ("deny", "gate", "allow")
+
+
+def normalize_autonomy(raw, phases) -> dict[str, str]:
+    """Every phase mapped to deny unless the file names it with an exact allowed mode.
+    Pure and total, so an unreadable or partial file degrades to deny, never to allow."""
+    source = raw if isinstance(raw, dict) else {}
+    return {p: (source[p] if isinstance(source.get(p), str) and source[p] in AUTONOMY_MODES
+                else "deny")
+            for p in phases}
 
 
 def load_policy(root: Path, init_id: str) -> tuple[dict, dict]:
@@ -93,3 +109,15 @@ def load_policy(root: Path, init_id: str) -> tuple[dict, dict]:
     if values["suspect_s"] >= values["deadline_s"]:
         raise ExecError("suspect_s must be below deadline_s", "policy_invalid")
     return values, sources
+
+
+def effective_policy(root: Path, init_id: str, init_idir: Path) -> tuple[dict, dict, str]:
+    """The one policy the engine decides by: the layered tunables plus the normalized
+    per-phase autonomy map, with the layer each value came from and the digest the
+    journal records. Every reader (the policy event, check and doctor) calls this, so
+    they cannot disagree about what the policy is."""
+    values, sources = load_policy(root, init_id)
+    values = {**values, "autonomy": normalize_autonomy(read_json(autonomy_file(init_idir)), PHASES)}
+    sources = {**sources, "autonomy": "initiative" if autonomy_file(init_idir).exists()
+               else "default"}
+    return values, sources, policy_sha(values)

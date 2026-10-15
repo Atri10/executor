@@ -100,7 +100,9 @@ class Journaling(PolicyCase):
     def test_creation_journals_the_effective_policy(self):
         events = self.policy_events()
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["data"]["values"], DEFAULTS)
+        values = events[0]["data"]["values"]
+        self.assertEqual({k: v for k, v in values.items() if k != "autonomy"}, DEFAULTS)
+        self.assertEqual(set(values["autonomy"].values()), {"deny"})
 
     def test_a_changed_file_is_journaled_at_the_next_poll_and_an_unchanged_one_is_not(self):
         before = len(self.policy_events())

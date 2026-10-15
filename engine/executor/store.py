@@ -323,6 +323,19 @@ def init_store(root: Path, init_id: str, title: str) -> Path:
     return idir
 
 
+def store_version_verdict(engine_version) -> str:
+    """Compare a store's engine version with this engine's major version. Pure, so
+    the CLI reports the same verdict the engine enforces. The result is one of
+    'current', 'store_outdated' (the store is older) or 'engine_too_old' (the store
+    is newer than this engine)."""
+    ev = str(engine_version)
+    if _major(ev) > _major(__version__):
+        return "engine_too_old"
+    if _major(ev) < _major(__version__):
+        return "store_outdated"
+    return "current"
+
+
 def check_store_version(idir: Path) -> None:
     """Refuse clearly on version skew rather than misreading a store."""
     meta = read_json(meta_file(idir))
@@ -330,13 +343,14 @@ def check_store_version(idir: Path) -> None:
         raise ExecError(f"no meta.json in {idir}: not an executor store "
                         f"(or one from before v2). Use `executor new`.",
                         "no_meta")
-    ev = meta.get("engine_version", "0")
-    if _major(ev) > _major(__version__):
+    ev = str(meta.get("engine_version", "0"))
+    verdict = store_version_verdict(ev)
+    if verdict == "engine_too_old":
         raise ExecError(
             f"store written by engine v{ev}; you have v{__version__}. "
             f"Install executor ≥ {_major(ev)}.x or run `executor migrate`.",
             "engine_too_old")
-    if _major(ev) < _major(__version__):
+    if verdict == "store_outdated":
         raise ExecError(
             f"store written by engine v{ev}; you have v{__version__}. "
             f"Run `executor migrate --dry-run` then `executor migrate`.",
@@ -385,18 +399,23 @@ def _finished(idir: Path) -> bool:
     return isinstance(phases, dict) and phases.get("handoff") == "passed"
 
 
-def find_initiative(root: Path, init_id: str | None = None) -> Initiative:
+def find_initiative(root: Path, init_id: str | None = None,
+                    gate: bool = True) -> Initiative:
     """Resolve an initiative by id, or the one in flight. Two in flight is an
     error, never a silent pick: acting on the wrong initiative is worse than
     asking. When every initiative is finished the newest is returned, so
-    status and check still work on a completed run."""
+    status and check still work on a completed run.
+
+    `gate=False` skips the version check. Only `migrate` uses it: it must open a
+    skewed store to tell the user what is wrong. Every other command is gated."""
     store = run_root(root)
     if init_id:
         idir = init_dir(root, init_id)
         if not idir.exists():
             raise ExecError(f"no initiative {init_id} at {idir}",
                             "no_initiative")
-        check_store_version(idir)
+        if gate:
+            check_store_version(idir)
         return Initiative(init_id, root, idir).reload()
     cands = [d for d in sorted(store.glob("INIT-*")) if d.is_dir()]
     if not cands:
@@ -408,5 +427,6 @@ def find_initiative(root: Path, init_id: str | None = None) -> Initiative:
         raise ExecError(f"{len(actives)} active initiatives ({names}); "
                         f"pass INIT-ID", "ambiguous")
     pick = actives[0] if actives else cands[-1]
-    check_store_version(pick)
+    if gate:
+        check_store_version(pick)
     return Initiative(pick.name, root, pick).reload()

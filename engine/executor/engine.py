@@ -34,8 +34,8 @@ from .paths import (artifact_file, audit_file, classify, dispatch_id,
                     fix_report_file, is_dispatch_id, journal_file, payload_file,
                     plan_audit_file, plan_file, plan_repair_file, preflight_file,
                     prompt_file, repair_file, review_package_file, run_root,
-                    state_file, task_impl_report, verdict_file)
-from .policy import default_state, load_policy, policy_sha
+                    state_file, task_impl_report, verdict_file, autonomy_file)
+from .policy import default_state, effective_policy, normalize_autonomy, policy_sha
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
                     append_event, atomic_write, init_store, make_event,
@@ -70,6 +70,16 @@ PHASE_ARTIFACTS = {
     "design": ["design"], "specification": ["spec", "risk", "vrfy"],
     "planning": ["plan"], "execution": [], "review": [],
     "plan_regression": [], "verification": [], "handoff": []}
+
+# Pick-class phases: the gate is a choice a human makes between options, so no
+# automatic pass may clear it. Mirrors v1 exec-gate's is_pick_phase, kept explicit so
+# the engine never infers it.
+PICK_PHASES = frozenset({"design", "specification"})
+# Phases whose gate the engine must never clear unattended: the pick-class
+# phases, where a human chooses between options, and handoff, where a human
+# signs off on the finished run. Every other gate is structural.
+NEVER_AUTO = PICK_PHASES | {"handoff"}
+
 
 _AKIND = {"charter": "CHTR-01", "options": "OPTS-01", "brainstorm": "BRN-01",
           "arch": "ARCH-01", "adr": "ADR-01", "ifce": "IFCE-01",
@@ -400,17 +410,24 @@ def _clock(now: float | None) -> float:
     return time.time() if now is None else now
 
 
-def _iso2epoch(ts: str) -> float:
+def _iso2epoch(ts) -> float:
     """UTC ISO timestamp to epoch seconds. timegm reads it as UTC; mktime would
-    read it as local time and drift on every non-UTC host."""
+    read it as local time and drift on every non-UTC host. An unreadable stamp
+    raises: read as epoch zero it would make every such dispatch look a billion
+    seconds silent and get abandoned on the next poll."""
     try:
-        return float(calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")))
-    except (TypeError, ValueError):
-        return 0.0
+        return float(calendar.timegm(time.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ")))
+    except (TypeError, ValueError) as exc:
+        raise ExecError(f"unreadable timestamp {ts!r}", "bad_timestamp") from exc
 
 
 def _silent_for(dsp: dict, now: float) -> float:
-    return now - _iso2epoch(dsp.get("last_beat") or dsp["at"])
+    """Seconds since the dispatch last showed life. A stamp that cannot be read
+    counts as no silence: a dispatch is judged dead on evidence, never on bad data."""
+    try:
+        return now - _iso2epoch(dsp.get("last_beat") or dsp["at"])
+    except ExecError:
+        return 0.0
 
 
 def _next_phase(ph: str) -> str | None:
@@ -493,8 +510,7 @@ def _sync_policy(init: Initiative) -> dict:
     """Journal the effective policy when it differs from the one in force. The
     caller holds the lock. Ingest calls this only after every check has passed,
     so a rejected payload journals no policy change."""
-    values, sources = load_policy(init.root, init.id)
-    sha = policy_sha(values)
+    values, sources, sha = effective_policy(init.root, init.id, init.idir)
     state = fold(init.events)["policy"]
     if not state["recorded"] or state["sha"] != sha:
         _record(init, "engine", "policy", init.id,
@@ -608,7 +624,7 @@ def _decide(init: Initiative, s: dict, now: float) -> dict:
     if pstate == "gate_pending":
         return _action("GATE", init.id, phase=ph)
     work = _phase_work(init, s, ph, now)
-    return work if work is not None else _open_gate(init, ph)
+    return work if work is not None else _open_gate(init, s, ph, now)
 
 
 def _enter(init: Initiative, phase: str) -> dict:
@@ -616,8 +632,19 @@ def _enter(init: Initiative, phase: str) -> dict:
     return _action("PHASE-ENTER", init.id, phase=phase)
 
 
-def _open_gate(init: Initiative, ph: str) -> dict:
+def _open_gate(init: Initiative, s: dict, ph: str, now: float) -> dict:
+    """Open the gate for a phase that has no work left. A structural phase whose
+    journaled autonomy mode is gate or allow clears itself here, recorded as an
+    automatic decision so the record never reads as a human's. A phase in
+    NEVER_AUTO never clears itself: a pick needs a human choice, and handoff is
+    the human's sign-off on the finished run."""
     _record(init, "engine", "gate_opened", init.id, {"phase": ph})
+    mode = normalize_autonomy(s["policy"]["values"].get("autonomy"), (ph,)).get(ph, "deny")
+    if mode in ("gate", "allow") and ph not in NEVER_AUTO:
+        _record(init, "engine", "gate_decision", init.id,
+                {"phase": ph, "decision": "approved", "by": "auto",
+                 "note": f"autonomy {mode}"})
+        return _decide(init, fold(init.events), now)
     return _action("GATE", init.id, phase=ph)
 
 
@@ -836,7 +863,13 @@ def _dispatch(init: Initiative, s: dict, role: str, entity: str, schema: str,
     pol = s["policy"]["values"]
     open_sl = _open_for(s, entity, schema)
     if open_sl is not None:
-        if _silent_for(s["dispatches"][open_sl["dispatch_id"]], now) <= pol["deadline_s"]:
+        dsp = s["dispatches"][open_sl["dispatch_id"]]
+        try:
+            _iso2epoch(dsp.get("last_beat") or dsp["at"])
+        except ExecError:
+            return _escalate(init, f"{entity}: dispatch {open_sl['dispatch_id']} has "
+                                   f"an unreadable timestamp; liveness cannot be judged")
+        if _silent_for(dsp, now) <= pol["deadline_s"]:
             return _dispatch_action(init, open_sl)
         _record(init, "engine", "abandon", entity,
                 {"reason": f"silent past {pol['deadline_s']}s"},
@@ -1314,8 +1347,8 @@ def check(init: Initiative, now: float | None = None) -> dict:
                             f"(the next write refreshes it)")
         pol = s["policy"]["values"]
         try:
-            files, _ = load_policy(init.root, init.id)
-            if policy_sha(files) != s["policy"]["sha"]:
+            _values, _sources, files_sha = effective_policy(init.root, init.id, init.idir)
+            if files_sha != s["policy"]["sha"]:
                 problems.append("policy drift: the policy files differ from the "
                                 "journal's last policy event (the next poll or "
                                 "ingest records them)")
@@ -1324,7 +1357,14 @@ def check(init: Initiative, now: float | None = None) -> dict:
         clock = _clock(now)
         open_ = _open_slots(s)
         for sl in open_:
-            silent = _silent_for(s["dispatches"][sl["dispatch_id"]], clock)
+            dsp = s["dispatches"][sl["dispatch_id"]]
+            try:
+                _iso2epoch(dsp.get("last_beat") or dsp["at"])
+            except ExecError:
+                problems.append(f"unreadable timestamp on dispatch {sl['dispatch_id']}: "
+                                f"liveness cannot be judged until it is repaired")
+                continue
+            silent = _silent_for(dsp, clock)
             if silent > pol["deadline_s"]:
                 problems.append(f"dead dispatch {sl['dispatch_id']}: silent "
                                 f"{int(silent)}s (the next poll abandons it)")

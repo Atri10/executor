@@ -26,7 +26,11 @@ from executor.store import read_events
 _GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0"}
 _GIT_IDENTITY = ["-c", "user.email=engine@example.invalid", "-c", "user.name=engine",
-                 "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+                 "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false",
+                 # Never launch a detached gc or maintenance task: a background
+                 # collector can write into the repo while tearDown removes the
+                 # temp directory (OSError 66, directory not empty).
+                 "-c", "gc.auto=0", "-c", "maintenance.auto=false"]
 
 
 def hermetic_git(root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -75,6 +79,25 @@ class Live:
 
     def events(self) -> list[dict]:
         return read_events(self.init.idir)
+
+    def dispatch_with_stamp(self, act: dict, stamp: str) -> dict:
+        """Append a second record of the open dispatch `act` whose timestamp is
+        `stamp`, through the store, so the journal chain stays valid. The fold reads
+        the dispatch from the latest such record, so this is the fault the engine
+        must survive: a dispatch it can no longer date."""
+        from executor.store import append_event, make_event
+        ev = make_event(self.init.idir, "engine", "task_dispatched", act["entity"],
+                        {"role": act["role"], "schema": act["schema"],
+                         "respond_to": act["respond_to"], "base": act["base"],
+                         "context": act["context"]},
+                        dispatch_id=act["dispatch_id"])
+        ev["ts"] = stamp
+        ev.pop("line_sha", None)
+        from executor.store import sha256
+        ev["line_sha"] = sha256({k: v for k, v in ev.items() if k != "line_sha"})
+        append_event(self.init.idir, ev)
+        self.init.events.append(ev)
+        return ev
 
     def act(self, now: float | None = None) -> dict:
         return emit_next(self.init, now=now)
