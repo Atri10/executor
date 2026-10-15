@@ -170,7 +170,8 @@ SPEC = {
 }
 
 # Grammar utilities that are not path helpers.
-NOT_HELPERS = {"classify", "dispatch_id", "is_dispatch_id"}
+NOT_HELPERS = {"classify", "dispatch_id", "is_dispatch_id",
+               "artifact_pattern"}
 
 ID_CASES = {
     "INIT_ID": (P.INIT_ID, ["INIT-0001", "INIT-9999"],
@@ -210,6 +211,8 @@ BAD_RUN = [
     "INIT-0007/artifacts/INIT-0007-chtr-01/artifact.json",
     "INIT-0007/artifacts/INIT-0007-CHTR-1/artifact.json",
     "INIT-0007/artifacts/INIT-0007-P03/artifact.json",       # plan id
+    "INIT-0007/artifacts/INIT-0007-FOO-01/artifact.json",    # no such kind
+    "INIT-0007/artifacts/INIT-0007-RSCH-01/artifact.json",
     f"INIT-0007/artifacts/{ART}/audits/R1.audit.json",
     f"INIT-0007/artifacts/{ART}/audits/R001.audit.json",
     f"INIT-0007/artifacts/{ART}/audits/r01.audit.json",
@@ -352,6 +355,37 @@ class IdGrammar(unittest.TestCase):
         self.assertEqual(P.dispatch_id(123456), "D123456")
         for seq in (1, 99999, 100000):
             self.assertTrue(P.is_dispatch_id(P.dispatch_id(seq)))
+
+    def test_only_real_artifact_segments_are_artifact_ids(self):
+        for seg in P.ARTIFACT_SEGMENTS.values():
+            with self.subTest(segment=seg):
+                self.assertIsNotNone(
+                    re.fullmatch(P.ARTIFACT_ID, f"INIT-0001-{seg}-01"))
+                self.assertIsNotNone(P.classify(
+                    f"INIT-0001/artifacts/INIT-0001-{seg}-01/artifact.json",
+                    "run"))
+        for seg in ("FOO", "RSCH", "CHT", "CHTRR", "chtr"):
+            with self.subTest(segment=seg):
+                self.assertIsNone(
+                    re.fullmatch(P.ARTIFACT_ID, f"INIT-0001-{seg}-01"))
+
+    def test_artifact_pattern_ties_each_kind_to_its_own_segment(self):
+        for kind, seg in P.ARTIFACT_SEGMENTS.items():
+            rx = P.artifact_pattern(kind)
+            with self.subTest(kind=kind):
+                self.assertIsNotNone(re.fullmatch(rx, f"INIT-0001-{seg}-01"))
+                self.assertIsNone(re.fullmatch(rx, "INIT-0001-P01"))
+                for other in set(P.ARTIFACT_SEGMENTS.values()) - {seg}:
+                    self.assertIsNone(
+                        re.fullmatch(rx, f"INIT-0001-{other}-01"), other)
+        self.assertIsNotNone(re.fullmatch(P.artifact_pattern("plan"),
+                                          "INIT-0001-P01"))
+        self.assertIsNone(re.fullmatch(P.artifact_pattern("plan"),
+                                       "INIT-0001-CHTR-01"))
+
+    def test_artifact_pattern_rejects_a_kind_it_does_not_know(self):
+        with self.assertRaises(KeyError):
+            P.artifact_pattern("research")
 
     def test_is_dispatch_id_rejects_the_old_verbose_form(self):
         self.assertTrue(P.is_dispatch_id("D00005"))

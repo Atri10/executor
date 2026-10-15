@@ -103,14 +103,19 @@ def now_iso() -> str:
 
 
 def atomic_write(path: Path, data: bytes) -> None:
-    """Write via tmp+rename so a crash never leaves a torn file."""
+    """Write via tmp+rename so a crash never leaves a torn file. A write that
+    fails part-way removes its temp file and leaves the target untouched."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def write_json(path: Path, obj) -> None:
@@ -127,9 +132,17 @@ def read_json(path: Path, default=None):
 
 # ---------------------------------------------------------------- locking
 
+_WINDOWS = os.name == "nt"
+
+
 class StoreLock:
     """Single-writer advisory lock on the initiative dir. Context manager.
-    flock on POSIX, msvcrt locking on Windows."""
+    flock on POSIX; msvcrt byte-range locking on Windows, which locks from the
+    descriptor's current offset, so it is rewound first. Every entry opens its
+    own descriptor, which is why the lock excludes threads as well as
+    processes. The platform is a module constant so tests can drive both
+    branches on any OS."""
+
     def __init__(self, idir: Path):
         self.path = lock_file(idir)
         self.fd: int = -1
@@ -138,13 +151,13 @@ class StoreLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR)
         try:
-            if os.name == "posix":
-                import fcntl
-                fcntl.flock(self.fd, fcntl.LOCK_EX)
-            elif os.name == "nt":  # pragma: no cover - windows
+            if _WINDOWS:
                 import msvcrt
                 os.lseek(self.fd, 0, os.SEEK_SET)
                 msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_EX)
         except OSError as e:
             os.close(self.fd)
             self.fd = -1
@@ -153,18 +166,19 @@ class StoreLock:
         return self
 
     def __exit__(self, *exc):
+        if self.fd < 0:
+            return
         try:
-            if os.name == "posix":
-                import fcntl
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-            elif os.name == "nt":  # pragma: no cover
+            if _WINDOWS:
                 import msvcrt
                 os.lseek(self.fd, 0, os.SEEK_SET)
                 msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
         finally:
-            if self.fd >= 0:
-                os.close(self.fd)
-                self.fd = -1
+            os.close(self.fd)
+            self.fd = -1
 
 
 # ---------------------------------------------------------------- journal
@@ -173,30 +187,42 @@ def sha_line(line: bytes) -> str:
     return hashlib.sha256(line.rstrip(b"\n")).hexdigest()
 
 
-def read_events(idir: Path) -> list[dict]:
-    """Read the journal, tolerating a torn last line (a crash mid-append).
-    Stops at the first unparseable/truncated line rather than failing — the
-    journal is append-only so a torn tail is simply replayed."""
+def scan_journal(idir: Path) -> tuple[list[dict], int]:
+    """Parse the journal line by line. Returns (events, torn): a non-empty
+    line that is not a JSON event object is counted and skipped. It neither
+    stops the scan nor is trusted, so a crash mid-append (even one that cut a
+    multibyte character in half) can never hide the events written after it.
+    `verify_chain` is what notices a gap."""
     path = journal_file(idir)
     events: list[dict] = []
+    torn = 0
     if not path.exists():
-        return events
+        return events, torn
     with open(path, "rb") as f:
         for raw in f:
-            line = raw.rstrip(b"\n")
-            if not line:
+            line = raw.rstrip(b"\r\n")
+            if not line.strip():
                 continue
             try:
                 ev = json.loads(line)
-            except json.JSONDecodeError:
-                break  # torn write: ignore tail
-            if isinstance(ev, dict) and "seq" in ev:
+            except ValueError:  # JSONDecodeError and UnicodeDecodeError
+                torn += 1
+                continue
+            if isinstance(ev, dict) and isinstance(ev.get("seq"), int):
                 events.append(ev)
-    return events
+            else:
+                torn += 1
+    return events, torn
+
+
+def read_events(idir: Path) -> list[dict]:
+    return scan_journal(idir)[0]
 
 
 def verify_chain(events: list[dict]) -> list[str]:
-    """Return list of integrity violations (empty = clean chain)."""
+    """Return the integrity violations (empty = clean chain). Every line_sha is
+    recomputed from its event body, so an edit to any committed event is
+    caught, including the last one, which nothing links to."""
     problems: list[str] = []
     prev = GENESIS_SHA
     for i, ev in enumerate(events):
@@ -204,6 +230,10 @@ def verify_chain(events: list[dict]) -> list[str]:
             problems.append(f"event {i+1}: seq {ev.get('seq')} != {i+1}")
         if ev.get("prev_sha") != prev:
             problems.append(f"event seq {ev.get('seq')}: prev_sha mismatch")
+        body = {k: v for k, v in ev.items() if k != "line_sha"}
+        if sha256(body) != ev.get("line_sha"):
+            problems.append(f"event seq {ev.get('seq')}: line_sha mismatch "
+                            f"(event edited after commit)")
         prev = ev.get("line_sha") or prev
     return problems
 
@@ -238,13 +268,25 @@ def make_event(idir: Path, actor: str, kind: str, entity: str,
     return ev
 
 
+def _tail_is_clean(path: Path) -> bool:
+    """True when the journal is empty or ends on a newline."""
+    if not path.exists() or path.stat().st_size == 0:
+        return True
+    with open(path, "rb") as f:
+        f.seek(-1, os.SEEK_END)
+        return f.read(1) == b"\n"
+
+
 def append_event(idir: Path, ev: dict) -> dict:
-    """Append one event to the journal (fsync'd). Caller holds the lock."""
+    """Append one event to the journal (fsync'd). Caller holds the lock. A
+    torn fragment left by a crash is closed off with a newline first, so the
+    new event is never glued onto it."""
     path = journal_file(idir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = (json.dumps(ev, sort_keys=False, ensure_ascii=False) + "\n")
+    lead = b"" if _tail_is_clean(path) else b"\n"
+    line = json.dumps(ev, sort_keys=False, ensure_ascii=False) + "\n"
     with open(path, "ab") as f:
-        f.write(line.encode("utf-8"))
+        f.write(lead + line.encode("utf-8"))
         f.flush()
         os.fsync(f.fileno())
     return ev
@@ -292,8 +334,11 @@ def open_slots(idir: Path) -> list[dict]:
 # ---------------------------------------------------------------- meta
 
 def init_store(root: Path, init_id: str, title: str) -> Path:
-    """Scaffold a new initiative store + committed docs dir."""
+    """Scaffold a new initiative store + committed docs dir. Refuses an
+    existing initiative: re-scaffolding would reset its meta and autonomy."""
     idir = init_dir(root, init_id)
+    if idir.exists():
+        raise ExecError(f"{init_id} already exists at {idir}", "exists")
     for d in (idir, journal_dir(idir), meta_dir(idir), dispatches_dir(idir),
               views_dir(idir), docs_init_dir(root, init_id)):
         d.mkdir(parents=True, exist_ok=True)
@@ -317,8 +362,8 @@ def check_store_version(idir: Path) -> None:
     """Refuse clearly on version skew rather than misreading a store."""
     meta = read_json(meta_file(idir))
     if meta is None:
-        raise ExecError(f"no meta.json in {idir} — not an executor "
-                        f"store (or pre-v2). Use `executor new` or --adopt.",
+        raise ExecError(f"no meta.json in {idir}: not an executor store "
+                        f"(or one from before v2). Use `executor new`.",
                         "no_meta")
     ev = meta.get("engine_version", "0")
     if _major(ev) > _major(__version__):

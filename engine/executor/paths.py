@@ -81,7 +81,14 @@ DOCS_STORE = "docs/executor"
 # grammar below all import these; a second copy anywhere is a bug.
 
 INIT_ID = r"INIT-\d{4}"
-ARTIFACT_ID = INIT_ID + r"-[A-Z]+-\d{2}"
+# kind -> the segment its ids carry. A plan is not here: its id is a plan id.
+ARTIFACT_SEGMENTS = {
+    "charter": "CHTR", "options": "OPTS", "brainstorm": "BRN",
+    "arch": "ARCH", "adr": "ADR", "ifce": "IFCE", "design": "DSGN",
+    "spec": "SPEC", "risk": "RISK", "vrfy": "VRFY",
+}
+_SEGMENT_ALT = "|".join(sorted(ARTIFACT_SEGMENTS.values()))
+ARTIFACT_ID = INIT_ID + r"-(?:" + _SEGMENT_ALT + r")-\d{2}"
 PLAN_ID = INIT_ID + r"-P\d{2}"
 TASK_ID = PLAN_ID + r"-T\d{2}"
 DISPATCH_ID = r"D\d{5,}"
@@ -95,6 +102,14 @@ def dispatch_id(seq: int) -> str:
 
 def is_dispatch_id(text: str) -> bool:
     return re.fullmatch(DISPATCH_ID, text) is not None
+
+
+def artifact_pattern(kind: str) -> str:
+    """The id pattern a payload of this kind must carry: its own segment (a
+    charter is CHTR, never SPEC), or a plan id for a plan."""
+    if kind == "plan":
+        return PLAN_ID
+    return INIT_ID + "-" + ARTIFACT_SEGMENTS[kind] + r"-\d{2}"
 
 
 # ---------------------------------------------------------------- roots
@@ -322,7 +337,7 @@ class Entry:
 
 
 _I = r"(?P<init>" + INIT_ID + r")"
-_ART = r"(?P<art>(?P=init)-[A-Z]+-\d{2})"
+_ART = r"(?P<art>(?P=init)-(?:" + _SEGMENT_ALT + r")-\d{2})"
 _PLAN = r"(?P<plan>(?P=init)-P\d{2})"
 _TASK = r"(?P<task>(?P=plan)-T\d{2})"
 _DISP = r"(?P<disp>" + DISPATCH_ID + r")"

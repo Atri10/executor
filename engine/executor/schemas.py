@@ -4,19 +4,39 @@
 
 Zero third-party dependencies: this is a deliberately small JSON-Schema
 subset (type/properties/required/enum/items/additionalProperties/
-minItems/minLength/maxLength/pattern/oneOf). Every payload the engine
-accepts is validated against one of the schemas below — structural first,
-then the semantic pass in engine.fold.
+minItems/minLength/maxLength/pattern/minimum/oneOf). A pattern must match the
+WHOLE string, so an id with junk around it is not an id. Every object in
+every schema is closed, and every payload the engine accepts is validated
+against one of the schemas below: structural first, then the semantic pass
+in engine.fold.
 """
 from __future__ import annotations
 
 import re
 
-from .store import Rejection
+from .paths import (ARTIFACT_ID, DISPATCH_ID, PLAN_ID, TASK_ID,
+                    artifact_pattern)
+from .store import PHASES, Rejection
 
 TYPES = {"object": dict, "array": list, "string": str,
          "integer": int, "number": (int, float), "boolean": bool,
          "null": type(None)}
+
+
+def json_type(obj) -> str:
+    """The JSON name of a value's type, so a rejection speaks the schema's
+    vocabulary ("expected string, got integer") instead of Python's ("got
+    int", "got NoneType"). bool is tested before int: in Python it is an
+    int, in JSON it is not."""
+    if obj is None:
+        return "null"
+    if isinstance(obj, bool):
+        return "boolean"
+    for name, py in (("integer", int), ("number", float), ("string", str),
+                     ("array", list), ("object", dict)):
+        if isinstance(obj, py):
+            return name
+    return type(obj).__name__
 
 
 def validate(obj, schema: dict, field: str = "$") -> None:
@@ -29,9 +49,9 @@ def validate(obj, schema: dict, field: str = "$") -> None:
         expected = TYPES[stype]
         # bool is a subclass of int in Python; keep them distinct.
         if stype in ("integer", "number") and isinstance(obj, bool):
-            raise Rejection("type", field, stype, "boolean")
+            raise Rejection("type", field, stype, json_type(obj))
         if not isinstance(obj, expected):
-            raise Rejection("type", field, stype, type(obj).__name__)
+            raise Rejection("type", field, stype, json_type(obj))
     if "enum" in schema and obj not in schema["enum"]:
         raise Rejection("enum", field, "|".join(map(str, schema["enum"])),
                         repr(obj))
@@ -42,7 +62,7 @@ def validate(obj, schema: dict, field: str = "$") -> None:
         if "maxLength" in schema and len(obj) > schema["maxLength"]:
             raise Rejection("maxLength", field,
                             f"len<={schema['maxLength']}", f"len={len(obj)}")
-        if "pattern" in schema and not re.search(schema["pattern"], obj):
+        if "pattern" in schema and not re.fullmatch(schema["pattern"], obj):
             raise Rejection("pattern", field, schema["pattern"], obj[:60])
     if stype == "integer":
         if "minimum" in schema and obj < schema["minimum"]:
@@ -77,7 +97,7 @@ def validate(obj, schema: dict, field: str = "$") -> None:
             for i, item in enumerate(obj):
                 validate(item, schema["items"], f"{field}[{i}]")
     if "oneOf" in schema:
-        for i, sub in enumerate(schema["oneOf"]):
+        for sub in schema["oneOf"]:
             try:
                 validate(obj, sub, field)
                 return
@@ -93,6 +113,9 @@ BASE = {
     "kind": {"type": "string", "minLength": 1},
     "v": {"type": "string", "minLength": 1},
     "engine_version": {"type": "string"},
+    # Optional echo of the slot a payload answers. The engine binds by it when
+    # present and by entity otherwise; a worker that cannot echo is still valid.
+    "dispatch_id": {"type": "string", "pattern": DISPATCH_ID},
 }
 
 
@@ -123,6 +146,11 @@ def _int(**kw):
     return d
 
 
+def _base(kind: str) -> dict:
+    """The keys every payload carries, with `kind` pinned to this schema's."""
+    return {**BASE, "kind": _enum(kind)}
+
+
 # ------------------------------------------------------------ artifacts
 
 SECTION = _obj({
@@ -132,34 +160,38 @@ SECTION = _obj({
 }, req=["id", "title", "body"])
 
 REQUIREMENT = _obj({
-    "id": _str(minLength=1, pattern=r"R\d+"),
+    "id": _str(pattern=r"R\d+"),
     "requirement": _str(minLength=1),
     "observable": _str(),
     "cites": _arr(_str()),
 }, req=["id", "requirement", "observable"])
 
 CONSTRAINT = _obj({
-    "id": _str(minLength=1, pattern=r"C\d+"),
+    "id": _str(pattern=r"C\d+"),
     "constraint": _str(minLength=1),
     "observable": _str(),
 }, req=["id", "constraint", "observable"])
 
 CRITERION = _obj({
-    "id": _str(minLength=1, pattern=r"V\d+"),
+    "id": _str(pattern=r"V\d+"),
     "criterion": _str(minLength=1),
     "procedure": _str(minLength=1),
     "cites": _arr(_str()),
 }, req=["id", "criterion", "procedure"])
 
+# A task id inside its plan is T plus exactly two digits: it becomes a
+# directory name, and the layout grammar admits no other shape.
+TASK_LOCAL = r"T\d{2}"
+
 TASK = _obj({
-    "id": _str(minLength=1, pattern=r"T\d+"),
+    "id": _str(pattern=TASK_LOCAL),
     "title": _str(minLength=1),
     "goal": _str(minLength=1),
     "files": _arr(_str(minLength=1), minItems=1),
     "accepts": _arr(_str(minLength=1), minItems=1),
     "provides": _arr(_str()),
     "consumes": _arr(_str()),
-    "depends_on": _arr(_str(pattern=r"T\d+")),
+    "depends_on": _arr(_str(pattern=TASK_LOCAL)),
 }, req=["id", "title", "goal", "files", "accepts"])
 
 FINDING = _obj({
@@ -175,9 +207,10 @@ FINDING = _obj({
 
 def artifact_schema(artifact_kind: str) -> dict:
     """Per-artifact body schema. Shared skeleton: id/title/summary/sections;
-    heavier kinds add their typed collections."""
+    heavier kinds add their typed collections. The id's segment is tied to the
+    kind (a charter is CHTR, never SPEC), and a plan is a plan id."""
     props = {
-        "id": _str(minLength=1, pattern=r"INIT-\d{4}-[A-Z]+-\d{2}|INIT-\d{4}-P\d{2}"),
+        "id": _str(pattern=artifact_pattern(artifact_kind)),
         "title": _str(minLength=1),
         "summary": _str(minLength=1),
         "sections": _arr(SECTION),
@@ -191,10 +224,13 @@ def artifact_schema(artifact_kind: str) -> dict:
             "risks": _arr(_str()),
         })
     if artifact_kind == "vrfy":
+        # Verification is driven by these rows: a VRFY without any would make
+        # the verification gate pass with nothing proven.
         props["criteria"] = _arr(CRITERION, minItems=1)
+        req.append("criteria")
     if artifact_kind == "plan":
         props.update({
-            "plan_id": _str(pattern=r"INIT-\d{4}-P\d{2}"),
+            "plan_id": _str(pattern=PLAN_ID),
             "objective": _str(minLength=1),
             "tasks": _arr(TASK, minItems=1),
             "gates": _arr(_str()),
@@ -220,18 +256,21 @@ def artifact_schema(artifact_kind: str) -> dict:
             "impact": _enum("high", "medium", "low"),
             "mitigation": _str(minLength=1),
         }, req=["id", "risk", "likelihood", "impact", "mitigation"]))
-    return _obj({**BASE, **props}, req=["kind", "v", *req])
+    return _obj({**_base(artifact_kind), **props}, req=["kind", "v", *req])
 
 
 ARTIFACT_KINDS = ["charter", "options", "brainstorm", "arch", "adr", "ifce",
                   "design", "spec", "risk", "vrfy", "plan"]
 
+# The target of an audit or repair: any artifact, or a plan.
+ARTIFACT_OR_PLAN = ARTIFACT_ID + "|" + PLAN_ID
+
 
 # ------------------------------------------------------------ runtime
 
 REPORT = _obj({
-    **BASE,
-    "task": _str(minLength=1),
+    **_base("report"),
+    "task": _str(pattern=TASK_ID),
     "result": _enum("DONE", "DONE_WITH_CONCERNS", "BLOCKED", "PARTIAL"),
     "summary": _str(minLength=1),
     "commits": _arr(_str(minLength=1)),
@@ -244,8 +283,8 @@ REPORT = _obj({
 }, req=["kind", "v", "task", "result", "summary", "commits"])
 
 VERDICT = _obj({
-    **BASE,
-    "task": _str(minLength=1),
+    **_base("verdict"),
+    "task": _str(pattern=TASK_ID),
     "round": _int(minimum=1),
     "spec_verdict": _enum("PASS", "FAIL"),
     "quality_verdict": _enum("APPROVED", "NEEDS_FIXES",
@@ -260,14 +299,14 @@ VERDICT = _obj({
         "reviewed_package_sha"])
 
 HEARTBEAT = _obj({
-    **BASE,
-    "task": _str(minLength=1),
+    **_base("heartbeat"),
+    "task": _str(pattern=TASK_ID),
     "note": _str(maxLength=400),
 }, req=["kind", "v", "task"])
 
 EVIDENCE = _obj({
-    **BASE,
-    "criterion": _str(minLength=1),
+    **_base("evidence"),
+    "criterion": _str(pattern=r"V\d+"),
     "command": _str(minLength=1),
     "observed": _str(minLength=1),
     "verdict": _enum("proven", "unavailable", "failed"),
@@ -277,35 +316,35 @@ EVIDENCE = _obj({
         "verdict", "state_commit"])
 
 GATE_DECISION = _obj({
-    **BASE,
-    "phase": _str(minLength=1),
+    **_base("gate_decision"),
+    "phase": _enum(*PHASES),
     "decision": _enum("approved", "rejected", "waived"),
     "by": _enum("human", "auto"),
     "note": _str(),
 }, req=["kind", "v", "phase", "decision", "by"])
 
 RULING = _obj({
-    **BASE,
+    **_base("ruling"),
     "decision": _str(minLength=1),
     "why": _str(minLength=1),
     "cost_if_wrong": _str(),
     "answered": _str(),
     "unsolicited": _str(),
     "stop": {"type": "boolean"},
-    "for_task": _str(),
+    "for_task": _str(pattern=TASK_ID),
 }, req=["kind", "v", "decision", "why"])
 
 AUDIT = _obj({
-    **BASE,
-    "target": _str(minLength=1),
+    **_base("audit"),
+    "target": _str(pattern=ARTIFACT_OR_PLAN),
     "round": _int(minimum=1),
     "verdict": _enum("PASS", "FAIL"),
     "findings": _arr(FINDING),
 }, req=["kind", "v", "target", "round", "verdict", "findings"])
 
 REPAIR = _obj({
-    **BASE,
-    "target": _str(minLength=1),
+    **_base("repair"),
+    "target": _str(pattern=ARTIFACT_OR_PLAN),
     "round": _int(minimum=1),
     "fixed": _arr(_str()),
     "introduced": _arr(FINDING),
@@ -314,28 +353,27 @@ REPAIR = _obj({
 
 
 HALT = _obj({
-    **BASE,
+    **_base("halt"),
     "reason": _str(minLength=1),
 }, req=["kind", "v", "reason"])
 
 SPAWN_ERROR = _obj({
-    **BASE,
-    "dispatch_id": _str(minLength=1),
+    **_base("spawn_error"),
     "error_class": _enum("rate_limit", "auth", "network", "session",
                          "other"),
     "detail": _str(),
 }, req=["kind", "v", "dispatch_id", "error_class"])
 
 NEEDS_CONTEXT = _obj({
-    **BASE,
-    "task": _str(minLength=1),
+    **_base("needs_context"),
+    "task": _str(pattern=TASK_ID),
     "question": _str(minLength=1),
     "for_role": _str(),
 }, req=["kind", "v", "task", "question"])
 
 MERGE = _obj({
-    **BASE,
-    "plan": _str(minLength=1),
+    **_base("merge"),
+    "plan": _str(pattern=PLAN_ID),
     "merge_sha": _str(minLength=4),
     "branch": _str(),
 }, req=["kind", "v", "plan", "merge_sha"])
