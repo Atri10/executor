@@ -56,7 +56,8 @@ from .paths import (autonomy_file, dispatch_dir, dispatches_dir,
                     docs_artifact_file, docs_artifact_md, docs_plan_dir,
                     docs_plan_file, docs_plan_md, docs_task_dir,
                     docs_report_file, docs_verdict_file,
-                    docs_export_journal, view_file)
+                    docs_export_journal, view_file,
+                    dispatch_id as new_dispatch_id)
 
 
 # ---------------------------------------------------------------- errors
@@ -254,7 +255,7 @@ def append_event(idir: Path, ev: dict) -> dict:
 def mint_slot(idir: Path, action: str, entity: str, schema: str) -> dict:
     """Create a single-use payload slot for an emitted action."""
     events = read_events(idir)
-    dispatch_id = f"d-{next_seq(events):05d}-{entity}-{schema}"
+    dispatch_id = new_dispatch_id(next_seq(events))
     slot = {
         "dispatch_id": dispatch_id,
         "action": action,

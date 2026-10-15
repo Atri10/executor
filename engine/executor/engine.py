@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from . import __version__
+from .paths import is_dispatch_id
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (ExecError, Initiative, Rejection, StoreLock,
                     append_event, docs_artifact_file, docs_artifact_md,
@@ -867,7 +868,7 @@ def check(init: Initiative) -> dict:
                   + a["data"].get("criteria", []))}
     for ed in s["edges"]:
         for end in (ed["from"], ed["to"]):
-            if end not in known and not end.startswith("d-"):
+            if end not in known and not is_dispatch_id(end):
                 problems.append(f"dangling edge {ed['kind']}: {end}")
     saved = read_json(state_file(init.idir)) or {}
     if saved.get("last_seq") != len(init.events):
