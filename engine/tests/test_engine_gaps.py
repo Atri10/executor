@@ -14,7 +14,7 @@ import _payloads as PL
 from _live import Live
 from executor import engine
 from executor.engine import _iso2epoch, _silent_for, check, fold, ingest
-from executor.paths import journal_file, state_file
+from executor.paths import dispatches_dir, docs_init_dir, journal_file, state_file
 from executor.store import ExecError, Rejection, read_json, write_json
 
 
@@ -235,6 +235,52 @@ class Timestamps(LiveCase):
         write_json(state_file(self.init.idir), cache)
         problems = check(self.init)["problems"]
         self.assertTrue(any("last_seq 0" in p for p in problems))
+
+
+class Internals(LiveCase):
+    def test_an_unreadable_stamp_counts_as_no_silence(self):
+        """A dispatch is judged dead on evidence, never on a stamp that cannot
+        be read: an unreadable one contributes zero seconds of silence."""
+        self.assertEqual(_silent_for({"at": "not a timestamp"}, 10**9), 0.0)
+
+    def test_entity_for_falls_back_to_the_dispatch_id_for_unknown_kinds(self):
+        """Slot-bearing kinds map to their natural entity; a kind the mapper
+        does not know yet still identifies itself by dispatch_id."""
+        self.assertEqual(engine._entity_for({"kind": "mystery",
+                                             "dispatch_id": "D00007"}),
+                         "D00007")
+        self.assertEqual(engine._entity_for({"kind": "mystery"}), "-")
+
+    def test_open_for_scans_past_a_slot_for_another_entity(self):
+        """The first open slot is not assumed to be the one a payload answers:
+        slots are scanned until entity and schema match."""
+        s = {"dispatches": {
+            "D00001": {"entity": "INIT-0001-CHTR-01", "schema": "charter",
+                       "role": "author", "respond_to": "", "base": "", "context": {}},
+            "D00002": {"entity": "INIT-0001-P01-T01", "schema": "report",
+                       "role": "impl", "respond_to": "", "base": "", "context": {}}},
+            "answered": set()}
+        self.assertIsNone(engine._open_for(s, "INIT-0001-CHTR-01", "report"))
+        self.assertEqual(engine._open_for(s, "INIT-0001-P01-T01")["dispatch_id"],
+                         "D00002")
+
+    def test_check_survives_a_store_missing_its_optional_directories(self):
+        """A store that has never dispatched or exported still audits cleanly:
+        missing dispatches/ and docs dirs are not problems."""
+        docs_init_dir(self.live.root, self.init.id).rmdir()
+        dispatches_dir(self.init.idir).rmdir()
+        report = check(self.init)
+        self.assertEqual((report["chain"], report["problems"]), ("ok", []))
+
+    def test_a_stray_file_in_the_committed_store_is_named(self):
+        """The committed side of the store is audited as strictly as the run
+        side: a file the grammar does not describe is reported by path."""
+        stray = docs_init_dir(self.live.root, self.init.id) / "meta" / "stray.txt"
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("x", encoding="utf-8")
+        problems = check(self.init)["problems"]
+        self.assertTrue(any("non-canonical committed file" in p and
+                            "stray.txt" in p for p in problems))
 
 
 if __name__ == "__main__":

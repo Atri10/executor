@@ -12,7 +12,8 @@ from _live import Live
 from executor.engine import check, fold, ingest
 from executor.policy import DEFAULTS
 from executor.paths import (artifact_file, audit_file, docs_artifact_file,
-                            docs_export_journal, docs_index_file, docs_index_md,
+                            docs_export_journal, docs_artifact_md, docs_index_file,
+                            docs_index_md,
                             docs_plan_file, docs_report_file, docs_verdict_file,
                             journal_file, plan_audit_file, plan_file,
                             preflight_file, repair_file, review_package_file,
@@ -69,6 +70,22 @@ class CanonicalLayout(LiveCase):
         self.live.run(lambda a: a["action"] == "DONE")
         self.assertEqual(docs_export_journal(self.live.root, INIT).read_bytes(),
                          journal_file(self.init.idir).read_bytes())
+
+    def test_a_spec_document_renders_its_requirements_and_constraints(self):
+        """The committed markdown is generated from the payload: a spec's
+        requirement and constraint sections appear in it."""
+        draft = self.live.run(lambda a: a["action"] == "DISPATCH"
+                              and a["role"] == "author"
+                              and a["schema"] == "spec")
+        spec = {**PL.art("spec"),
+                "requirements": [{"id": "R1", "requirement": "log in",
+                                  "observable": "session cookie"}],
+                "constraints": [{"id": "C1", "constraint": "under 200ms",
+                                 "observable": "p99"}]}
+        ingest(self.init, spec)
+        md = docs_artifact_md(self.live.root, INIT, spec["id"]).read_text()
+        self.assertIn("### R1", md)
+        self.assertIn("**C1**", md)
 
 
 class ReviewPackages(LiveCase):

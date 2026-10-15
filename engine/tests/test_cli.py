@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import unittest
+import runpy
 from pathlib import Path
 from unittest import mock
 
@@ -69,6 +70,14 @@ class Usage(CliCase):
         self.assertEqual(code, 0)
         self.assertIn("executor new", out)
 
+    def test_the_module_guard_exits_with_mains_code(self):
+        """`python cli.py --version` reaches the __main__ guard and exits 0."""
+        with mock.patch("sys.argv", ["cli.py", "--version"]), \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as se:
+                runpy.run_path(str(Path(cli.__file__)), run_name="__main__")
+        self.assertEqual(se.exception.code, 0)
+
 
 class NewCommand(CliCase):
     def test_new_creates_an_initiative_through_the_engine(self):
@@ -119,8 +128,12 @@ class Autonomy(CliCase):
         code, _, err = self.cli("autonomy", "bogusphase", "gate")
         self.assertEqual((code, json.loads(err)["code"]), (2, "unknown_phase"))
 
+    def test_a_phase_without_a_mode_is_a_usage_error(self):
+        code, _, err = self.cli("autonomy", "intake")
+        self.assertEqual((code, json.loads(err)["code"]), (2, "usage"))
 
-class NextAndStatus(CliCase):
+
+class StatusAndId(CliCase):
     def test_status_prints_the_gate_card(self):
         self.live.run(lambda a: a["action"] == "GATE")
         code, out, _ = self.cli("status")
@@ -276,6 +289,10 @@ class Migrate(CliCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["verdict"], "store_outdated")
         self.assertEqual(meta_file(self.live.init.idir).read_bytes(), before)
+
+    def test_an_explicit_initiative_id_is_accepted(self):
+        code, out, _ = self.cli("migrate", self.live.init.id, "--dry-run")
+        self.assertEqual((code, json.loads(out)["verdict"]), (0, "current"))
 
 
 class Errors(CliCase):

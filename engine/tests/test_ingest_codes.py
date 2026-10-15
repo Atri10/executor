@@ -71,6 +71,31 @@ class PlanCodes(LiveCase):
             tasks=[PL.task_row("T01", depends_on=["T09"])]))
         self.assertEqual(exc.field, "$.tasks.T01.depends_on")
 
+    def test_every_cite_is_checked_not_just_the_first(self):
+        spec_id = PL.art("spec")["id"]
+        exc = self.assertRefused("dangling_ref",
+                                 {**PL.plan_payload(),
+                                  "cites": [spec_id, "bogus-id-99"]})
+        self.assertIn("bogus-id-99", exc.got)
+
+    def test_ordered_tasks_may_share_a_file_without_conflict(self):
+        """A task that depends on another may touch the same files: the pair is
+        ordered, so preflight skips it; a third task sharing nothing exercises
+        the no-shared-files scan."""
+        tasks = [{"id": "T01", "title": "a", "goal": "g", "files": ["x.py"],
+                  "accepts": ["ok"]},
+                 {"id": "T02", "title": "b", "goal": "g", "files": ["x.py"],
+                  "accepts": ["ok"], "depends_on": ["T01"]},
+                 {"id": "T03", "title": "c", "goal": "g", "files": ["y.py"],
+                  "accepts": ["ok"]}]
+        ingest(self.init, {**PL.plan_payload(), "tasks": tasks})
+        self.live.run(lambda a: a["action"] == "DISPATCH" and a["role"] == "impl")
+        # preflight runs just before the first impl dispatch
+        from executor.paths import preflight_file
+        from executor.store import read_json
+        self.assertEqual(read_json(preflight_file(self.init.idir, PL.PLAN))
+                         ["verdict"], "clear")
+
 
 class CriteriaCodes(LiveCase):
     def setUp(self) -> None:
@@ -103,6 +128,29 @@ class ReviewCodes(LiveCase):
             task=self.review["entity"], rnd=ctx["round"], base=ctx["base"],
             head=ctx["head"], reviewed_package_sha=ctx["package_sha"],
             findings=[PL.finding(evidence="see src/nowhere/x.py")]))
+
+    def test_a_finding_with_a_bare_filename_is_not_path_checked(self):
+        """Only evidence that names a path inside the repo is verified against
+        git; a bare filename carries no path claim, so it is accepted."""
+        ctx = self.review["context"]
+        ingest(self.init, PL.verdict(
+            task=self.review["entity"], rnd=ctx["round"], base=ctx["base"],
+            head=ctx["head"], reviewed_package_sha=ctx["package_sha"],
+            spec="FAIL", findings=[PL.finding(evidence="see nothing.py")]))
+
+    def test_a_report_can_name_the_dispatch_it_answers(self):
+        """dispatch_id narrows the answer to that dispatch: naming another open
+        dispatch is refused, naming its own is accepted."""
+        ctx = self.review["context"]
+        self.assertRefused("no_open_slot", PL.verdict(
+            task=self.review["entity"], rnd=ctx["round"], base=ctx["base"],
+            head=ctx["head"], reviewed_package_sha=ctx["package_sha"],
+            dispatch_id="D99999"))
+        ingest(self.init, PL.verdict(
+            task=self.review["entity"], rnd=ctx["round"], base=ctx["base"],
+            head=ctx["head"], reviewed_package_sha=ctx["package_sha"],
+            dispatch_id=self.review["dispatch_id"]))
+        self.assertEqual(self.live.events()[-1]["kind"], "verdict")
 
 
 class EvidenceCodes(LiveCase):

@@ -1147,8 +1147,7 @@ def _check_advances(init: Initiative, s: dict, p: dict, sl: dict) -> None:
     refs = [sl["base"]]
     if sl["role"] == "fix":
         prior = (s["reports"].get(p["task"]) or {}).get("commits") or []
-        if prior:
-            refs.append(prior[-1])
+        refs += prior[-1:]
     commits = p.get("commits") or []
     if not commits:
         raise Rejection("empty_range", "$.commits", "at least one commit",

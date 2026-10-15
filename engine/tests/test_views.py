@@ -8,7 +8,7 @@ import unittest
 
 import _payloads as PL
 from _live import Live
-from executor.engine import fold
+from executor.engine import fold, ingest
 from executor.paths import views_dir
 from executor.views import (render_handoff_index, render_handoff_md,
                             render_report_md, render_verdict_md, status_card)
@@ -47,6 +47,35 @@ class GateCard(unittest.TestCase):
         self.assertIn("-> GATE intake", card)
         card.encode("ascii")
 
+
+    def test_the_card_reports_open_critiques_and_unruled_concerns(self):
+        live = Live()
+        self.addCleanup(live.close)
+        drafted = live.run(lambda a: a["action"] == "DISPATCH"
+                           and a["role"] == "author")
+        ingest(live.init, live.answer(drafted))
+        audit = live.act()
+        ingest(live.init, PL.audit(target=audit["entity"], rnd=1, verdict="FAIL",
+                                   findings=(PL.finding(),)))
+        # Read the card before the repair dispatch is issued: the fixture would
+        # answer it and close the critique again.
+        card = status_card(live.init, fold(live.events()))
+        self.assertIn("open critique findings", card)
+        impl = live.run(lambda a: a["action"] == "DISPATCH"
+                        and a["role"] == "impl")
+        ingest(live.init, PL.report(task=impl["entity"], commits=(),
+                                    result="BLOCKED",
+                                    concerns=["no schema yet"]))
+        card = status_card(live.init, fold(live.events()))
+        self.assertIn("awaiting rulings", card)
+
+    def test_a_halted_run_says_so_on_the_card(self):
+        live = Live()
+        self.addCleanup(live.close)
+        live.act()
+        ingest(live.init, {"kind": "halt", "v": "v1", "reason": "client stop"})
+        card = status_card(live.init, fold(live.events()))
+        self.assertIn("HALTED: client stop", card)
 
 class FinishedRun(unittest.TestCase):
     def setUp(self) -> None:
