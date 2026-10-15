@@ -103,13 +103,29 @@ Subagent (general-purpose):
     ```json
     {"kind": "[ARTIFACT_KIND]", "v": "v1", "dispatch_id": "[D<NNNNN>]",
      "id": "[TARGET]", "title": "…", "summary": "…",
-     "sections": [{"id": "…", "title": "…", "body": "…"}]}
+     "sections": [{"id": "…", "title": "…", "prose": "…",
+                   "bullets": ["…"],
+                   "tables": [{"columns": ["…"], "rows": [["…"]]}],
+                   "code": [{"lang": "…", "source": "…"}]}]}
     ```
 
     `id` echoes the target exactly — a redraft claiming another artifact
     is rejected. The journal's `repairs/R<NN>.repair.json` records what
-    changed; your payload is the new truth the re-auditor grades.
+    changed; your payload is the new truth the re-auditor grades. A
+    section is data, not markdown: `prose`, `bullets`, `tables`, `code`,
+    with the engine rendering the `.md` — a pipe table or a fence inside a
+    string is a schema rejection.
 ```
+
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
 
 **Placeholders — every one is required:**
 

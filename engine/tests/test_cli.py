@@ -78,6 +78,26 @@ class Usage(CliCase):
                 runpy.run_path(str(Path(cli.__file__)), run_name="__main__")
         self.assertEqual(se.exception.code, 0)
 
+    def test_the_package_guard_exits_with_mains_code(self):
+        """`python -m executor` reaches executor/__main__.py and exits 0,
+        with the same argv convention cli.py's own guard uses."""
+        pkg_main = Path(cli.__file__).parent / "__main__.py"
+        self.assertTrue(pkg_main.exists(), "executor/__main__.py is the -m entry")
+        out = io.StringIO()
+        with mock.patch("sys.argv", ["executor", "--version"]), \
+             contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as se:
+                runpy.run_path(str(pkg_main), run_name="__main__")
+        self.assertEqual(se.exception.code, 0)
+        self.assertEqual(out.getvalue().strip(), cli.__version__)
+
+    def test_importing_the_package_entry_does_not_run_it(self):
+        """A plain import of `executor.__main__` is inert: the CLI runs only
+        under the `__main__` guard, so importing never fires a command."""
+        import importlib
+        module = importlib.import_module("executor.__main__")
+        self.assertTrue(hasattr(module, "main"))
+
 
 class NewCommand(CliCase):
     def test_new_creates_an_initiative_through_the_engine(self):

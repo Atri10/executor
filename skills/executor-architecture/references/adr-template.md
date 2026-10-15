@@ -24,15 +24,32 @@ below. Guidance sits in italic lines — replace each one with content.
  "summary": "Use per-cell SQLite over a shared Postgres cluster — no cross-cell transactions; operator manages N files per node.",
  "cites": ["INIT-0004-ARCH-01", "INIT-0004-OPTS-01", "INIT-0004-SPEC-01"],
  "sections": [
-   {"id": "context", "title": "Context", "body": "…"},
-   {"id": "options", "title": "Options weighed", "body": "…"},
-   {"id": "decision", "title": "Decision", "body": "…"},
-   {"id": "consequences", "title": "Consequences accepted", "body": "…"},
-   {"id": "falsifier", "title": "What would make this decision wrong", "body": "…"},
-   {"id": "reversibility", "title": "Reversibility", "body": "…"},
-   {"id": "supersession", "title": "Supersession", "body": "…"}
+   {"id": "context", "title": "Context",
+    "prose": "…",
+    "tables": [{"columns": ["Force", "Source", "Consequence for structure"],
+                "rows": [["p99 under 200ms", "charter criteria", "no per-request network"]]}]},
+   {"id": "options", "title": "Options weighed",
+    "tables": [{"columns": ["Option", "What it buys", "What it costs"],
+                "rows": [["Per-cell SQLite (chosen)", "No network on the placement path", "N files per node"]]}],
+    "code": [{"lang": "json", "source": "…"}]},
+   {"id": "decision", "title": "Decision",
+    "prose": "Cell state lives in one SQLite database per cell, opened by `sqlite-cell-store`."},
+   {"id": "consequences", "title": "Consequences accepted",
+    "bullets": ["No cross-cell transaction is available."]},
+   {"id": "falsifier", "title": "What would make this decision wrong",
+    "tables": [{"columns": ["Falsifier", "How it is observed", "Trigger to revisit"],
+                "rows": [["One cell exceeds one node's disk", "Cell size crosses 40GB", "Alert on cell size"]]}]},
+   {"id": "reversibility", "title": "Reversibility",
+    "prose": "One-way. Reversal means migrating stored data out of N SQLite files into a cluster."},
+   {"id": "supersession", "title": "Supersession",
+    "prose": "Supersedes INIT-0004-ADR-01."}
  ]}
 ```
+
+**The tables in this document are the content your payload's `tables[]`
+carries** — `columns` plus `rows`, one cell per column. Never paste
+markdown into a string: a pipe table, a fence, or a heading in `prose` is
+a schema rejection, because the engine renders every `.md` from this data.
 
 `summary` is the one-line decision plus the cost you are choosing — if
 it reads as a benefit, it is not the cost. `reversibility:

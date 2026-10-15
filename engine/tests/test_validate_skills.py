@@ -100,10 +100,130 @@ class VisualGuardTests(unittest.TestCase):
         self.assertIn("all clean", out)
 
 
+class PayloadContractGuardTests(unittest.TestCase):
+    """The guard that makes a second markdown renderer impossible to
+    reintroduce: a `sections[].body` example, a markdown template handed
+    to a prompt, or an output placeholder resolving to a .md file."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def put(self, rel: str, text: str) -> Path:
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def findings(self) -> list[str]:
+        fail: list[str] = []
+        vs.check_payload_contract(self.root, fail)
+        return fail
+
+    def test_a_clean_tree_has_no_findings(self):
+        self.put("demo/SKILL.md", "# Demo\nprose only\n")
+        self.assertEqual(self.findings(), [])
+
+    def test_a_body_field_example_is_flagged_with_file_and_line(self):
+        p = self.put("demo/notes.md", 'ok\n"sections": [{"id": "s", '
+                                      '"title": "t", "body": "b"}]\n')
+        (finding,) = self.findings()
+        self.assertIn(f"{p}:2", finding)
+        self.assertIn("sections[].body example", finding)
+
+    def test_the_structured_field_names_pass(self):
+        self.put("demo/notes.md", '```json\n"sections": [{"id": "s", '
+                                  '"title": "t", "prose": "p",\n'
+                                  '  "bullets": ["b"],\n'
+                                  '  "tables": [{"columns": ["A"], '
+                                  '"rows": [["1"]]}],\n'
+                                  '  "code": [{"lang": "ts", '
+                                  '"source": "x"}]}]\n```\n')
+        self.assertEqual(self.findings(), [])
+
+    def test_a_prompt_with_a_markdown_output_template_is_flagged(self):
+        self.put("demo/scout-prompt.md",
+                 "## The Output File\n\n```markdown\n\n"
+                 "| A | B |\n|---|---|\n\n```\n")
+        (finding,) = self.findings()
+        self.assertIn("```markdown template", finding)
+
+    def test_a_markdown_fence_in_a_non_prompt_is_allowed(self):
+        self.put("demo/SKILL.md", "```markdown\nsample\n```\n")
+        self.assertEqual(self.findings(), [])
+
+    def test_an_output_placeholder_resolving_to_markdown_is_flagged(self):
+        self.put("demo/prompt.md", "| `[OUTPUT_FILE]` | "
+                                   "`<session dir>/prior-art.md` |\n")
+        (finding,) = self.findings()
+        self.assertIn("output placeholder resolves to a .md file", finding)
+
+    def test_an_output_placeholder_resolving_to_json_passes(self):
+        self.put("demo/prompt.md", "| `[OUTPUT_FILE]` | "
+                                   "the `respond_to` path "
+                                   "`dispatches/D<NNNNN>/payload.json` |\n")
+        self.assertEqual(self.findings(), [])
+
+
+class RefusalContractGuardTests(unittest.TestCase):
+    """A worker prompt that never says what a refusal means leaves the
+    worker to improvise: re-dispatch, edit the journal, answer another
+    slot. All three corrupt a run, so every payload-writing prompt carries
+    the contract and the validator proves it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def put(self, rel: str, text: str) -> Path:
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def findings(self) -> list[str]:
+        fail: list[str] = []
+        vs.check_refusal_contract(self.root, fail)
+        return fail
+
+    def test_a_prompt_without_the_refusal_contract_is_flagged(self):
+        p = self.put("demo/scout-prompt.md", "# Scout\n\n| respond_to | x |\n")
+        (finding,) = self.findings()
+        self.assertIn(str(p), finding)
+        self.assertIn("refusal contract", finding)
+
+    def test_a_prompt_carrying_the_contract_passes(self):
+        self.put("demo/scout-prompt.md",
+                 "# Scout\n\n## If Your Payload Is Refused\n\nfix it\n")
+        self.assertEqual(self.findings(), [])
+
+    def test_the_human_lane_templates_are_exempt(self):
+        self.put("demo/decide-prompt.md", "# Decide\n")
+        self.put("demo/supervisor-prompt.md", "# Supervisor\n")
+        self.assertEqual(self.findings(), [])
+
+    def test_the_real_repository_prompts_carry_the_contract(self):
+        fail: list[str] = []
+        vs.check_refusal_contract(REPO / "skills", fail)
+        self.assertEqual(fail, [])
+
+
 class RepositoryIsCleanTests(unittest.TestCase):
     def test_skills_tree_ships_no_visual_material(self):
         fail: list[str] = []
         vs.check_no_visual_material(REPO / "skills", fail)
+        self.assertEqual(fail, [])
+
+    def test_skills_tree_teaches_no_second_renderer(self):
+        """Real-tree enforcement: no `sections[].body` example, no prompt
+        carrying a markdown output template, and no output placeholder
+        that resolves to a .md path. The engine renders every markdown
+        file from the payload's data, so a doc that shows anything else
+        teaches an agent to become a second renderer."""
+        fail: list[str] = []
+        vs.check_payload_contract(REPO / "skills", fail)
         self.assertEqual(fail, [])
 
     def test_readme_contributing_and_ci_do_not_mention_the_companion(self):

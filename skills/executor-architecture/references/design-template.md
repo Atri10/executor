@@ -23,18 +23,41 @@ one with content.
  "cites": ["INIT-0004-ARCH-01", "INIT-0004-IFCE-01"],
  "component": "placement-service",
  "sections": [
-   {"id": "responsibility", "title": "Responsibility", "body": "…"},
-   {"id": "nonresponsibilities", "title": "What this component does not do", "body": "…"},
-   {"id": "surface", "title": "Public surface", "body": "…"},
-   {"id": "state", "title": "State", "body": "…"},
-   {"id": "algorithms", "title": "Algorithms", "body": "…"},
-   {"id": "edges", "title": "Edge cases", "body": "…"},
-   {"id": "errors", "title": "Error handling", "body": "…"},
-   {"id": "seams", "title": "Testing seams", "body": "…"},
-   {"id": "files", "title": "File structure", "body": "…"},
-   {"id": "open", "title": "Open questions", "body": "…"}
+   {"id": "responsibility", "title": "Responsibility",
+    "prose": "Chooses the cell a tenant belongs to and records the binding."},
+   {"id": "nonresponsibilities", "title": "What this component does not do",
+    "bullets": ["Does not decide whether a request is admissible — `admission-control` does."]},
+   {"id": "surface", "title": "Public surface",
+    "prose": "Consumed: `CellStore`, `MetricsPort` — see INIT-0004-IFCE-01. Exposed: `place(request) -> Placement`."},
+   {"id": "state", "title": "State",
+    "tables": [{"columns": ["State", "Type", "Lifetime", "Mutated by", "Rule"],
+                "rows": [["rules", "PlacementRules", "process", "never after construction", "Immutable"]]}]},
+   {"id": "algorithms", "title": "Algorithms",
+    "prose": "Step by step, with the ordering and the complexity.",
+    "tables": [{"caption": "place(request)",
+                "columns": ["Step", "Action", "Why the order matters"],
+                "rows": [["1", "store.candidates(region, sizeClass)", "checked before scoring so the empty case costs no work"]]}]},
+   {"id": "edges", "title": "Edge cases",
+    "tables": [{"columns": ["Case", "Required behaviour"],
+                "rows": [["No candidates", "NoCapacity, no metric, no store write"]]}]},
+   {"id": "errors", "title": "Error handling",
+    "tables": [{"columns": ["Origin", "Handling"],
+                "rows": [["StoreUnavailable", "Propagate unchanged — the edge maps it to 503"]]}]},
+   {"id": "seams", "title": "Testing seams",
+    "tables": [{"columns": ["Seam", "Injected as", "Fake", "Tested for real where"],
+                "rows": [["CellStore", "constructor parameter", "InMemoryCellStore", "Adapter test against a real SQLite file"]]}]},
+   {"id": "files", "title": "File structure",
+    "tables": [{"columns": ["Path", "Responsibility", "Changes when"],
+                "rows": [["core/placement/place.ts", "The place() use case", "The placement flow changes"]]}]},
+   {"id": "open", "title": "Open questions",
+    "bullets": ["None."]}
  ]}
 ```
+
+**The tables in this document are the content your payload's `tables[]`
+carries.** A pipe table, a fence, or a heading inside any string is a
+schema rejection: the engine renders the `.md` from this data, so a
+payload never carries formatting.
 
 ## 1. Responsibility
 

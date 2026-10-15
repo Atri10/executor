@@ -15,7 +15,13 @@ provenance claim.** If a check did not run, the payload says so.
 ```json
 {"kind": "spec",                    "v": "v1",
  "id": "INIT-0004-SPEC-01",         "title": "Cell placement",
- "summary": "…",                   "sections": [{"id": "…", "title": "…", "body": "…"}],
+ "summary": "…",
+ "sections": [{"id": "…", "title": "…",
+               "prose": "…",
+               "bullets": ["…"],
+               "tables": [{"caption": "…", "columns": ["…"],
+                           "rows": [["…"]]}],
+               "code": [{"lang": "…", "source": "…"}]}],
  "dispatch_id": "D00112"}
 ```
 
@@ -26,6 +32,19 @@ provenance claim.** If a check did not run, the payload says so.
   rejects a payload that answers nothing or the wrong slot.
 - `sections` carry the document body — one entry per section, each with
   its own `id` so a reviewer cites `INIT-0004-SPEC-01 §R3`, not a page.
+
+## A section is data, not markdown
+
+Four shapes carry a section's content, and the engine renders the `.md`
+from them: `prose` for paragraphs, `bullets` for lists, `tables` for grids
+(`columns` plus `rows`, one cell per column, no pipes or newlines inside a
+cell), and `code` for signatures, samples, and Mermaid diagrams.
+
+The schema enforces it: a pipe table, a code fence, or a heading inside
+any string is rejected as `notMatch`, a short or long table row is
+`row_width`, and a section with no shape at all is `empty_section`. One
+renderer — `engine._render_doc` — produces every markdown file in the
+store, so a payload cannot become a second renderer that drifts from it.
 
 ## Per-kind fields
 

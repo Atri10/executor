@@ -422,10 +422,14 @@ def _iso2epoch(ts) -> float:
 
 
 def _silent_for(dsp: dict, now: float) -> float:
-    """Seconds since the dispatch last showed life. A stamp that cannot be read
-    counts as no silence: a dispatch is judged dead on evidence, never on bad data."""
+    """Seconds since the dispatch last showed life. A stamp that cannot be
+    read — malformed, or absent entirely — counts as no silence: a dispatch
+    is judged dead on evidence, never on bad data."""
+    stamp = dsp.get("last_beat") or dsp.get("at")
+    if not stamp:
+        return 0.0
     try:
-        return now - _iso2epoch(dsp.get("last_beat") or dsp["at"])
+        return now - _iso2epoch(stamp)
     except ExecError:
         return 0.0
 
@@ -1115,6 +1119,11 @@ def _check_free(init: Initiative, s: dict, p: dict) -> str:
 def _check_artifact(s: dict, p: dict) -> None:
     known = _known_ids(s)
     for c in p.get("cites", []):
+        if c == p["id"]:
+            raise Rejection("dangling_ref", "$.cites",
+                            "another artifact, task, or criterion", c,
+                            "a payload cannot cite itself: the reference "
+                            "would add nothing a reader can check")
         if c not in known:
             raise Rejection("dangling_ref", "$.cites", "an authored id", c,
                             "cite only artifacts, tasks or criteria that exist")
@@ -1275,6 +1284,10 @@ def _write_artifact(init: Initiative, p: dict) -> None:
 
 
 def _render_doc(p: dict) -> str:
+    """Deterministic markdown from the payload's data. The payload never
+    carries formatting — every table, list, and fence below is built here
+    from typed fields, so an agent that wants a table emits rows and the
+    reader always gets the same one."""
     out = [f"# {p['id']} — {p.get('title', '')}", "", f"*{p.get('summary', '')}*", ""]
     for r in p.get("requirements", []):
         out += [f"### {r['id']} — {r['requirement']}",
@@ -1283,7 +1296,7 @@ def _render_doc(p: dict) -> str:
         out += [f"**{c['id']}** {c['constraint']}  ",
                 f"*observable:* {c.get('observable', '')}  ", ""]
     for sec in p.get("sections", []):
-        out += [f"## {sec['title']}", sec.get("body", ""), ""]
+        out += _render_section(sec)
     for c in p.get("criteria", []):
         out += [f"### {c['id']}", f"{c['criterion']}  ",
                 f"*procedure:* {c['procedure']}  ", ""]
@@ -1292,6 +1305,28 @@ def _render_doc(p: dict) -> str:
                 "**files:** " + ", ".join(f"`{f}`" for f in t["files"]), "",
                 "**accepts:**", *[f"- {a}" for a in t["accepts"]], ""]
     return "\n".join(out) + "\n"
+
+
+def _render_section(sec: dict) -> list[str]:
+    out = [f"## {sec['title']}"]
+    if sec.get("prose"):
+        out += [sec["prose"], ""]
+    else:
+        out.append("")
+    out += [f"- {b}" for b in sec.get("bullets", [])]
+    if sec.get("bullets"):
+        out.append("")
+    for t in sec.get("tables", []):
+        if t.get("caption"):
+            out += [f"*{t['caption']}*", ""]
+        cols = t["columns"]
+        out += ["| " + " | ".join(cols) + " |",
+                "| " + " | ".join(["---"] * len(cols)) + " |"]
+        out += ["| " + " | ".join(row) + " |" for row in t["rows"]]
+        out.append("")
+    for c in sec.get("code", []):
+        out += [f"```{c.get('lang', '')}", c["source"], "```", ""]
+    return out
 
 
 # ------------------------------------------------------------ initiatives

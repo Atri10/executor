@@ -43,6 +43,17 @@ class Binding(LiveCase):
         self.assertEqual(exc.field, "$.cites")
         self.assertFalse(artifact_file(self.init.idir, f"{self.init.id}-CHTR-01").exists())
 
+    def test_a_payload_cannot_cite_itself(self):
+        """A self-citation is an artifact arguing from itself: the reference
+        adds nothing a reader can check, and it would also make a redraft
+        look like it cited its predecessor."""
+        self.live.act()
+        self.live.act()
+        exc = self.assertRefused("dangling_ref", PL.art(
+            "charter", cites=["INIT-0001-CHTR-01"]))
+        self.assertEqual(exc.field, "$.cites")
+        self.assertIn("itself", exc.hint or "")
+
 
 class Redelivery(LiveCase):
     def test_an_identical_redelivery_of_an_accepted_answer_is_a_no_op(self):

@@ -28,15 +28,34 @@ one with content.
  "consumers": ["INIT-0004-P01", "INIT-0004-P02"],
  "stability": "draft",
  "sections": [
-   {"id": "scope", "title": "Scope", "body": "…"},
-   {"id": "types", "title": "Data types", "body": "…"},
-   {"id": "operations", "title": "Operations", "body": "…"},
-   {"id": "lifecycle", "title": "Lifecycle", "body": "…"},
-   {"id": "provider-invariants", "title": "Invariants the provider guarantees", "body": "…"},
-   {"id": "consumer-invariants", "title": "Invariants the consumer must uphold", "body": "…"},
-   {"id": "worked-call", "title": "Worked call", "body": "…"}
+   {"id": "scope", "title": "Scope",
+    "prose": "Provider: `sqlite-cell-store` (adapter). Consumer: `placement-service` (policy)."},
+   {"id": "types", "title": "Data types",
+    "code": [{"lang": "ts",
+              "source": "type CellId = string;        // \"r1-c007\"; ^[a-z0-9]+-c[0-9]{3}$; never empty\ntype SizeClass = \"small\" | \"medium\" | \"large\";\n\ninterface Cell {\n  id: CellId;\n  region: string;            // ISO-3166-1 alpha-2, lowercase\n  usedBytes: number;         // integer, >= 0, bytes not MB\n}"}]},
+   {"id": "operations", "title": "Operations",
+    "prose": "One subsection per operation. Each names its signature, its returns, its errors, and its ordering and concurrency contract.",
+    "tables": [{"caption": "candidates(region, sizeClass) -> Cell[]",
+                "columns": ["Parameter", "Type", "Constraint"],
+                "rows": [["region", "string", "ISO-3166-1 alpha-2, lowercase; unknown is not an error, it returns []"]]}],
+    "code": [{"lang": "ts", "source": "candidates(region: string, sizeClass: SizeClass): Promise<Cell[]>"}]},
+   {"id": "lifecycle", "title": "Lifecycle",
+    "bullets": ["1. `open(config)` resolves before any other call.", "2. `close()` is idempotent."]},
+   {"id": "provider-invariants", "title": "Invariants the provider guarantees",
+    "bullets": ["`usedBytes <= capacityBytes` for every returned cell.", "A tenant has at most one placement at any time."]},
+   {"id": "consumer-invariants", "title": "Invariants the consumer must uphold",
+    "bullets": ["Never persist a `CellId` obtained anywhere other than `candidates`.", "Never re-sort the `candidates` result."]},
+   {"id": "worked-call", "title": "Worked call",
+    "code": [{"lang": "ts",
+              "source": "const cells = await store.candidates(\"de\", \"medium\");\nif (cells.length === 0) throw new NoCapacity();\ntry {\n  return await store.bind(tenant, cells[0].id);\n} catch (e) {\n  if (e instanceof AlreadyBound) return await store.placementOf(tenant);\n  throw e;\n}"}]}
  ]}
 ```
+
+**Every signature and sample in this document is `code` with a language;
+every parameter and error grid is `tables[]` with `columns` plus `rows`.**
+A pipe table, a fence, or a heading inside any string is a schema
+rejection: the engine renders the `.md` from this data, so the payload
+never carries formatting.
 
 | Field | Meaning | Changing it |
 |---|---|---|

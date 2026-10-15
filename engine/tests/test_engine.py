@@ -110,7 +110,7 @@ class TestLoop(Base):
     def charter(self):
         return {"kind": "charter", "v": "v1", "id": "INIT-0001-CHTR-01",
                 "title": "t", "summary": "s",
-                "sections": [{"id": "s1", "title": "w", "body": "x"}],
+                "sections": [{"id": "s1", "title": "w", "prose": "x"}],
                 "cites": [], "requirements": [], "constraints": [],
                 "risks": []}
 

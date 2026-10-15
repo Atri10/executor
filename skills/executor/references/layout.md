@@ -120,25 +120,44 @@ file must be named here.
 | Engine role | Emitted kind | Prompt template | Bound to |
 |---|---|---|---|
 | `author` | the artifact kind for the phase (`charter`, `options`, `brainstorm`, `arch`, `adr`, `ifce`, `design`, `spec`, `risk`, `vrfy`, `plan`) | `executor/author-prompt.md` | the artifact entity |
-| `audit` | `audit` | `executor-critique/component-auditor-prompt.md` (artifacts) or `executor-plan-regression/plan-auditor-prompt.md` (a plan) | the artifact or plan under critique |
-| `repair` | the artifact kind it redrafts (round echoes the audit) | `executor-critique/component-repairer-prompt.md` or `executor-plan-regression/plan-repairer-prompt.md` | the same entity |
-| `audit` (re-audit) | `audit` with the next `round` | `executor-critique/component-reauditor-prompt.md` or `executor-plan-regression/plan-reauditor-prompt.md` | the same entity |
+| `audit` (artifact) | `audit` | `executor-critique/component-auditor-prompt.md` | the artifact under critique |
+| `repair` (artifact) | the artifact kind it redrafts (round echoes the audit) | `executor-critique/component-repairer-prompt.md` | the same entity |
+| `audit` (artifact re-audit) | `audit` with the next `round` | `executor-critique/component-reauditor-prompt.md` | the same entity |
+| `audit` (plan) | `audit` | `executor-plan-regression/plan-auditor-prompt.md` | the plan under critique |
+| `repair` (plan) | `plan` | `executor-plan-regression/plan-repairer-prompt.md` | the same entity |
+| `audit` (plan re-audit) | `audit` with the next `round` | `executor-plan-regression/plan-reauditor-prompt.md` | the same entity |
 | `impl` | `report` | `executor-execution/implementer-prompt.md` | one task |
-| `review` | `verdict` | `executor-review/task-reviewer-prompt.md` (round 1), `re-review-prompt.md` (later rounds), `final-reviewer-prompt.md` (whole plan) | one task's round |
 | `fix` | `report` | `executor-execution/implementer-prompt.md` with the fix preamble | the task's fix round |
+| `review` (round 1) | `verdict` | `executor-review/task-reviewer-prompt.md` | one task's round |
+| `review` (later rounds) | `verdict` | `executor-review/re-review-prompt.md` | one task's round |
+| `audit` (whole plan) | `audit` | `executor-review/final-reviewer-prompt.md` | the plan branch as one change |
 | `evidence` | `evidence` | `executor-verification/evidence-runner-prompt.md` | one VRFY criterion |
-| *(preamble)* — revive/redispatch instructions | — | `executor/revive-preamble.md`, prepended to a re-dispatched worker | the abandoned dispatch |
+| *(preamble)* — revive/redispatch instructions | — | `executor/revive-preamble.md` | the abandoned dispatch |
 
 The brainstorm session's `SCOUT`/`EXPLORE`/`CRITIC` lanes are session
-dispatches inside one `brainstorm` artifact's context, not engine roles;
-they are logged in the session's dispatch view and their output lands in
-the session record the `brainstorm` artifact captures.
+dispatches inside one `brainstorm` artifact's context, not engine roles,
+and they are registered here so the registry stays exhaustive even though
+the engine mints no slot for them: the controller records their
+dispatches in the session's `Dispatch log` and merges their output into
+the artifact's `sections` on commit.
 
-`executor/decide-prompt.md` and `executor/supervisor-prompt.md` are not
-worker templates — a ruling is a human-only kind, so what they briefed is
-now stated by the human via `executor decide`. The templates remain as the
-checklist a human (or a harness's DECIDE lane) answers with a `ruling` or
-`evidence` payload.
+| Lane | Emitted kind | Prompt template | Bound to |
+|---|---|---|---|
+| scout (prior art) | none — the session file is merged by the `author` payload | `executor-brainstorm/prior-art-scout-prompt.md` | the session's scope |
+| explorer (concept lens) | none — the session file is merged by the `author` payload | `executor-brainstorm/concept-explorer-prompt.md` | one concept letter |
+| critic (stress round) | none — the session file is merged by the `author` payload | `executor-brainstorm/design-critic-prompt.md` | the concepts under stress |
+
+`executor/decide-prompt.md` and `executor/supervisor-prompt.md` carry no
+engine dispatch: a `ruling` is a human-only kind, so what they briefed is
+now answered by the human through `executor decide`, which journals the
+`ruling` payload with `actor: human`. The templates remain as the
+checklist a human answers with — each carries the payload contract its
+answers fill.
+
+| Human lane | Emitted kind | Prompt template | Bound to |
+|---|---|---|---|
+| decision intake | `ruling`, `gate_decision`, or `resume` | `executor/decide-prompt.md` | the decision the fold is blocked on |
+| supervision of an autonomous run | `ruling` when the run needs a call | `executor/supervisor-prompt.md` | the phase's open decisions |
 
 ## Path resolution
 

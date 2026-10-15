@@ -23,7 +23,7 @@ Subagent (general-purpose):
     **Audit target:** [PLAN_ID]
     **Round (the new audit you write):** [ROUND]
     **Dispatch:** [D<NNNNN>]
-    **Respond to:** [absolute path of dispatches/D<NNNNN>/payload.json]
+    **`respond_to`:** [absolute path of dispatches/D<NNNNN>/payload.json]
 
     ## Job 1 — Impact review of the repair, FIRST
 
@@ -79,6 +79,16 @@ Subagent (general-purpose):
     `round` echoes the minted round; `id`s echo prior finding ids where
     they answer one.
 ```
+
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
 
 **Placeholders — every one is required:**
 

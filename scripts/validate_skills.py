@@ -122,6 +122,24 @@ def check_registry(dir_: Path, fail: list[str]) -> None:
         fail.append(f"FAIL {p}: prompt on disk not in Dispatch registry")
 
 
+def check_refusal_contract(dir_: Path, fail: list[str]) -> None:
+    """Every prompt whose worker writes a payload must say what happens
+    when the engine refuses it. A prompt that omits this leaves the
+    worker to improvise — re-dispatching, editing the journal, or
+    answering a different slot — and all three corrupt the run.
+
+    The human-lane templates (`decide-prompt.md`, `supervisor-prompt.md`)
+    brief a person, not a payload writer, so they are exempt by name."""
+    EXEMPT = {"decide-prompt.md", "supervisor-prompt.md"}
+    for p in sorted(dir_.rglob("*-prompt.md")):
+        if p.name in EXEMPT:
+            continue
+        body = p.read_text(encoding="utf-8")
+        if "## If Your Payload Is Refused" not in body:
+            fail.append(f"FAIL {p}: prompt lacks the refusal contract "
+                        f"('## If Your Payload Is Refused')")
+
+
 def check_box_drawing(f: Path, rel: str, fail: list[str]) -> None:
     for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
         if BOX.search(_strip_spans(line)):
@@ -133,6 +151,34 @@ VISUAL_MARKERS = re.compile(
     r"visual[ -]?companion|visual mode|server\.cjs|frame-template"
     r"|screen_dir|events_file|start-server|stop-server", re.I)
 VISUAL_ASSET_SUFFIXES = frozenset({".html", ".htm", ".js", ".cjs", ".mjs"})
+
+# The payload contract: a section is data (prose/bullets/tables/code) and the
+# engine renders every .md. Three patterns would reintroduce a second
+# renderer, so all three are rejected wherever they appear in the tree.
+BODY_FIELD = re.compile(r'"body"\s*:')
+PROMPT_MD_FENCE = re.compile(r"^```markdown\s*$", re.M)
+MD_OUTPUT_PLACEHOLDER = re.compile(
+    r"\|[^|\n]*`\[OUTPUT_FILE\]`[^|\n]*\|[^|\n]*\.md[^|\n]*\|")
+
+
+def check_payload_contract(root: Path, fail: list[str]) -> None:
+    """No skill doc may teach the retired `sections[].body` field, hand a
+    prompt a markdown template to copy, or resolve an output placeholder
+    to a .md path. Each of those makes an agent a renderer, and a payload
+    that carries formatting cannot be validated."""
+    for f in sorted(root.rglob("*.md")):
+        rel = str(f)
+        text = f.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if BODY_FIELD.search(line):
+                fail.append(f"FAIL {rel}:{i}: sections[].body example — a "
+                            f"section is prose/bullets/tables/code data")
+            if MD_OUTPUT_PLACEHOLDER.search(line):
+                fail.append(f"FAIL {rel}:{i}: output placeholder resolves "
+                            f"to a .md file — outputs are JSON payloads")
+        if f.name.endswith("-prompt.md") and PROMPT_MD_FENCE.search(text):
+            fail.append(f"FAIL {rel}: prompt carries a ```markdown "
+                        f"template — a prompt's output is a JSON payload")
 
 
 def check_no_visual_material(root: Path, fail: list[str]) -> None:
@@ -181,6 +227,8 @@ def main() -> int:
 
     check_registry(root, fail)
     check_no_visual_material(root, fail)
+    check_payload_contract(root, fail)
+    check_refusal_contract(root, fail)
 
     if fail:
         print("\n".join(fail), file=sys.stderr)

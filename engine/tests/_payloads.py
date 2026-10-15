@@ -15,7 +15,7 @@ from executor import paths as P  # noqa: E402
 INIT = "INIT-0001"
 PLAN = f"{INIT}-P01"
 TASK = f"{PLAN}-T01"
-SEC = [{"id": "s1", "title": "Why", "body": "Because."}]
+SEC = [{"id": "s1", "title": "Why", "prose": "Because."}]
 
 
 def art(kind: str, **extra) -> dict:

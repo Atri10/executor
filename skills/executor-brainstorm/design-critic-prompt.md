@@ -53,6 +53,11 @@ Subagent (general-purpose):
     ## Identity
 
     **Session:** [SESSION_ID] — [SESSION_DIR]
+    **`dispatch_id`:** [the row the controller added to the session's
+    `Dispatch log`; your return echoes it]
+    **`respond_to`:** [OUTPUT_FILE — the payload path under
+    merges into the artifact's `sections` on commit]
+    **`kind`:** `brainstorm` (the artifact this section feeds)
     **Question:** [QUESTION]
     **Brief and map:** [SESSION_FILE], sections `## Brief` and `## Map`
     **Prior art:** [PRIOR_ART_FILE]
@@ -225,83 +230,65 @@ Subagent (general-purpose):
 
     ## Verification
 
-    1. Re-read [OUTPUT_FILE] from disk; every section below is present.
+    1. Re-read your payload from disk and parse it as JSON — a file that
+       does not parse is not a critique. Every `sections[]` entry is
+       present and every method row says RUN or NOT RUN with a reason.
     2. Confirm the method table has one row per method per concept you
        attacked, and that every unrun row says `NOT RUN` with a reason.
     3. Count FATAL, MAJOR, and MINOR findings per concept and confirm the
        status block matches.
-    4. Confirm [OUTPUT_FILE] is your only change (`git status --short`).
+    4. Confirm `git status --short` shows nothing but your payload file.
 
     ## The Output File
 
-    ```markdown
-    ---
-    kind: critique
-    session: [SESSION_ID]
-    round: [ROUND]
-    concepts: <letters dispatched to you>
-    title: Stress round [ROUND] for [SESSION_TOPIC]
-    created_at: <UTC from an executed command>
-    updated_at: <same>
-    ---
+    You write **one JSON file** to `respond_to` — never markdown. The
+    engine renders every `.md` a reader sees; a hand-written one is a
+    second source of truth that cannot be validated. Your `sections[]`
+    carry typed content — `prose`, `bullets`, `tables`, `code` — and the
+    controller merges them verbatim into the `brainstorm` artifact's own
+    `sections[]`. A table is `columns` plus `rows`, never pipes in a
+    string; the schema rejects both, so a finding can never be a
+    formatting accident.
 
-    **Critic model:** <the model you are running as>
-
-    ## Methods
-
-    | Concept | Method | Result |
-    |---|---|---|
-
-    ## Findings — Concept <LETTER>
-
-    **F1 (FATAL) — <headline>**
-    - **Scenario:** actor, situation, the step where it breaks
-    - **Reasoning:** why it breaks, with the concept's section cited
-    - **Mitigation:** a change inside the concept, or "none known"
-
-    **J1 (MAJOR) — …** / **N1 (MINOR) — …** (same fields)
-
-    ## Strongest points
-
-    One per concept.
-
-    ## Could not assess
-
-    Two kinds. `None.` if there are none.
-
-    - **Missing information** — a fact the attack needed that nothing on
-      disk supplies.
-    - **Unreadable subject** — a file in [CONCEPT_FILES] that does not
-      exist, is empty, or stops mid-argument. Name the file, its state,
-      and the last section that is complete. A concept the round never
-      attacked and a concept the round attacked and found nothing are
-      different results, and this is where the difference is recorded.
-
-    ## Brief gaps
-
-    Gaps in the brief the attack exposed. `None.` if none.
-
-    ## What cuts each way
-
-    Per concept, both ends, each citing a finding ID from this round.
-
-    - **Worst case:** the finding that, if true, does the most damage,
-      and the scenario it rests on.
-    - **Best case:** the finding that does the most to defend the
-      concept, and what survives if that finding is dismissed. `None.`
-      if nothing in the round defends it.
-
-    This is a decision aid, not a ranking. Ordering the concepts, or
-    naming one as the one to build, is the human's — that is the first
-    rule of this prompt.
+    ```json
+    {
+      "kind": "brainstorm",
+      "lane": "critique",
+      "session": "[SESSION_ID]",
+      "round": 1,
+      "concepts": ["A", "B"],
+      "supersedes": null,
+      "sections": [
+        {"id": "methods", "title": "Methods",
+         "tables": [{"columns": ["Concept", "Method", "Result"],
+                     "rows": [["A", "load 10x", "binds exhaust at 9x"]]}]},
+        {"id": "findings", "title": "Findings",
+         "prose": "One entry per finding: id, severity, headline, scenario, reasoning, mitigation. Mark any method not run with NOT RUN and the reason.",
+         "tables": [{"columns": ["Id", "Severity", "Concept", "Headline"],
+                     "rows": [["F1", "FATAL", "A", "single-cell hotspot"]]}],
+         "bullets": ["F1 (FATAL) — scenario: one tenant bulk import; reasoning: binds exhaust at 9x per the slices section; mitigation: cap per-cell fan-in at dispatch"]},
+        {"id": "strongest", "title": "Strongest points",
+         "bullets": ["A — the store owns the clock, which removes two failure modes"]},
+        {"id": "could-not-assess", "title": "Could not assess",
+         "bullets": ["None."]},
+        {"id": "brief-gaps", "title": "Brief gaps",
+         "bullets": ["None."]},
+        {"id": "cuts-both-ways", "title": "What cuts each way",
+         "prose": "Per concept, both ends, each citing a finding ID from this round. Worst case: the finding that does the most damage and the scenario it rests on. Best case: the finding that most defends the concept and what survives if it is dismissed. This is a decision aid, not a ranking — ordering the concepts is the human's.",
+         "bullets": ["A worst case: F1, the 9x bind ceiling", "A best case: nothing in this round defends the concept"]}
+      ]
+    }
     ```
 
-    **If [OUTPUT_FILE] already exists**, a critic for this round died
+    `created_at`/`updated_at` are not yours to write: the journal records
+    when the payload landed.
+
+    **If `respond_to` already exists**, a critic for this round died
     before it finished. Read it, then write your complete critique over
     it — findings are re-derived here, not inherited from the abandoned
-    attempt — and put that attempt's `created_at:` in `SUPERSEDES:`
-    below. If the file on disk carries the front-matter above, this same
-    `round:`, and every section filled in, the round is finished: return
+    attempt — and put that attempt's payload into `SUPERSEDES`. If the
+    file on disk carries a complete critique — same `round`, every
+    `sections[]` entry filled in — the round is finished: return
     `BLOCKED` naming it. Overwriting a completed attack destroys a
     critique a human may already have read, and nothing in the store
     records that it happened.
@@ -324,6 +311,16 @@ Subagent (general-purpose):
     ```
 ```
 
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
+
 **Placeholders — every one is required:**
 
 | Placeholder | Value |
@@ -334,10 +331,10 @@ Subagent (general-purpose):
 | `[SESSION_DIR]` | the session's working directory (scratch; its files merge into the artifact) |
 | `[QUESTION]` | the session's `question:` value |
 | `[SESSION_FILE]` | the session's `session.md` |
-| `[PRIOR_ART_FILE]` | `<session dir>/prior-art.md` |
+| `[PRIOR_ART_FILE]` | the scout's payload — the controller passes the rendered `prior-art` view the engine writes from it |
 | `[CONCEPT_FILES]` | the 1–2 concept files under attack, one per line |
 | `[ROUND]` | `R01`, or `R02` after a concept is revised |
-| `[OUTPUT_FILE]` | `<session dir>/critique-R<nn>.md` |
+| `[OUTPUT_FILE]` | the `respond_to` payload path the engine minted — JSON only |
 
 **Never** tell the critic which concept you prefer, and **never** dispatch
 an explorer as the critic of its own concept.

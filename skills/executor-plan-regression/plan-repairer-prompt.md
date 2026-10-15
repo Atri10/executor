@@ -69,12 +69,19 @@ Subagent (general-purpose):
     {"kind": "plan", "v": "v1", "dispatch_id": "[D<NNNNN>]",
      "id": "[PLAN_ID]", "plan_id": "[PLAN_ID]",
      "title": "…", "summary": "…", "objective": "…",
-     "sections": [{"id": "S1", "title": "…", "body": "…"}],
+     "sections": [{"id": "S1", "title": "…", "prose": "…",
+                   "bullets": ["…"],
+                   "tables": [{"columns": ["…"], "rows": [["…"]]}],
+                   "code": [{"lang": "…", "source": "…"}]}],
      "tasks": [{"id": "T03", "title": "…", "goal": "…",
                 "files": ["…"], "accepts": ["…"],
                 "depends_on": ["T01"]}],
      "more_plans": false}
     ```
+
+    A section is data, not markdown: `prose`, `bullets`, `tables`
+    (`columns` plus `rows`), and `code`, with the engine rendering the
+    `.md`. A pipe table or a fence inside a string is a schema rejection.
 
     `id`/`plan_id` echo the target exactly; task `id`s are the short
     `T<nn>` the fold prefixes into `INIT-NNNN-PNN-TNN` — renumbering one
@@ -86,6 +93,16 @@ Subagent (general-purpose):
     The journal's `repairs/R<NN>` records the round; your payload is the
     new truth the re-auditor grades.
 ```
+
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
 
 **Placeholders — every one is required:**
 
