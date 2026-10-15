@@ -223,3 +223,31 @@ class TestCheck(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ------------------------------------------------------------------ races
+
+class TestConcurrency(Base):
+    """Two writers must never produce a broken chain or duplicate slots.
+    The v1 store raced here; the fix is the lock inside _commit/mint."""
+
+    def test_concurrent_appends_chain_ok(self):
+        import threading
+        evs = []
+        def worker(i):
+            evs.append(append_event(self.idir, make_event(
+                self.idir, "engine", "emit", "INIT-0001",
+                {"action": "X", "key": str(i)})))
+        # store-level appends are deliberately lock-free; engine._commit is
+        # what locks. Two engine-level commits must not collide.
+        from executor.engine import _commit
+        threads = [threading.Thread(
+            target=lambda i=i: evs.append(_commit(
+                self.init, "engine", "emit", "INIT-0001",
+                {"action": "X", "key": str(i)})))
+            for i in range(8)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        seqs = sorted(e["seq"] for e in evs)
+        self.assertEqual(seqs, list(range(2, 10)))
+        self.assertEqual(verify_chain(read_events(self.idir)), [])

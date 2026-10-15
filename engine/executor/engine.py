@@ -15,17 +15,21 @@ from pathlib import Path
 
 from . import __version__
 from .schemas import ARTIFACT_KINDS, schema_for, validate
-from .store import (ExecError, Initiative, Rejection, append_event,
-                    docs_artifact_file, docs_artifact_md, docs_plan_file,
-                    docs_plan_md, docs_root, make_event, mint_slot, now_iso,
-                    open_slots, prompt_file, read_json, save_slot, sha256,
-                    state_file, verify_chain, write_json)
+from .store import (ExecError, Initiative, Rejection, StoreLock,
+                    append_event, docs_artifact_file, docs_artifact_md,
+                    docs_plan_file, docs_plan_md, docs_root, make_event,
+                    mint_slot, now_iso, open_slots, prompt_file, read_json,
+                    save_slot, sha256, state_file, verify_chain, write_json)
 
-MAX_FIX_ROUNDS = 5
 INGEST_RETRY_CAP = 2
-DEADLINE_S = 3600          # worker deadline after dispatch (slow ≠ dead)
-SUSPECT_S = 1800           # heartbeat grace before suspect
-NO_PROGRESS_LIMIT = 3      # same action on unchanged state → livelock
+MAX_FIX_ROUNDS = 5
+NO_PROGRESS_LIMIT = 3      # same action over unchanged state → livelock
+SUSPECT_S = 1800          # no heartbeat this long → suspect warning
+DEADLINE_S = 3600        # dispatch lease before _dead() sweeps
+
+# in-process serialization for the dedup+mint+commit critical section.
+# Cross-process pump runs are one-pump-per-initiative by contract.
+_DISPATCH_LOCK = __import__("threading").Lock()
 
 # Actions the pump can see, and the payload kind each expects.
 ROLE_SCHEMA = {"impl": "report", "fix": "report", "audit": "audit",
@@ -289,10 +293,8 @@ def _record_emit(init: Initiative, s: dict, act: dict) -> None:
                      for c in s["critiques"]),
         "ph": s["phase"], "ps": s["phase_state"].get(s["phase"]),
     })
-    ev = make_event(init.idir, "engine", "emit", init.id,
-                    {"action": act["action"], "key": digest})
-    append_event(init.idir, ev)
-    init.reload()
+    _commit(init, "engine", "emit", init.id,
+            {"action": act["action"], "key": digest})
 
 
 def _compute(init: Initiative, s: dict) -> dict:
@@ -386,12 +388,10 @@ def _merge_action(init: Initiative, s, pid: str) -> dict:
     """MERGE: the pump runs the merge, then ingests a merge payload."""
     slot = mint_slot(init.idir, "merge", pid, "merge")
     save_slot(init.idir, slot)
-    ev = make_event(init.idir, "engine", "task_dispatched", pid,
-                    {"task": pid, "role": "merge",
-                     "respond_to": slot["respond_to"], "schema": "merge"},
-                    dispatch_id=slot["dispatch_id"])
-    append_event(init.idir, ev)
-    init.reload()
+    _commit(init, "engine", "task_dispatched", pid,
+            {"task": pid, "role": "merge",
+             "respond_to": slot["respond_to"], "schema": "merge"},
+            dispatch_id=slot["dispatch_id"])
     write_json(state_file(init.idir),
                fold(init.events) | {"last_seq": len(init.events)})
     return _action("MERGE", init.id, plan=pid,
@@ -453,9 +453,12 @@ def _dead(s, t) -> bool:
 
 
 def _iso2epoch(ts: str) -> float:
+    """UTC ts → epoch. mktime() would read it as local time — wrong on
+    every non-UTC host and DST-broken on the rest. timegm is exact."""
+    import calendar
     import time as _t
     try:
-        return _t.mktime(_t.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")) - _t.timezone
+        return calendar.timegm(_t.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
     except Exception:
         return 0
 
@@ -515,9 +518,7 @@ def _criteria(s) -> list[str]:
 
 
 def _phase_enter(init: Initiative, phase: str) -> dict:
-    ev = make_event(init.idir, "engine", "phase_entered", init.id,
-                    {"phase": phase})
-    append_event(init.idir, ev)
+    _commit(init, "engine", "phase_entered", init.id, {"phase": phase})
     write_json(state_file(init.idir), fold(init.reload().events)
                | {"last_seq": len(init.events)})
     return _action("PHASE-ENTER", init.id, phase=phase)
@@ -527,47 +528,72 @@ def _phase_enter(init: Initiative, phase: str) -> dict:
 
 def _dispatch(init: Initiative, s, role: str, entity: str, schema: str,
               role_detail: str = "", base: str | None = None) -> dict:
-    # dedup: an open (unconsumed) slot for this entity+schema means a
-    # dispatch is already in flight — return it instead of minting another.
-    for sl in open_slots(init.idir):
-        if sl["entity"] == entity and sl["schema"] == schema \
-                and not sl.get("consumed"):
-            return _action("DISPATCH", init.id, entity=entity, role=role,
-                           role_detail=role_detail,
-                           dispatch_id=sl["dispatch_id"],
-                           respond_to=sl["respond_to"],
-                           prompt=str(prompt_file(init.idir, sl["dispatch_id"])))
-    slot = mint_slot(init.idir, role, entity, schema)
-    save_slot(init.idir, slot)
-    data = {"task": entity, "role": role, "role_detail": role_detail,
-            "respond_to": slot["respond_to"], "schema": schema}
-    if base:
-        data["base"] = base
-    ev = make_event(init.idir, "engine", "task_dispatched", entity, data,
-                    dispatch_id=slot["dispatch_id"])
-    append_event(init.idir, ev)
-    _write_prompt(init, slot, s)
-    init.reload()
-    write_json(state_file(init.idir), fold(init.events)
-               | {"last_seq": len(init.events)})
-    return _action("DISPATCH", init.id, entity=entity, role=role,
-                   role_detail=role_detail,
-                   dispatch_id=slot["dispatch_id"],
-                   respond_to=slot["respond_to"],
-                   prompt=str(prompt_file(init.idir, slot["dispatch_id"])))
+    """dedup + mint + commit are one critical section: two threads must
+    never mint the same dispatch_id or double-dispatch one entity.
+    Cross-process pump runs stay operator-serialized (one pump per
+    initiative) — the lock is the in-process guarantee."""
+    with _DISPATCH_LOCK:
+        for sl in open_slots(init.idir):
+            if sl["entity"] == entity and sl["schema"] == schema \
+                    and not sl.get("consumed"):
+                return _action(
+                    "DISPATCH", init.id, entity=entity, role=role,
+                    role_detail=role_detail,
+                    dispatch_id=sl["dispatch_id"],
+                    respond_to=sl["respond_to"],
+                    prompt=str(prompt_file(init.idir,
+                                           sl["dispatch_id"])))
+        slot = mint_slot(init.idir, role, entity, schema)
+        save_slot(init.idir, slot)
+        data = {"task": entity, "role": role, "role_detail": role_detail,
+                "respond_to": slot["respond_to"], "schema": schema}
+        if base:
+            data["base"] = base
+        _commit(init, "engine", "task_dispatched", entity, data,
+                dispatch_id=slot["dispatch_id"])
+        _write_prompt(init, slot, s)
+        write_json(state_file(init.idir), fold(init.events)
+                   | {"last_seq": len(init.events)})
+        return _action("DISPATCH", init.id, entity=entity, role=role,
+                       role_detail=role_detail,
+                       dispatch_id=slot["dispatch_id"],
+                       respond_to=slot["respond_to"],
+                       cwd=str(init.root),
+                       prompt=str(prompt_file(init.idir,
+                                              slot["dispatch_id"])))
 
 
 def _write_prompt(init: Initiative, slot: dict, s: dict) -> None:
+    """Every prompt carries the full working set: location invariant, task
+    contract, prior findings. Context loss is the norm, not the edge
+    case — a cold agent must not need to recover anything by memory."""
     body = [f"# {slot['action'].upper()} — {slot['entity']}",
             "",
             f"**Dispatch id:** `{slot['dispatch_id']}`  ",
             f"**Write your JSON to:** `{slot['respond_to']}`  ",
-            f"**Schema kind:** `{slot['schema']}`  ", ""]
+            f"**Schema kind:** `{slot['schema']}`  ",
+            f"**Repo root:** `{init.root}`  ",
+            f"**Workdir:** `{init.root}` (cd here first — relative "
+            "paths resolve against the repo root, NOT a worktree)", ""]
     t = s["tasks"].get(slot["entity"])
     if t:
         body += ["## Task", f"- {t['title']}", f"- {t['goal']}", "",
                  "## Files you may touch", *[f"- `{f}`" for f in t["files"]],
                  "", "## Accept when", *[f"- {a}" for a in t["accepts"]], ""]
+    # context-loss mitigation: embed prior findings for this entity
+    prior = [v for v in s["verdicts"].values()
+             if v.get("task") == slot["entity"]]
+    if prior and slot["schema"] in ("verdict", "report"):
+        last = prior[-1]
+        body += ["## Prior round findings — confirm or refute each",
+                 *[f"- {f['id']} ({f['severity']}): {f['claim']}"
+                   for f in last.get("findings", [])], ""]
+    crit = s["critiques"].get(slot["entity"])
+    if crit and crit.get("open") and slot["schema"] == "repair":
+        body += ["## Open findings you must close",
+                 *[f"- {f.get('id','?')} ({f.get('severity','?')}): "
+                   f"{f.get('claim') or f.get('title','')}"
+                   for f in crit["open"]], ""]
     if slot["schema"] == "verdict":
         body += ["## Review",
                  "You receive a review package with the diff and the prior "
@@ -589,6 +615,27 @@ def _action(word: str, init_id: str, **kw) -> dict:
     return a
 
 
+# ------------------------------------------------------------ commit
+
+def _commit(init: Initiative, actor: str, kind: str, entity: str,
+            data: dict, dispatch_id: str | None = None,
+            payload_sha: str | None = None) -> dict:
+    """Serialize the journal write: lock → dedup → make → append → reload.
+    Nobody may call make_event/append_event without the lock — the v1
+    store raced exactly here (concurrent appends wrote duplicate seq +
+    identical prev_sha and silently broke the chain). Dedup lives inside
+    the lock too, or two ingests of one payload both pass the check."""
+    with StoreLock(init.idir):
+        init.reload()
+        if payload_sha and _duplicate(init, payload_sha):
+            return {"deduplicated": True}
+        ev = make_event(init.idir, actor, kind, entity, data,
+                        dispatch_id=dispatch_id, payload_sha=payload_sha)
+        append_event(init.idir, ev)
+        init.reload()
+        return ev
+
+
 # ------------------------------------------------------------ ingest
 
 def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
@@ -603,22 +650,20 @@ def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
     validate(payload, schema)
     s = fold(init.events)
     _semantic(init, s, payload)
-    ev = make_event(init.idir, actor, kind,
-                    _entity_for(init, payload), _data_for(payload),
-                    dispatch_id=payload.get("dispatch_id"),
-                    payload_sha=sha256(payload))
-    if _duplicate(init, ev):
-        return {"deduplicated": True, "seq": ev["seq"]}
-    append_event(init.idir, ev)
+    ev = _commit(init, actor, kind,
+                 _entity_for(init, payload), _data_for(payload),
+                 dispatch_id=payload.get("dispatch_id"),
+                 payload_sha=sha256(payload))
+    if ev.get("deduplicated"):
+        return ev
     _after(init, s, ev, payload)
-    init.reload()
     write_json(state_file(init.idir), fold(init.events)
                | {"last_seq": len(init.events)})
     return ev
 
 
-def _duplicate(init: Initiative, ev: dict) -> bool:
-    return any(e.get("payload_sha") == ev["payload_sha"]
+def _duplicate(init: Initiative, payload_sha: str) -> bool:
+    return any(e.get("payload_sha") == payload_sha
                for e in init.events)
 
 
@@ -831,6 +876,28 @@ def check(init: Initiative) -> dict:
             f"!= journal {len(init.events)} — run `executor check` "
             f"to refold")
         write_json(state_file(init.idir), s | {"last_seq": len(init.events)})
+    # liveness ladder: an open slot whose task hasn't beaten in SUSPECT_S
+    # is suspect (early warning); past DEADLINE_S it's dead.
+    import time as _t
+    for x in open_slots(init.idir):
+        t = s["tasks"].get(x["entity"]) or s["dispatches"].get(
+            x["dispatch_id"])
+        if t:
+            last = t.get("last_beat") or t.get("dispatched_at") or ""
+            age = _t.time() - _iso2epoch(last) if last else 0
+            if SUSPECT_S < age <= DEADLINE_S:
+                problems.append(f"suspect dispatch: {x['dispatch_id']} "
+                                f"silent {int(age)}s")
+    # layout drift: every file under idir must live under a canonical dir.
+    # INIT-0002 shipped a stray `prompts/` dir this way.
+    canonical = {"meta", "journal", "dispatches", "artifacts", "plans",
+                 "tasks", "fixes", "reviews", "views", ".lock"}
+    for f in init.idir.rglob("*"):
+        if not f.is_file() or f.name in (".gitignore", ".DS_Store"):
+            continue
+        if f.relative_to(init.idir).parts[0] not in canonical:
+            problems.append(f"non-canonical file: "
+                            f"{f.relative_to(init.idir)}")
     open_s = open_slots(init.idir)
     return {"initiative": init.id, "events": len(init.events),
             "chain": "broken" if chain_problems else "ok",

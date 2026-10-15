@@ -142,6 +142,7 @@ class StoreLock:
                 fcntl.flock(self.fd, fcntl.LOCK_EX)
             elif os.name == "nt":  # pragma: no cover - windows
                 import msvcrt
+                os.lseek(self.fd, 0, os.SEEK_SET)
                 msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
         except OSError as e:
             os.close(self.fd)
@@ -157,6 +158,7 @@ class StoreLock:
                 fcntl.flock(self.fd, fcntl.LOCK_UN)
             elif os.name == "nt":  # pragma: no cover
                 import msvcrt
+                os.lseek(self.fd, 0, os.SEEK_SET)
                 msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
         finally:
             if self.fd >= 0:
