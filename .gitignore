@@ -14,3 +14,8 @@ docs/
 __pycache__/
 *.pyc
 .idea/
+
+# Coverage data
+.coverage
+.coverage.*
+htmlcov/

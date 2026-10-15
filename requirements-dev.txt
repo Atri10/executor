@@ -1,0 +1,2 @@
+# Development-only. The engine itself needs nothing beyond the standard library.
+coverage>=7.4
