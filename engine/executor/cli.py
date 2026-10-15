@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Atri10
-"""executor — the v2 CLI. Seven commands; the pump loop is next → ingest.
+"""executor — the v2 CLI. Nine commands; the pump loop is next → ingest.
 
     executor new "<title>"          scaffold INIT-NNNN
     executor next                   → one typed action + minted payload slot
     executor ingest <path|->        validate → fold → render, or typed reject
     executor status                 gate card / current position
     executor check [--secrets]      journal re-fold, chain verify, integrity
+    executor doctor                 check + open slots + autonomy
+    executor autonomy [phase mode]  per-phase allow|gate|deny
     executor migrate [--dry-run]    version upgrade
     executor graph [--format json|mermaid]   nodes + edges
 
@@ -23,8 +25,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from executor import __version__                      # noqa: E402
 from executor.engine import check, emit_next, ingest, fold   # noqa: E402
-from executor.store import (ExecError, Initiative, Rejection, docs_root,
-                            find_initiative, init_store, repo_root, run_root)
+from executor.store import (ExecError, Initiative, Rejection, autonomy_file,
+                            docs_root, find_initiative, init_store,
+                            open_slots, read_json, repo_root, run_root,
+                            PHASES)
 from executor.views import status_card               # noqa: E402
 
 
@@ -137,9 +141,49 @@ def cmd_migrate(args: list[str]) -> int:
     return 0
 
 
+def cmd_autonomy(args: list[str]) -> int:
+    """executor autonomy [INIT-NNNN] [<phase> <allow|gate|deny>]."""
+    sel = args[0] if args and args[0].upper().startswith("INIT-") else None
+    if sel:
+        args = args[1:]
+    init = find_initiative(repo_root(), sel)
+    f = autonomy_file(init.idir)
+    cur = read_json(f) or {p: "deny" for p in PHASES}
+    if len(args) >= 2:
+        phase, mode = args[0], args[1]
+        if phase not in PHASES:
+            _die(f"unknown phase {phase}")
+        if mode not in ("allow", "gate", "deny"):
+            _die("mode must be allow|gate|deny")
+        cur[phase] = mode
+        f.write_text(json.dumps(cur, indent=2) + "\n")
+        _emit({"set": {phase: mode}, "autonomy": cur})
+    elif len(args) == 1:
+        _die("autonomy set needs <phase> <mode>")
+    else:
+        _emit({"autonomy": cur})
+    return 0
+
+
+def cmd_doctor(args: list[str]) -> int:
+    """executor doctor — check + slot/liveness report."""
+    init = find_initiative(repo_root(), args[0] if args else None)
+    res = check(init)
+    s = fold(init.events)
+    open_s = [x["dispatch_id"] for x in open_slots(init.idir)]
+    res.update({
+        "open_dispatch_ids": open_s,
+        "autonomy": read_json(autonomy_file(init.idir)),
+        "last_seq": len(init.events),
+    })
+    _emit(res)
+    return 0
+
+
 COMMANDS = {"new": cmd_new, "next": cmd_next, "ingest": cmd_ingest,
             "status": cmd_status, "check": cmd_check, "graph": cmd_graph,
-            "migrate": cmd_migrate}
+            "migrate": cmd_migrate, "autonomy": cmd_autonomy,
+            "doctor": cmd_doctor}
 
 
 def main(argv: list[str]) -> int:
