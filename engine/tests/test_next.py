@@ -10,7 +10,7 @@ import unittest
 import _payloads as PL
 from _live import Live
 from executor.engine import (DEADLINE_S, MAX_AUDIT_ROUNDS, SPAWN_RETRY_CAP,
-                             check, ingest)
+                             check, ingest, open_dispatches)
 from executor.store import PHASES, verify_chain
 
 
@@ -113,6 +113,16 @@ class Concurrency(LiveCase):
                       if r["action"] == "DISPATCH"}
         self.assertEqual(dispatched, {opened})
         self.assertEqual(verify_chain(events), [])
+
+
+class OpenDispatches(LiveCase):
+    def test_the_journal_lists_what_a_worker_may_still_answer(self):
+        self.assertEqual(open_dispatches(self.init), [])
+        act = self.live.run(lambda a: a["action"] == "DISPATCH")
+        self.assertEqual([d["dispatch_id"] for d in open_dispatches(self.init)],
+                         [act["dispatch_id"]])
+        ingest(self.init, self.live.answer(act))
+        self.assertEqual(open_dispatches(self.init), [])
 
 
 if __name__ == "__main__":

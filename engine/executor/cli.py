@@ -24,10 +24,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from executor import __version__                      # noqa: E402
-from executor.engine import check, emit_next, ingest, fold   # noqa: E402
+from executor.engine import check, emit_next, ingest, fold, open_dispatches   # noqa: E402
 from executor.store import (ExecError, Initiative, Rejection, autonomy_file,
                             docs_root, find_initiative, init_store,
-                            open_slots, read_json, repo_root, run_root,
+                            read_json, repo_root, run_root,
                             PHASES)
 from executor.views import status_card               # noqa: E402
 
@@ -170,7 +170,7 @@ def cmd_doctor(args: list[str]) -> int:
     init = find_initiative(repo_root(), args[0] if args else None)
     res = check(init)
     s = fold(init.events)
-    open_s = [x["dispatch_id"] for x in open_slots(init.idir)]
+    open_s = [x["dispatch_id"] for x in open_dispatches(init)]
     res.update({
         "open_dispatch_ids": open_s,
         "autonomy": read_json(autonomy_file(init.idir)),

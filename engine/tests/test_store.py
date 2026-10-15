@@ -610,67 +610,6 @@ class JournalTests(TmpCase):
         self.assertEqual([bool(x) for x in lines], [True, True, False])
 
 
-class SlotTests(TmpCase):
-    def setUp(self):
-        super().setUp()
-        store.init_store(self.root, "INIT-0001", "t")
-
-    def mint(self, entity="INIT-0001-P01-T01"):
-        return store.mint_slot(self.idir, "impl", entity, "report")
-
-    def test_the_slot_id_follows_the_grammar_and_the_next_seq(self):
-        first = self.mint()
-        self.assertEqual(first["dispatch_id"], "D00001")
-        self.assertTrue(P.is_dispatch_id(first["dispatch_id"]))
-        self.append()
-        self.assertEqual(self.mint()["dispatch_id"], "D00002")
-
-    def test_the_slot_records_what_a_worker_needs(self):
-        slot = self.mint("INIT-0001-P01-T09")
-        self.assertEqual(slot["respond_to"],
-                         str(P.payload_file(self.idir, "D00001")))
-        self.assertEqual((slot["action"], slot["entity"], slot["schema"]),
-                         ("impl", "INIT-0001-P01-T09", "report"))
-        self.assertEqual((slot["consumed"], slot["retries"]), (False, 0))
-        self.assertRegex(slot["minted_at"], ISO)
-
-    def test_minting_alone_writes_nothing(self):
-        self.mint()
-        self.assertEqual(list(P.dispatches_dir(self.idir).iterdir()), [])
-
-    def test_save_and_load_round_trip(self):
-        slot = self.mint()
-        store.save_slot(self.idir, slot)
-        self.assertEqual(store.load_slot(self.idir, "D00001"), slot)
-        self.assertIsNone(store.load_slot(self.idir, "D00099"))
-
-    def test_open_slots_are_the_unconsumed_ones_in_id_order(self):
-        ids = []
-        for entity in ("A", "B", "C"):
-            slot = self.mint(entity)
-            store.save_slot(self.idir, slot)
-            ids.append(slot["dispatch_id"])
-            self.append()
-        done = must(store.load_slot(self.idir, ids[1]))
-        done["consumed"] = True
-        store.save_slot(self.idir, done)
-        self.assertEqual([s["dispatch_id"]
-                          for s in store.open_slots(self.idir)],
-                         [ids[0], ids[2]])
-
-    def test_open_slots_skip_corrupt_and_foreign_entries(self):
-        d = P.dispatches_dir(self.idir)
-        (d / "D00009").mkdir()
-        (d / "D00009" / "slot.json").write_text("{bad", encoding="utf-8")
-        (d / "D00010").mkdir()
-        (d / "stray.txt").write_text("x", encoding="utf-8")
-        self.assertEqual(store.open_slots(self.idir), [])
-
-    def test_a_store_without_a_dispatches_dir_has_no_open_slots(self):
-        other = P.init_dir(self.root, "INIT-0002")
-        self.assertEqual(store.open_slots(other), [])
-
-
 class InitStoreTests(TmpCase):
     def test_scaffolds_every_directory_and_meta_file(self):
         idir = store.init_store(self.root, "INIT-0001", "My title")

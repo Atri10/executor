@@ -37,8 +37,8 @@ from .paths import (artifact_file, audit_file, classify, dispatch_id,
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
                     append_event, atomic_write, init_store, make_event,
-                    next_seq, read_json, scan_journal, sha256, verify_chain,
-                    write_json)
+                    next_seq, read_events, read_json, scan_journal, sha256,
+                    verify_chain, write_json)
 from .views import render_all
 
 MAX_FIX_ROUNDS = 5        # fix dispatches per task before the run escalates
@@ -509,6 +509,12 @@ def _open_for(s: dict, entity: str, schema: str | None = None) -> dict | None:
         if sl["entity"] == entity and (schema is None or sl["schema"] == schema):
             return sl
     return None
+
+
+def open_dispatches(init: Initiative) -> list[dict]:
+    """What a worker may still answer, in id order. Reads the journal and
+    writes nothing, so it is safe at any time."""
+    return _open_slots(fold(read_events(init.idir)))
 
 
 def _dispatch_action(init: Initiative, sl: dict) -> dict:

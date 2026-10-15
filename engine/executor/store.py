@@ -46,7 +46,7 @@ def repo_root(start: Path | None = None) -> Path:
 from .paths import (autonomy_file, dispatch_dir, dispatches_dir,
                     docs_root, init_dir, journal_dir, journal_file,
                     lock_file, meta_dir, meta_file, payload_file, prompt_file,
-                    run_meta_file, run_root, slot_file, state_file,
+                    run_meta_file, run_root, state_file,
                     task_dir, views_dir, artifact_dir, artifact_file,
                     plan_dir, plan_file, audit_file, repair_file,
                     task_impl_report, review_package_file, verdict_file,
@@ -56,8 +56,7 @@ from .paths import (autonomy_file, dispatch_dir, dispatches_dir,
                     docs_artifact_file, docs_artifact_md, docs_plan_dir,
                     docs_plan_file, docs_plan_md, docs_task_dir,
                     docs_report_file, docs_verdict_file,
-                    docs_export_journal, view_file,
-                    dispatch_id as new_dispatch_id)
+                    docs_export_journal, view_file)
 
 
 # ---------------------------------------------------------------- errors
@@ -295,45 +294,6 @@ def append_event(idir: Path, ev: dict) -> dict:
         f.flush()
         os.fsync(f.fileno())
     return ev
-
-
-# ---------------------------------------------------------------- slots
-
-def mint_slot(idir: Path, action: str, entity: str, schema: str) -> dict:
-    """Create a single-use payload slot for an emitted action."""
-    events = read_events(idir)
-    dispatch_id = new_dispatch_id(next_seq(events))
-    slot = {
-        "dispatch_id": dispatch_id,
-        "action": action,
-        "entity": entity,
-        "schema": schema,
-        "minted_at": now_iso(),
-        "respond_to": str(payload_file(idir, dispatch_id)),
-        "consumed": False,
-        "retries": 0,
-    }
-    return slot
-
-
-def save_slot(idir: Path, slot: dict) -> None:
-    write_json(slot_file(idir, slot["dispatch_id"]), slot)
-
-
-def load_slot(idir: Path, dispatch_id: str) -> dict | None:
-    return read_json(slot_file(idir, dispatch_id))
-
-
-def open_slots(idir: Path) -> list[dict]:
-    d = dispatches_dir(idir)
-    if not d.exists():
-        return []
-    out = []
-    for p in sorted(d.glob("*/slot.json")):
-        s = read_json(p)
-        if s and not s.get("consumed"):
-            out.append(s)
-    return out
 
 
 # ---------------------------------------------------------------- meta
