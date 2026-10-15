@@ -295,6 +295,27 @@ class Migrate(CliCase):
         self.assertEqual((code, json.loads(out)["verdict"]), (0, "current"))
 
 
+class Secrets(CliCase):
+    def test_secrets_scan_finds_a_secret_without_printing_it(self):
+        key = "-----BEGIN " + " ".join(("RSA", "PRIVATE", "KEY")) + "-----"
+        leak = self.live.init.idir / "meta" / "leak.txt"
+        leak.write_text(f"x\n{key}\n", encoding="utf-8")
+        code, out, _ = self.cli("check", "--secrets")
+        self.assertEqual(code, 1)
+        self.assertIn("private_key", out)
+        self.assertIn("leak.txt", out)
+        self.assertNotIn(key, out)
+
+    def test_secrets_scan_on_a_clean_store_exits_zero(self):
+        code, out, _ = self.cli("check", "--secrets")
+        self.assertEqual(json.loads(out)["findings"], [])
+
+    def test_stray_args_are_usage_under_secrets_too(self):
+        code, _, err = self.cli("check", "--secrets", "extra-arg")
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(err)["code"], "usage")
+
+
 class Errors(CliCase):
     def fail_status(self, error) -> tuple[int, str, str]:
         """Run `status` with its handler replaced in the real dispatch table, so

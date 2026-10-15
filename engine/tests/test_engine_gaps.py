@@ -5,8 +5,8 @@ and verdict outcomes, preflight conflicts, report and evidence checks, and the
 liveness of dispatches with unreadable timestamps."""
 import json
 import re
+import shutil
 import threading
-
 import time
 import unittest
 
@@ -14,7 +14,7 @@ import _payloads as PL
 from _live import Live
 from executor import engine
 from executor.engine import _iso2epoch, _silent_for, check, fold, ingest
-from executor.paths import dispatches_dir, docs_init_dir, journal_file, state_file
+from executor.paths import dispatches_dir, docs_init_dir, docs_root, journal_file, state_file
 from executor.store import ExecError, Rejection, read_json, write_json
 
 
@@ -281,6 +281,36 @@ class Internals(LiveCase):
         problems = check(self.init)["problems"]
         self.assertTrue(any("non-canonical committed file" in p and
                             "stray.txt" in p for p in problems))
+
+
+class Secrets(LiveCase):
+    def test_a_finding_is_reported_without_its_bytes(self):
+        """A secret in either store is found and named, but the scan returns
+        its digest and line, never the secret itself."""
+        key = "-----BEGIN " + " ".join(("RSA", "PRIVATE", "KEY")) + "-----"
+        target = self.init.idir / "meta" / "leak.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"creds\n{key}\nrest\n", encoding="utf-8")
+        res = engine.scan_secrets(self.init)
+        self.assertEqual(len(res["findings"]), 1)
+        f = res["findings"][0]
+        self.assertEqual((f["rule"], f["line"]), ("private_key", 2))
+        self.assertTrue(f["file"].endswith("leak.txt"))
+        self.assertNotIn(key, str(res))
+
+    def test_binary_and_clean_files_are_not_findings(self):
+        blob = self.init.idir / "meta" / "blob.bin"
+        blob.parent.mkdir(parents=True, exist_ok=True)
+        blob.write_bytes(bytes(range(256)))
+        res = engine.scan_secrets(self.init)
+        self.assertTrue(all("blob.bin" not in f["file"]
+                            for f in res["findings"]))
+
+    def test_a_missing_store_side_is_skipped(self):
+        """A store half that does not exist yet is skipped, not an error."""
+        shutil.rmtree(docs_root(self.init.root))
+        res = engine.scan_secrets(self.init)
+        self.assertEqual(res["findings"], [])
 
 
 if __name__ == "__main__":

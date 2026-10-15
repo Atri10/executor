@@ -1397,6 +1397,44 @@ def _layout_problems(init: Initiative) -> list[str]:
     return out
 
 
+SECRET_RULES = (
+    ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("github_token", re.compile(r"\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}\b")),
+    ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("generic_secret", re.compile(
+        r"(?i)\b(?:api[_-]?key|secret|token|password|passwd)\b"
+        r"\s*[:=]\s*[\"']?[A-Za-z0-9+/=._~|-]{16,}")),
+)
+
+
+def scan_secrets(init: Initiative) -> dict:
+    """Every secret-looking string in both stores, reported without the
+    bytes: a finding is the rule, the file and line, and a short digest of
+    the match so a human can correlate it without ever reading it back.
+    A binary file cannot contain a pattern we know, so it is skipped, and a
+    false positive is a lead for the human — not a verdict."""
+    findings, scanned = [], 0
+    for base in (run_root(init.root), docs_root(init.root)):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            scanned += 1
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for lineno, line in enumerate(text.splitlines(), 1):
+                for name, rx in SECRET_RULES:
+                    for m in rx.finditer(line):
+                        findings.append({
+                            "rule": name, "line": lineno,
+                            "file": str(path.relative_to(init.root)),
+                            "digest": sha256(m.group(0))[:8]})
+    return {"initiative": init.id, "scanned": scanned, "findings": findings}
+
 def _report(init: Initiative, events: list[dict], chain: list[str],
             problems: list[str], open_ids: list[str]) -> dict:
     return {"initiative": init.id, "events": len(events),

@@ -8,7 +8,7 @@
     executor ingest <path|-> [INIT]            a worker payload: validate → fold → render
     executor decide <path|-> [INIT]            a human decision: gate_decision, ruling, resume
     executor status [INIT]                     gate card
-    executor check [INIT]                      chain, edges, liveness, layout, policy
+    executor check [INIT] [--secrets]           chain, edges, liveness, layout; or scan for secrets
     executor doctor [INIT]                     check + open dispatches + policy in force
     executor graph [INIT] [--format json|mermaid]
     executor migrate [INIT] [--dry-run]        reports the store version verdict; never edits
@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from executor import __version__                                   # noqa: E402
 from executor.engine import (check, create_initiative, emit_next,  # noqa: E402
-                             fold, ingest, open_dispatches)
+                             fold, ingest, open_dispatches, scan_secrets)
 from executor.paths import autonomy_file, docs_root                # noqa: E402
 from executor.policy import (AUTONOMY_MODES, effective_policy,      # noqa: E402
                              normalize_autonomy)
@@ -127,7 +127,15 @@ def cmd_status(args: list[str]) -> int:
 
 
 def cmd_check(args: list[str]) -> int:
-    init, _ = _target(args)
+    rest = [a for a in args if a != "--secrets"]
+    secrets = len(rest) != len(args)
+    init, extra = _target(rest)
+    if extra:
+        raise ExecError("usage: executor check [--secrets] [INIT-ID]", "usage")
+    if secrets:
+        res = scan_secrets(init)
+        _emit(res)
+        return 0 if not res["findings"] else 1
     res = check(init)
     _emit(res)
     return 0 if res["chain"] == "ok" and not res["problems"] else 1
