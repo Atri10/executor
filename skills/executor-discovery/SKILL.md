@@ -330,7 +330,6 @@ If the charter already pins the approach, or the work is a continuation
 with no open design questions, record the skip in the initiative
 `INDEX.md` — one line containing "brainstorm":
 `*Brainstorming considered at discovery entry: not needed — <reason>.*`
-A declined visual offer is recorded there too, once.
 
 That note satisfies discovery's B1 record check, **not** the specification
 gate: a spec still needs a decided design session behind it. The note says
@@ -338,20 +337,6 @@ discovery did not need ideation; it does not say the feature was designed.
 
 An empty `brainstorm/sessions/` directory with no recorded session or skip
 is a gap `exec-store-check` fails on.
-
-### Visual mode is a capability, not the definition
-
-The visual companion renders mockups and screens INSIDE a session when
-a question is genuinely clearer shown than told. It is offered
-just-in-time, never upfront, and only with explicit consent — the offer
-contract and server mechanics live in
-[visual-companion.md](visual-companion.md); `executor-brainstorm` calls
-into it. Visual artifacts live in the tracked store; the session record
-itself may be text-only.
-
-**Synthetic data only** in every mockup and screen — session state can capture
-whatever was on screen, and this directory is tracked from the moment it is
-written. See [safety](../executor/references/safety.md).
 
 ## The Gate Out of Discovery
 
@@ -430,7 +415,7 @@ Run these in this session and cite their output at the gate:
 2. Every RSCH and OPTS document has a Documents-table row — `exec-store-check`
    I1 fails an unlisted one.
 3. `../executor/scripts/exec-scan-secrets docs/executor/<INIT>-<slug>` —
-   exit 0; mockups and research may capture real data.
+   exit 0; research may capture real data.
 4. `../executor/scripts/exec-initiative phase <INIT> discovery passed "…"`
    — accepted; it refuses with no RSCH or OPTS on disk.
 
@@ -448,5 +433,4 @@ Run these in this session and cite their output at the gate:
 | "The other initiative's ADR already decided this — I'll cite it" | Forbidden. Restate the fact in your own words; declare the dependency in the charter. |
 | "I'll record this call with exec-ruling" | No plan exists, so there is no rulings log. It is an ADR, or a line in the options body. |
 | "Discovery is dragging, I'll pick for them" | Choosing on the human's behalf is the one decision discovery may not make. Narrow to two, state the trade, ask once. |
-| "The brainstorm mockups were just scratch" | They are the evidence for the choice. They are tracked. |
 | "It grew into three subsystems but I'm nearly done" | Hidden scope decomposes the work, mid-phase. Stop and say so. |

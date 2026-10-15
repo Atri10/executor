@@ -225,15 +225,6 @@ entry is a line in `INDEX.md` containing "brainstorm". It satisfies
 discovery's B1 check; it does not satisfy the specification or planning
 entry gates, which need a decided session.
 
-## Visual mode
-
-Same method, rendered: `executor-discovery`'s
-[visual-companion.md](../executor-discovery/visual-companion.md) owns the
-server. Offer it explicitly when a screen, a layout, or a flow is clearer
-shown than described. Synthetic data only. The text record is the
-deliverable either way — a visual session with no `session.md` produced
-nothing reviewable.
-
 ## Self-Critique
 
 Run this against the session record before setting `status: active`, and

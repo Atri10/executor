@@ -10,7 +10,8 @@ Checks: frontmatter parseable with name/description + "Use when" trigger;
 balanced code fences; no HTML comments outside code blocks; unique skill
 names; exactly one Self-Critique and one Verification section per SKILL.md;
 dispatch registry in references/layout.md matches *-prompt.md on disk;
-no box-drawing characters outside inline code spans.
+no box-drawing characters outside inline code spans; no HTML or
+visual-companion material anywhere under the skills tree.
 
 Usage: scripts/validate_skills.py [SKILLS_DIR]   (default: skills)
 Exit 0 clean, 1 with FAIL lines on stderr.
@@ -128,6 +129,30 @@ def check_box_drawing(f: Path, rel: str, fail: list[str]) -> None:
                         f"as a mermaid diagram or a table")
 
 
+VISUAL_MARKERS = re.compile(
+    r"visual[ -]?companion|visual mode|server\.cjs|frame-template"
+    r"|screen_dir|events_file|start-server|stop-server", re.I)
+VISUAL_ASSET_SUFFIXES = frozenset({".html", ".htm", ".js", ".cjs", ".mjs"})
+
+
+def check_no_visual_material(root: Path, fail: list[str]) -> None:
+    """The browser visual companion is removed for good. Nothing under the
+    skills tree may ship HTML or server assets, and no markdown may tell an
+    agent to start or offer one. A code fence that launches it is as bad as
+    a sentence that offers it, so fenced text is scanned too."""
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() in VISUAL_ASSET_SUFFIXES:
+            fail.append(f"FAIL {f}: visual-companion asset ({f.suffix}); "
+                        f"no HTML or visuals ship with the skills")
+        elif f.suffix == ".md":
+            lines = f.read_text(encoding="utf-8").splitlines()
+            for i, line in enumerate(lines, 1):
+                if VISUAL_MARKERS.search(line):
+                    fail.append(f"FAIL {f}:{i}: visual-companion reference")
+
+
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "skills")
     fail: list[str] = []
@@ -155,6 +180,7 @@ def main() -> int:
         check_box_drawing(f, rel, fail)
 
     check_registry(root, fail)
+    check_no_visual_material(root, fail)
 
     if fail:
         print("\n".join(fail), file=sys.stderr)

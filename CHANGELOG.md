@@ -59,6 +59,14 @@ built out alongside them (`design/executor-v2.md`).
 Verified end-to-end on a scratch repo: `new` → 11 phases → merge →
 `DONE`, 136 events, `chain:ok`, `open_slots:0`, `dangling:[]`.
 
+### Removed
+
+- **The visual companion.** The browser-based mockup server, its HTML frame
+  and helper, and every instruction to offer or start it are gone; Executor
+  ships no HTML and no visuals. `scripts/validate_skills.py` fails if
+  companion assets or references return. Historical entries below describe
+  it as it shipped.
+
 
 ## [0.7.1] — 2026-10-05
 

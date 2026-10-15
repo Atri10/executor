@@ -35,7 +35,7 @@ Shape: `postgres://<user>:<pass>@<host>:5432/<db>`.
 The reader learns what exists, where it comes from, and what shape it has.
 Nothing recoverable is written down.
 
-## The four live risks
+## The three live risks
 
 **1. Implementer reports.** An implementer debugging an auth failure pastes
 the failing request — headers included — into its report. The report is a
@@ -48,19 +48,13 @@ place. The scan covers `reviews/diffs/` for exactly this reason — and a
 secret found in a diff means the secret is also in git history, which is a
 bigger problem than the diff.
 
-**3. Brainstorm session state.** Mockups and event logs can capture whatever
-was on screen, including real data pulled in to make a mockup realistic. Use
-synthetic data in mockups.
-
-**4. Tooling runtime state.** A tool that serves or persists something on the
+**3. Tooling runtime state.** A tool that serves or persists something on the
 agent's behalf generates its own secrets — session keys, tokens, cookies,
 signed URLs — and writes them beside its output by default. Those files are
 operational state, not artifacts, and they **never** go inside `docs/executor/`
 or `.executor/`; they belong in a runtime directory outside the repository.
 The scan will not save you here: a freshly generated hex key matches no
-known credential prefix. The visual companion is the worked example — its
-`--project-dir` takes only `content/` and `events`, while `server-info`,
-the log, and `.last-token` stay outside the repo.
+known credential prefix.
 
 ## The required scan
 

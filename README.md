@@ -104,7 +104,7 @@ frontmatter description.
 | `executor-review` | Review | Per-task and whole-branch verdicts, findings, fix loops |
 | `executor-verification` | Verification | Evidence-backed proof each requirement holds |
 | `executor-handoff` | Handoff | Human decision menu: merge, PR, or keep the branch |
-| `executor-brainstorm` | Cross-phase | Recorded divergent ideation sessions; visual companion optional |
+| `executor-brainstorm` | Cross-phase | Recorded divergent ideation sessions |
 | `executor-critique` | Every phase (gate) | Per-component audit, repair, re-audit; gates the phase that produced the artifacts |
 
 **Phases compress, they never vanish.** A small initiative can produce a

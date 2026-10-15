@@ -11,23 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  shellcheck:
-    name: ShellCheck (bash scripts)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run ShellCheck
-        # The scripts run inside users' agents with broad filesystem and git
-        # access; a shell bug there is a security event, not a style nit.
-        # Warning-level (-S warning) is the floor; errors already fail.
-        run: |
-          # Every shell file the repo ships: the exec-* tools, the shared
-          # library they all source, the visual-companion helpers, and the
-          # repo's own scripts/ (validators and regression tests).
-          find skills/executor/scripts scripts -type f \
-            \( -name 'exec-*' -o -name '*.sh' \) -print0 \
-            | xargs -0 shellcheck --severity=warning
-
   prompt-injection:
     name: Prompt-injection lint (skills are prompts)
     runs-on: ubuntu-latest

@@ -21,7 +21,6 @@ flowchart TB
     INIT --> BRAIN["brainstorm/sessions/, timestamp-topic/"]
     BRAIN --> REC["session.md, BRN record or dossier"]
     BRAIN --> WORK["prior-art, concepts, critiques, dispatches"]
-    BRAIN --> CONTENT["content/ and events, visual mode only"]
 ```
 
 **Folder name:** `INIT-<NNNN>-<topic-slug>`. The slug is human-readable and
@@ -41,7 +40,6 @@ flowchart LR
     DIR -->|"SCOUT writes"| PA["prior-art.md"]
     DIR -->|"EXPLORE writes, one file each"| CON["concepts/A-minimal.md, B-journey.md"]
     DIR -->|"CRITIC writes, one per round"| CRIT["critique-R01.md"]
-    DIR -->|"visual mode only"| VIS["content/ and events"]
     PA -->|"cited in"| REC
     CON -->|"summarized in"| REC
     CRIT -->|"dispositioned in"| REC
@@ -70,11 +68,6 @@ skip is a line in `INIT-NNNN-<slug>/INDEX.md` containing the word
 An empty `brainstorm/sessions/` with no such line is a contract violation,
 not a neutral state — `exec-store-check` reports it, because nobody can
 later tell a deliberate skip from one that was never considered.
-
-The visual companion's operational state — `server-info`, the log, the pid,
-and the persisted session key — is written to a runtime directory outside
-the repository, never into a session directory. This store is public (see
-[safety](safety.md)) and the session key is an access token.
 
 **Document types and their directories:**
 
