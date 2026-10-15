@@ -35,7 +35,7 @@ def plan_payload(pid: str = PLAN, tasks: list[dict] | None = None,
     rows = [task_row("T01")] if tasks is None else tasks
     return {"kind": "plan", "v": "v1", "id": pid, "plan_id": pid,
             "title": "t", "summary": "s", "sections": SEC, "objective": "o",
-            "tasks": rows, **extra}
+            "tasks": rows, "more_plans": False, **extra}
 
 
 def vrfy_payload(*criteria: tuple[str, str], **extra) -> dict:
@@ -92,11 +92,6 @@ def audit(target: str = f"{INIT}-CHTR-01", rnd: int = 1,
             "verdict": verdict, "findings": list(findings), **extra}
 
 
-def repair(target: str = f"{INIT}-CHTR-01", rnd: int = 1, **extra) -> dict:
-    return {"kind": "repair", "v": "v1", "target": target, "round": rnd,
-            **extra}
-
-
 def halt(reason: str = "stop", **extra) -> dict:
     return {"kind": "halt", "v": "v1", "reason": reason, **extra}
 
@@ -130,7 +125,6 @@ GOOD: dict[str, dict] = {
     "gate_decision": gate(),
     "ruling": ruling(),
     "audit": audit(),
-    "repair": repair(),
     "halt": halt(),
     "spawn_error": spawn_error(),
     "needs_context": needs_context(),

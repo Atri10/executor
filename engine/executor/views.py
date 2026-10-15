@@ -113,3 +113,65 @@ def status_card(init: Initiative, s: dict) -> str:
         lines.append(f"-> GATE {s['phase']}: awaiting a human decision "
                      f"(ingest a gate_decision payload)")
     return "\n".join(lines)
+
+
+def render_report_md(p: dict, did: str) -> str:
+    """The committed record of one worker report. No timestamp, so re-rendering
+    the same payload writes the same bytes."""
+    lines = [f"# {p['task']} — report {did}", "",
+             f"**result:** {p['result']}", "", p["summary"], "", "**commits:**"]
+    lines += [f"- `{c}`" for c in p.get("commits", [])] or ["- none"]
+    if p.get("concerns"):
+        lines += ["", "**concerns:**", *[f"- {c}" for c in p["concerns"]]]
+    return "\n".join(lines) + "\n"
+
+
+def render_verdict_md(p: dict) -> str:
+    """The committed record of one review round. Findings are sorted by
+    severity so the same verdict always renders the same bytes."""
+    lines = [f"# {p['task']} — verdict R{p['round']:02d}", "",
+             f"- spec: **{p['spec_verdict']}**",
+             f"- quality: **{p['quality_verdict']}**",
+             f"- range: `{p['commit_base']}..{p['commit_head']}`",
+             f"- package: `{p['reviewed_package_sha']}`", "", "## Findings"]
+    found = sorted(p.get("findings", []), key=lambda f: SEV.get(f["severity"], 9))
+    lines += [f"- **{f['id']}** ({f['severity']}): {f['claim']}" for f in found] or ["- none"]
+    return "\n".join(lines) + "\n"
+
+
+def render_handoff_index(init_id: str, s: dict) -> dict:
+    """The machine-readable index of a finished run: every artifact, plan, task,
+    verdict and final evidence state. A pure function of the folded state."""
+    return {
+        "initiative": init_id,
+        "phase": s["phase"],
+        "artifacts": [{"id": aid, "kind": a["kind"], "status": a["status"],
+                       "rounds": a["round"]}
+                      for aid, a in sorted(s["artifacts"].items())],
+        "plans": [{"id": pid, "status": s["plans"][pid]["status"],
+                   "tasks": sorted(t for t in s["tasks"]
+                                   if t.startswith(pid + "-"))}
+                  for pid in s["plan_order"]],
+        "tasks": {tid: t["state"] for tid, t in sorted(s["tasks"].items())},
+        "verdicts": sorted(s["verdicts"]),
+        "evidence": {cid: runs[-1]["verdict"]
+                     for cid, runs in sorted(s["evidence"].items())},
+    }
+
+
+def render_handoff_md(init_id: str, s: dict) -> str:
+    """The human-readable handoff: the same facts as the index, as tables."""
+    idx = render_handoff_index(init_id, s)
+    lines = [f"# {init_id} — handoff", "",
+             f"Phase at handoff: `{idx['phase']}`", "",
+             "## Artifacts", "", "| Id | Kind | Status | Rounds |", "|---|---|---|---|"]
+    lines += [f"| {a['id']} | {a['kind']} | {a['status']} | {a['rounds']} |"
+              for a in idx["artifacts"]]
+    lines += ["", "## Plans", ""]
+    lines += [f"- `{p['id']}` ({p['status']}): {len(p['tasks'])} task(s)"
+              for p in idx["plans"]] or ["- none"]
+    lines += ["", "## Tasks", "", "| Task | State |", "|---|---|"]
+    lines += [f"| {tid} | {state} |" for tid, state in idx["tasks"].items()]
+    lines += ["", "## Evidence", ""]
+    lines += [f"- {cid}: {v}" for cid, v in idx["evidence"].items()] or ["- none"]
+    return "\n".join(lines) + "\n"

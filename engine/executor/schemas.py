@@ -234,8 +234,9 @@ def artifact_schema(artifact_kind: str) -> dict:
             "objective": _str(minLength=1),
             "tasks": _arr(TASK, minItems=1),
             "gates": _arr(_str()),
+            "more_plans": {"type": "boolean"},
         })
-        req += ["plan_id", "objective", "tasks"]
+        req += ["plan_id", "objective", "tasks", "more_plans"]
     if artifact_kind in ("arch", "design"):
         props.update({
             "adrs": _arr(_obj({
@@ -342,15 +343,6 @@ AUDIT = _obj({
     "findings": _arr(FINDING),
 }, req=["kind", "v", "target", "round", "verdict", "findings"])
 
-REPAIR = _obj({
-    **_base("repair"),
-    "target": _str(pattern=ARTIFACT_OR_PLAN),
-    "round": _int(minimum=1),
-    "fixed": _arr(_str()),
-    "introduced": _arr(FINDING),
-    "note": _str(),
-}, req=["kind", "v", "target", "round"])
-
 
 HALT = _obj({
     **_base("halt"),
@@ -395,7 +387,6 @@ SCHEMAS = {
     "spawn_error": SPAWN_ERROR,
     "needs_context": NEEDS_CONTEXT,
     "audit": AUDIT,
-    "repair": REPAIR,
     "merge": MERGE,
     "resume": RESUME,
 }

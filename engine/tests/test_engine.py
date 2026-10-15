@@ -18,9 +18,7 @@ from executor.store import (Initiative, Rejection, append_event,
 from executor.schemas import schema_for, validate           # noqa: E402
 
 
-def git(root, *a):
-    return subprocess.run(["git", "-C", str(root), *a],
-                          capture_output=True, text=True)
+from _live import hermetic_git as git   # noqa: E402  (no signing, no global config)
 
 
 class Base(unittest.TestCase):

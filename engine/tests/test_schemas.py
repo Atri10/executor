@@ -43,7 +43,7 @@ REQUIRED = {
                  "design", "spec", "risk")},
     "vrfy": {"kind", "v", "id", "title", "summary", "sections", "criteria"},
     "plan": {"kind", "v", "id", "title", "summary", "sections", "plan_id",
-             "objective", "tasks"},
+             "objective", "tasks", "more_plans"},
     "report": {"kind", "v", "task", "result", "summary", "commits"},
     "verdict": {"kind", "v", "task", "round", "spec_verdict",
                 "quality_verdict", "commit_base", "commit_head",
@@ -54,7 +54,6 @@ REQUIRED = {
     "gate_decision": {"kind", "v", "phase", "decision", "by"},
     "ruling": {"kind", "v", "decision", "why"},
     "audit": {"kind", "v", "target", "round", "verdict", "findings"},
-    "repair": {"kind", "v", "target", "round"},
     "halt": {"kind", "v", "reason"},
     "spawn_error": {"kind", "v", "dispatch_id", "error_class"},
     "needs_context": {"kind", "v", "task", "question"},
@@ -69,7 +68,7 @@ EXTRA_KEYS = {
     "design": ART_KEYS | {"adrs", "ifces"},
     "risk": ART_KEYS | {"risks"},
     "vrfy": ART_KEYS | {"criteria"},
-    "plan": ART_KEYS | {"plan_id", "objective", "tasks", "gates"},
+    "plan": ART_KEYS | {"plan_id", "objective", "tasks", "gates", "more_plans"},
     "report": BASE_KEYS | {"task", "result", "summary", "commits", "concerns",
                            "tests", "model_actual"},
     "verdict": BASE_KEYS | {"task", "round", "spec_verdict",
@@ -83,7 +82,6 @@ EXTRA_KEYS = {
     "ruling": BASE_KEYS | {"decision", "why", "cost_if_wrong", "answered",
                            "unsolicited", "stop", "for_task"},
     "audit": BASE_KEYS | {"target", "round", "verdict", "findings"},
-    "repair": BASE_KEYS | {"target", "round", "fixed", "introduced", "note"},
     "halt": BASE_KEYS | {"reason"},
     "spawn_error": BASE_KEYS | {"error_class", "detail"},
     "needs_context": BASE_KEYS | {"task", "question", "for_role"},
@@ -91,7 +89,7 @@ EXTRA_KEYS = {
     "resume": BASE_KEYS | {"reason"},
 }
 RUNTIME_KINDS = ["report", "verdict", "heartbeat", "evidence",
-                 "gate_decision", "ruling", "audit", "repair", "halt",
+                 "gate_decision", "ruling", "audit", "halt",
                  "spawn_error", "needs_context", "merge", "resume"]
 
 
@@ -507,16 +505,15 @@ class IdAnchoringTests(SchemaCase):
                 self.kind_rejects({**GOOD["merge"], "plan": bad}, "pattern",
                                   "$.plan")
 
-    def test_audit_and_repair_targets_are_an_artifact_or_a_plan(self):
-        for kind in ("audit", "repair"):
-            for good in (f"{INIT}-CHTR-01", f"{INIT}-ADR-07", PLAN):
-                with self.subTest(kind=kind, target=good):
-                    validate({**GOOD[kind], "target": good}, schema_for(kind))
-            for bad in (TASK, "INIT-0001", "charter", f"{INIT}-FOO-01",
-                        f"x{PLAN}", f"{PLAN}x", ""):
-                with self.subTest(kind=kind, target=bad):
-                    self.kind_rejects({**GOOD[kind], "target": bad},
-                                      "pattern", "$.target")
+    def test_audit_targets_are_an_artifact_or_a_plan(self):
+        for good in (f"{INIT}-CHTR-01", f"{INIT}-ADR-07", PLAN):
+            with self.subTest(target=good):
+                validate({**GOOD["audit"], "target": good}, schema_for("audit"))
+        for bad in (TASK, "INIT-0001", "charter", f"{INIT}-FOO-01",
+                    f"x{PLAN}", f"{PLAN}x", ""):
+            with self.subTest(target=bad):
+                self.kind_rejects({**GOOD["audit"], "target": bad},
+                                  "pattern", "$.target")
 
     def test_a_dispatch_id_is_required_and_exact_for_a_spawn_error(self):
         for bad in ("D1", "d00001", "D00001x", "x", ""):
@@ -669,15 +666,6 @@ class RuntimePayloadTests(SchemaCase):
             schema_for("audit"))
         self.kind_rejects({**GOOD["audit"], "findings": [{"id": "F1"}]},
                           "required", "$.findings[0].severity")
-
-    def test_repair_optional_fields(self):
-        validate({**GOOD["repair"], "fixed": ["F1"], "note": "n",
-                  "introduced": [{"id": "F2", "severity": "minor",
-                                  "claim": "c"}]}, schema_for("repair"))
-        self.kind_rejects({**GOOD["repair"], "round": 0}, "minimum",
-                          "$.round")
-        self.kind_rejects({**GOOD["repair"], "fixed": [1]}, "type",
-                          "$.fixed[0]")
 
     def test_halt_needs_a_reason(self):
         self.kind_rejects({**GOOD["halt"], "reason": ""}, "minLength",
@@ -948,9 +936,6 @@ BOUNDS = {
     ("audit", "round", "minimum"): 1,
     ("audit", "findings[].id", "minLength"): 1,
     ("audit", "findings[].claim", "minLength"): 1,
-    ("repair", "round", "minimum"): 1,
-    ("repair", "introduced[].id", "minLength"): 1,
-    ("repair", "introduced[].claim", "minLength"): 1,
     ("halt", "reason", "minLength"): 1,
     ("needs_context", "question", "minLength"): 1,
     ("merge", "merge_sha", "minLength"): 4,

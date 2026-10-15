@@ -360,29 +360,27 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(s["artifacts"], {})
         self.assertIn("intake:INIT-0001-GHOST-01", s["critiques"])
 
-    def test_a_repair_marks_the_failed_critique_repaired(self):
+    def test_a_redrafted_artifact_marks_the_failed_critique_repaired(self):
         s = self.state("intake", self.audit(1, "FAIL", PL.finding()),
-                       ev("repair", self.AID,
-                          data_of(PL.repair(self.AID, 1))))
+                       ev("charter", self.AID, data_of(PL.art("charter"))))
         self.assertEqual(s["critiques"][f"intake:{self.AID}"]["status"],
                          "repaired")
 
-    def test_a_repair_in_another_phase_does_not_touch_this_critique(self):
+    def test_a_redraft_in_another_phase_does_not_touch_this_critique(self):
         s = self.state("intake", self.audit(1, "FAIL", PL.finding()),
                        entered("discovery"),
-                       ev("repair", self.AID,
-                          data_of(PL.repair(self.AID, 1))))
+                       ev("charter", self.AID, data_of(PL.art("charter"))))
         self.assertEqual(s["critiques"][f"intake:{self.AID}"]["status"],
                          "fail")
 
-    def test_a_repair_of_an_unaudited_target_is_ignored(self):
-        s = self.state("intake", ev("repair", self.AID,
-                                    data_of(PL.repair(self.AID, 1))))
+    def test_a_redraft_of_an_unaudited_artifact_leaves_no_critique(self):
+        s = self.state("intake", ev("charter", self.AID,
+                                    data_of(PL.art("charter"))))
         self.assertEqual(s["critiques"], {})
 
-    def test_audits_and_repairs_draw_no_self_referential_edges(self):
+    def test_audits_and_redrafts_draw_no_self_referential_edges(self):
         s = self.state("intake", self.audit(1, "PASS"),
-                       ev("repair", self.AID, data_of(PL.repair(self.AID))))
+                       ev("charter", self.AID, data_of(PL.art("charter"))))
         self.assertEqual([e for e in s["edges"] if e["from"] == e["to"]], [])
 
 
@@ -691,7 +689,7 @@ class PurityTests(unittest.TestCase):
             ev("charter", aid, data_of(PL.art("charter"))),
             ev("audit", aid, data_of(PL.audit(aid, 1, "FAIL",
                                               (PL.finding(),)))),
-            ev("repair", aid, data_of(PL.repair(aid, 1))),
+            ev("charter", aid, data_of(PL.art("charter"))),
             ev("audit", aid, data_of(PL.audit(aid, 2, "PASS"))),
             entered("planning"),
             ev("plan", PLAN, data_of(PL.plan_payload())),

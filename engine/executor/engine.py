@@ -28,22 +28,25 @@ from pathlib import Path
 
 from .paths import (artifact_file, audit_file, classify, dispatch_id,
                     dispatches_dir, docs_artifact_file, docs_artifact_md,
-                    docs_init_dir, docs_plan_file, docs_plan_md, docs_root,
-                    fix_package_file, fix_report_file, is_dispatch_id,
-                    payload_file, plan_audit_file, plan_file, plan_repair_file,
-                    preflight_file, prompt_file, repair_file,
-                    review_package_file, run_root, state_file,
-                    task_impl_report, verdict_file)
+                    docs_export_journal, docs_index_file, docs_index_md,
+                    docs_init_dir, docs_plan_file, docs_plan_md, docs_report_file,
+                    docs_root, docs_verdict_file, fix_package_file,
+                    fix_report_file, is_dispatch_id, journal_file, payload_file,
+                    plan_audit_file, plan_file, plan_repair_file, preflight_file,
+                    prompt_file, repair_file, review_package_file, run_root,
+                    state_file, task_impl_report, verdict_file)
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
                     append_event, atomic_write, init_store, make_event,
                     next_seq, read_events, read_json, scan_journal, sha256,
                     verify_chain, write_json)
-from .views import render_all
+from .views import (render_all, render_handoff_index, render_handoff_md,
+                    render_report_md, render_verdict_md)
 
 MAX_FIX_ROUNDS = 5        # fix dispatches per task before the run escalates
 MAX_AUDIT_ROUNDS = 5      # audit rounds per artifact or plan before escalation
 MAX_EVIDENCE_TRIES = 5    # evidence attempts per criterion before escalation
+MAX_PLANS = 9             # plans per initiative (ids run P01..P09)
 SPAWN_RETRY_CAP = 2       # lost dispatches per entity and schema (spawn error or abandon)
 SUSPECT_S = 1800          # silence before check warns about a dispatch
 DEADLINE_S = 3600         # silence after which the next poll abandons a dispatch
@@ -59,13 +62,13 @@ SLOT_FREE_KINDS = HUMAN_KINDS | {"halt", "merge"}
 ENGINE_KINDS = frozenset({"created", "phase_entered", "gate_opened",
                           "task_dispatched", "abandon", "preflight"})
 WORKER_KINDS = (frozenset({"report", "heartbeat", "verdict", "spawn_error",
-                           "needs_context", "evidence", "audit", "repair"})
+                           "needs_context", "evidence", "audit"})
                 | frozenset(ARTIFACT_KINDS))
 KNOWN_KINDS = ENGINE_KINDS | SLOT_FREE_KINDS | WORKER_KINDS
 # Events that carry a dispatch id but do not close that dispatch.
 NON_ANSWERING = frozenset({"heartbeat", "task_dispatched"})
 # Schemas whose payload must echo the engine-minted round.
-ROUND_SCHEMAS = frozenset({"verdict", "audit", "repair"})
+ROUND_SCHEMAS = frozenset({"verdict", "audit"})
 
 PHASE_ARTIFACTS = {
     "intake": ["charter"], "discovery": ["options", "brainstorm"],
@@ -137,6 +140,16 @@ def _head(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD").strip()
 
 
+def _resolve(root: Path, rev: str) -> str:
+    return _git(root, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
+
+
+def _is_ancestor(root: Path, a: str, b: str) -> bool:
+    return subprocess.run(["git", "-C", str(root), "merge-base",
+                           "--is-ancestor", a, b],
+                          capture_output=True).returncode == 0
+
+
 # ------------------------------------------------------------ fold
 
 def fold(events: list[dict]) -> dict:
@@ -189,10 +202,6 @@ def _apply(s: dict, ev: dict) -> None:
         _apply_artifact(s, k, e, d)
     elif k == "audit":
         _apply_audit(s, d)
-    elif k == "repair":
-        c = s["critiques"].get(_crit_key(s, d["target"]))
-        if c is not None and c["status"] == "fail":
-            c["status"] = "repaired"
     elif k == "task_dispatched":
         _apply_dispatch(s, ev, d)
     elif k == "abandon":
@@ -450,26 +459,26 @@ def _phase_artifacts(s: dict, ph: str) -> list[str]:
     return [aid for aid, a in s["artifacts"].items() if a["kind"] in kinds]
 
 
+def _more_plans_wanted(s: dict) -> bool:
+    """The planner says whether another plan is needed. No plan yet means one is."""
+    if not s["plan_order"]:
+        return True
+    last = s["artifacts"][s["plan_order"][-1]]["data"]
+    return bool(last.get("more_plans"))
+
+
 def _write_text(path: Path, text: str) -> None:
     atomic_write(path, text.encode("utf-8"))
 
 
 # ------------------------------------------------------------ journal writes
 
-def _checked_event(init: Initiative, actor: str, kind: str, entity: str,
-                   data: dict, dispatch_id_: str | None = None,
-                   payload_sha: str | None = None) -> dict:
-    """Build the next chained event and dry-run the fold over it. An event the
-    fold cannot apply is refused before anything reaches the journal, so the
-    journal stays replayable."""
-    ev = make_event(init.idir, actor, kind, entity, data,
-                    dispatch_id=dispatch_id_, payload_sha=payload_sha)
-    try:
-        fold(init.events + [ev])
-    except (KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
-        raise Rejection("apply_failed", "$", "an event the fold accepts",
-                        f"{kind}: {exc}") from exc
-    return ev
+def _event(init: Initiative, actor: str, kind: str, entity: str, data: dict,
+           dispatch_id_: str | None = None,
+           payload_sha: str | None = None) -> dict:
+    """The next chained event, not yet appended. Callers hold the lock."""
+    return make_event(init.idir, actor, kind, entity, data,
+                      dispatch_id=dispatch_id_, payload_sha=payload_sha)
 
 
 def _append(init: Initiative, ev: dict) -> dict:
@@ -481,15 +490,29 @@ def _append(init: Initiative, ev: dict) -> dict:
 def _record(init: Initiative, actor: str, kind: str, entity: str, data: dict,
             dispatch_id_: str | None = None) -> dict:
     """An engine write: the caller holds the lock."""
-    return _append(init, _checked_event(init, actor, kind, entity, data,
-                                        dispatch_id_))
+    return _append(init, _event(init, actor, kind, entity, data, dispatch_id_))
 
 
 def _project(init: Initiative) -> None:
-    """Refresh the fold cache and every projection after a journal change."""
+    """Refresh the fold cache and every projection after a journal change. Once
+    the handoff gate is approved, the committed handoff files follow."""
     s = fold(init.events)
     write_json(state_file(init.idir), s | {"last_seq": len(init.events)})
     render_all(init)
+    if s["done"]:
+        _export_handoff(init, s)
+
+
+def _export_handoff(init: Initiative, s: dict) -> None:
+    """The committed handoff: an index of the run and a byte copy of its journal.
+    Both are pure functions of the journal, so a re-export rewrites identical
+    bytes."""
+    write_json(docs_index_file(init.root, init.id),
+               render_handoff_index(init.id, s))
+    _write_text(docs_index_md(init.root, init.id),
+                render_handoff_md(init.id, s))
+    atomic_write(docs_export_journal(init.root, init.id),
+                 journal_file(init.idir).read_bytes())
 
 
 # ------------------------------------------------------------ dispatches
@@ -604,6 +627,11 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
         return _execution(init, s, now)
     if ph == "verification":
         return _verification(init, s, now)
+    if ph == "planning" and _more_plans_wanted(s):
+        if len(s["plan_order"]) >= MAX_PLANS:
+            return _escalate(init, f"the planner asked for more than "
+                                   f"{MAX_PLANS} plans")
+        return _author(init, s, "plan", now)
     for kind in PHASE_ARTIFACTS.get(ph, []):
         if not any(a["kind"] == kind for a in s["artifacts"].values()):
             return _author(init, s, kind, now)
@@ -611,8 +639,8 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
                else _phase_artifacts(s, ph))
     for tgt in targets:
         c = s["critiques"].get(_crit_key(s, tgt))
-        rnd = c["round"] if c else 0
         if c is None or c["status"] == "repaired":
+            rnd = _audit_rounds(s, tgt)
             if rnd >= MAX_AUDIT_ROUNDS:
                 return _escalate(init, f"{tgt} not cleared after "
                                        f"{MAX_AUDIT_ROUNDS} audit rounds")
@@ -620,8 +648,16 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
                              context={"round": rnd + 1})
         if c["status"] == "fail":
             return _dispatch(init, s, "repair", tgt, _kind_of(s, tgt), now=now,
-                             context={"round": rnd, "findings": c["open"]})
+                             context={"round": c["round"], "findings": c["open"]})
     return None
+
+
+def _audit_rounds(s: dict, tgt: str) -> int:
+    """Audit rounds are numbered per target across phases, so a plan audited in
+    planning and again in plan_regression gets rounds 1 and 2, and each round
+    keeps its own canonical file."""
+    return max((c["round"] for key, c in s["critiques"].items()
+                if key.split(":", 1)[1] == tgt), default=0)
 
 
 def _author(init: Initiative, s: dict, kind: str, now: float) -> dict:
@@ -763,15 +799,11 @@ def _reaches(tasks: dict, src: str, dst: str) -> bool:
 
 
 def _review_package(init: Initiative, s: dict, tid: str, rnd: int,
-                    base: str | None) -> dict | None:
+                    base: str) -> dict:
     """What the reviewer must see: the range from the task's base to what the
     worker reported, the changed files, the diff itself and the prior findings.
     The package sha is what the verdict must echo back."""
-    commits = (s["reports"].get(tid) or {}).get("commits") or []
-    head = commits[-1] if commits else _head(init.root)
-    base = base or _head(init.root)
-    if base == head:
-        return None
+    head = _resolve(init.root, s["reports"][tid]["commits"][-1])
     diff = _git(init.root, "diff", "--no-color", base, head)
     names = _git(init.root, "diff", "--name-only", base, head).splitlines()
     core = {"task": tid, "round": rnd, "base": base, "head": head,
@@ -801,9 +833,8 @@ def _dispatch(init: Initiative, s: dict, role: str, entity: str, schema: str,
     ctx = dict(context or {})
     package = None
     if role == "review":
+        assert base is not None, "a review is measured from its task's dispatch base"
         package = _review_package(init, s, entity, ctx["round"], base)
-        if package is None:
-            return _escalate(init, f"{entity}: nothing to review, base equals head")
         ctx.update(package_sha=package["package_sha"], base=package["base"],
                    head=package["head"])
     did = dispatch_id(next_seq(init.events))
@@ -891,8 +922,8 @@ def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
         digest = sha256(payload)
         if kind in SLOT_FREE_KINDS:
             entity = _check_free(init, s, payload)
-            ev = _checked_event(init, actor, kind, entity, _data_for(payload),
-                                payload_sha=digest)
+            ev = _event(init, actor, kind, entity, _data_for(payload),
+                        payload_sha=digest)
         else:
             try:
                 sl = _bind(s, payload)
@@ -901,9 +932,8 @@ def ingest(init: Initiative, payload: dict, actor: str = "worker") -> dict:
                     return {"deduplicated": True}
                 raise
             entity = _check(init, s, payload, sl)
-            ev = _checked_event(init, actor, kind, entity, _data_for(payload),
-                                dispatch_id_=sl["dispatch_id"],
-                                payload_sha=digest)
+            ev = _event(init, actor, kind, entity, _data_for(payload),
+                        dispatch_id_=sl["dispatch_id"], payload_sha=digest)
             _effects(init, s, payload, sl)
         _append(init, ev)
         _project(init)
@@ -938,6 +968,20 @@ def _data_for(p: dict) -> dict:
             if k not in ("kind", "v", "engine_version", "dispatch_id")}
 
 
+def _entity_for(p: dict) -> str:
+    """The entity a slot-bearing payload speaks for, read from the payload."""
+    k = p["kind"]
+    if k in ARTIFACT_KINDS:
+        return p["id"]
+    if k in ("report", "verdict", "heartbeat", "needs_context"):
+        return p["task"]
+    if k == "evidence":
+        return p["criterion"]
+    if k == "audit":
+        return p["target"]
+    return p.get("dispatch_id", "-")
+
+
 def _bind(s: dict, p: dict) -> dict:
     """The open dispatch a slot-bearing payload answers. A payload that answers
     none is unsolicited and is refused: the engine decides what is asked."""
@@ -947,9 +991,6 @@ def _bind(s: dict, p: dict) -> dict:
         cands = [x for x in open_ if x["dispatch_id"] == p.get("dispatch_id")]
     elif kind in ("heartbeat", "needs_context"):
         cands = [x for x in open_ if x["entity"] == p["task"]]
-    elif kind == "repair":
-        cands = [x for x in open_ if x["entity"] == p["target"]
-                 and x["role"] == "repair"]
     else:
         entity = _entity_for(p)
         cands = [x for x in open_ if x["entity"] == entity
@@ -965,20 +1006,6 @@ def _bind(s: dict, p: dict) -> dict:
                         f"{kind} for {did or _entity_for(p)}",
                         f"open: {expected}")
     return cands[0]
-
-
-def _entity_for(p: dict) -> str:
-    """The entity a slot-bearing payload speaks for, read from the payload."""
-    k = p["kind"]
-    if k in ARTIFACT_KINDS:
-        return p["id"]
-    if k in ("report", "verdict", "heartbeat", "needs_context"):
-        return p["task"]
-    if k == "evidence":
-        return p["criterion"]
-    if k in ("audit", "repair"):
-        return p["target"]
-    return p.get("dispatch_id", "-")
 
 
 def _check(init: Initiative, s: dict, p: dict, sl: dict) -> str:
@@ -1000,13 +1027,10 @@ def _check(init: Initiative, s: dict, p: dict, sl: dict) -> str:
         _check_verdict(init, p, sl)
         return p["task"]
     if k == "evidence":
-        _check_evidence(init, s, p)
+        _check_evidence(init, p)
         return p["criterion"]
     if k == "audit":
-        _check_audit(s, p, sl)
-        return p["target"]
-    if k == "repair":
-        _check_repair(p, sl)
+        _check_audit(p, sl)
         return p["target"]
     if k == "spawn_error":
         return sl["entity"]
@@ -1065,30 +1089,22 @@ def _check_artifact(s: dict, p: dict) -> None:
                             "duplicate id")
 
 
-def _resolve(root: Path, rev: str) -> str:
-    return _git(root, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
-
-
-def _is_ancestor(root: Path, a: str, b: str) -> bool:
-    return subprocess.run(["git", "-C", str(root), "merge-base",
-                           "--is-ancestor", a, b],
-                          capture_output=True).returncode == 0
-
-
 def _check_advances(init: Initiative, s: dict, p: dict, sl: dict) -> None:
-    """A worker that reports work must have moved the branch past what it
-    started from. A fix is measured from the head of the report it answers,
-    an implementation from the base it was dispatched on."""
-    ref = sl["base"]
+    """A worker that reports work must have added something. An implementation
+    is measured from the base it was dispatched on; a fix is also measured from
+    the head of the report it answers. A head equal to, or an ancestor of, either
+    adds nothing."""
+    refs = [sl["base"]]
     if sl["role"] == "fix":
         prior = (s["reports"].get(p["task"]) or {}).get("commits") or []
-        ref = prior[-1] if prior else ref
+        if prior:
+            refs.append(prior[-1])
     commits = p.get("commits") or []
     if not commits:
         raise Rejection("empty_range", "$.commits", "at least one commit",
                         "none", "commit the change before reporting it")
     head = _resolve(init.root, commits[-1])
-    if ref is not None:
+    for ref in refs:
         base = _resolve(init.root, ref)
         if head == base or _is_ancestor(init.root, head, base):
             raise Rejection("empty_range", "$.commits",
@@ -1118,10 +1134,7 @@ def _check_verdict(init: Initiative, p: dict, sl: dict) -> None:
                                 f"{path} not found")
 
 
-def _check_evidence(init: Initiative, s: dict, p: dict) -> None:
-    if p["criterion"] not in {c["id"] for c in _criteria_defs(s)}:
-        raise Rejection("unknown_entity", "$.criterion", "a VRFY criterion id",
-                        p["criterion"])
+def _check_evidence(init: Initiative, p: dict) -> None:
     if not rev_exists(init.root, p["state_commit"]):
         raise Rejection("unknown_rev", "$.state_commit",
                         "a resolvable commit", p["state_commit"])
@@ -1131,21 +1144,11 @@ def _check_evidence(init: Initiative, s: dict, p: dict) -> None:
                             f"path exists at {p['state_commit']}", a)
 
 
-def _check_audit(s: dict, p: dict, sl: dict) -> None:
-    if p["target"] not in s["artifacts"] and p["target"] not in s["plans"]:
-        raise Rejection("unknown_entity", "$.target",
-                        "an authored artifact or plan", p["target"])
+def _check_audit(p: dict, sl: dict) -> None:
     if p["round"] != sl["context"].get("round"):
         raise Rejection("round_mismatch", "$.round",
                         str(sl["context"].get("round")), str(p["round"]),
                         "the engine mints audit rounds")
-
-
-def _check_repair(p: dict, sl: dict) -> None:
-    if p["round"] != sl["context"].get("round"):
-        raise Rejection("round_mismatch", "$.round",
-                        str(sl["context"].get("round")), str(p["round"]),
-                        "repair the audited round")
 
 
 def _check_merge(init: Initiative, s: dict, p: dict) -> None:
@@ -1171,16 +1174,12 @@ def _effects(init: Initiative, s: dict, p: dict, sl: dict) -> None:
     k = p["kind"]
     if k in ARTIFACT_KINDS:
         _write_artifact(init, p)
+        if sl["role"] == "repair":
+            _write_repair_record(init, p, sl)
     elif k == "audit":
-        f = (plan_audit_file(init.idir, p["target"], p["round"])
-             if p["target"] in s["plans"]
-             else audit_file(init.idir, p["target"], p["round"]))
-        write_json(f, p)
-    elif k == "repair":
-        f = (plan_repair_file(init.idir, p["target"], p["round"])
-             if p["target"] in s["plans"]
-             else repair_file(init.idir, p["target"], p["round"]))
-        write_json(f, p)
+        write_json(plan_audit_file(init.idir, p["target"], p["round"])
+                   if p["target"] in s["plans"]
+                   else audit_file(init.idir, p["target"], p["round"]), p)
     elif k == "report":
         if sl["role"] == "fix":
             write_json(fix_report_file(init.idir, p["task"],
@@ -1188,8 +1187,26 @@ def _effects(init: Initiative, s: dict, p: dict, sl: dict) -> None:
         else:
             write_json(task_impl_report(init.idir, p["task"],
                                         sl["dispatch_id"]), p)
+        _write_text(docs_report_file(init.root, init.id, p["task"],
+                                     sl["dispatch_id"]),
+                    render_report_md(p, sl["dispatch_id"]))
     elif k == "verdict":
         write_json(verdict_file(init.idir, p["task"], p["round"]), p)
+        _write_text(docs_verdict_file(init.root, init.id, p["task"], p["round"]),
+                    render_verdict_md(p))
+
+
+def _write_repair_record(init: Initiative, p: dict, sl: dict) -> None:
+    """The engine writes the repair: which open findings the re-drafted artifact
+    answers, and the digest of the artifact it produced. A worker never sends a
+    repair payload; a critique is cleared only by a re-drafted artifact."""
+    rnd = sl["context"]["round"]
+    record = {"target": p["id"], "round": rnd,
+              "addressed": sl["context"]["findings"],
+              "artifact_sha256": sha256(p)}
+    write_json(plan_repair_file(init.idir, p["id"], rnd)
+               if p["kind"] == "plan"
+               else repair_file(init.idir, p["id"], rnd), record)
 
 
 def _write_artifact(init: Initiative, p: dict) -> None:
