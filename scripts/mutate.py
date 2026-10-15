@@ -214,7 +214,7 @@ def _run_tests(workdir: Path, modules: list[str], timeout: float) -> str:
 
 
 def default_tests(root: Path, rel: str) -> list[str]:
-    stem = Path(rel).stem
+    stem = Path(rel).stem.replace("-", "_")
     return sorted(p.stem for p in (root / "engine" / "tests").glob(
         f"test_{stem}*.py"))
 

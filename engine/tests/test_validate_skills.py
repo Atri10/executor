@@ -9,7 +9,6 @@ clean today.
 """
 from __future__ import annotations
 
-import importlib.util
 import io
 import tempfile
 import unittest
@@ -17,19 +16,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-REPO = Path(__file__).resolve().parents[2]
+from _scripts import REPO, load
 
-
-def _load_validator():
-    spec = importlib.util.spec_from_file_location(
-        "validate_skills", REPO / "scripts" / "validate_skills.py")
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-vs = _load_validator()
+vs = load("validate_skills.py")
 
 MARKERS = ["Visual Companion", "visual-companion", "visualcompanion",
            "visual mode", "server.cjs", "frame-template", "screen_dir",

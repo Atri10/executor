@@ -8,23 +8,17 @@ leaking exactly where it is weak.
 from __future__ import annotations
 
 import ast
-import importlib.util
 import io
 import json
-import sys
 import tempfile
 import textwrap
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location(
-    "mutate", REPO / "scripts" / "mutate.py")
-assert spec is not None and spec.loader is not None
-M = importlib.util.module_from_spec(spec)
-sys.modules["mutate"] = M        # @dataclass resolves annotations through it
-spec.loader.exec_module(M)
+from _scripts import load, run_as_main
+
+M = load("mutate.py")
 
 SRC = textwrap.dedent('''
     def f(a, b, c):
@@ -354,6 +348,56 @@ class MainTests(ToyCase):
         allow.write_text(json.dumps(entries), encoding="utf-8")
         rc, _, _ = self.main(root, "--allow", str(allow))
         self.assertEqual(rc, 0)
+
+
+def site(source: str, desc: str) -> int:
+    """The traversal index of the mutation named `desc` in `source`."""
+    return [s.desc for s in M.list_sites(source)].index(desc)
+
+
+class RemainingBranchTests(ToyCase):
+    """Branches the toy-project runs never reach."""
+
+    def test_an_augmented_assignment_flips_in_both_directions(self):
+        for src, desc, want in (("x += y", "+= -> -=", "x -= y"),
+                                ("x -= y", "-= -> +=", "x += y")):
+            with self.subTest(src=src):
+                self.assertEqual(M.mutate_source(src, site(src, desc)), want)
+
+    def test_a_while_loop_can_be_skipped_entirely(self):
+        src = "while c:\n    y = 1\n"
+        out = M.mutate_source(src, site(src, "while-test -> False"))
+        self.assertIn("while False:", out)
+        self.assertIn("y = 1", out)
+
+    def test_a_snapshot_copies_files_and_directories_but_not_bytecode(self):
+        root = self.project(STRONG)
+        (root / "README.md").write_text("readme", encoding="utf-8")
+        (root / "pyproject.toml").write_text("[x]", encoding="utf-8")
+        cache = root / "engine" / "executor" / "__pycache__"
+        cache.mkdir()
+        (cache / "toy.pyc").write_bytes(b"x")
+        (root / "engine" / "executor" / "stale.pyc").write_bytes(b"x")
+        dest = self.snapshot(root)
+        self.assertEqual((dest / "README.md").read_text(encoding="utf-8"),
+                         "readme")
+        self.assertTrue((dest / "pyproject.toml").is_file())
+        self.assertTrue((dest / "engine" / "executor" / "toy.py").is_file())
+        self.assertFalse((dest / "engine" / "executor" / "__pycache__").exists())
+        self.assertFalse((dest / "engine" / "executor" / "stale.pyc").exists())
+        self.assertFalse((dest / "scripts").exists())     # absent: skipped
+
+    def test_default_tests_normalise_hyphens_in_the_script_name(self):
+        root = self.project(STRONG)
+        (root / "engine" / "tests" / "test_lint_thing.py").write_text("")
+        self.assertEqual(M.default_tests(root, "scripts/lint-thing.py"),
+                         ["test_lint_thing"])
+
+    def test_the_entry_point_reports_a_usage_error(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(run_as_main("mutate.py"), 2)
+        self.assertIn("targets", err.getvalue())
 
 
 if __name__ == "__main__":

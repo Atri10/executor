@@ -37,7 +37,19 @@ PATTERNS = [
      "high", "exfiltration-endpoint"),
     (r"(?i)(curl|wget)[^|\n]{0,120}\|\s*(ba)?sh\b",
      "high", "fetch-and-execute"),
-    (r"(?i)\b(curl|wget)\b[^|\n]{0,200}\b(-d|--data|--upload-file|-T|--form)\b",
+    # Sending local data out: a body read from a file (@file), stdin (@-) or
+    # command output ($(...)), a file upload, or a form field read from a
+    # file. An inline literal body is API testing, not exfiltration (a secret
+    # pasted there is caught by the credential patterns instead). The command
+    # name is case-insensitive, its flags are not: wget -t is --tries and curl
+    # -D dumps headers. A flag follows whitespace, so no word boundary may be
+    # demanded before its dash (a boundary cannot exist between a space and
+    # "-", which is why this pattern once matched nothing).
+    (r"\b(?i:curl|wget)\b[^|\n]{0,200}(?<=\s)(?:"
+     r"(?:-d|--data[\w-]*|--json)\s*[\"']?(?:@|\$\()"
+     r"|(?:-T|--upload-file)(?=\s)"
+     r"|(?:-F|--form[\w-]*)\s+\S*=@"
+     r"|--(?:post|body)-file(?=[\s=]))",
      "medium", "outbound-post"),
     # Credential-shaped content in a prompt file (secret hygiene)
     (r"\b(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}\b",
@@ -58,26 +70,35 @@ PATTERNS = [
 
 # Fenced code blocks are quoted examples more often than live attacks —
 # still scanned, but a finding inside a fence is downgraded so humans can
-# triage quickly.
-FENCE = re.compile(r"^(```|~~~)", re.M)
+# triage quickly. A fence is closed only by a marker of the same kind, at
+# least as long as the opener, with no text after it, and indented at most
+# three spaces past the opener, as Markdown renders it. Honouring any marker
+# would let one stray ~~~ inside a ``` block flip the tracker and file the
+# real injection that follows as a harmless example; honouring indentation is
+# what lets a template quote an indented ``` block inside its own fence.
+FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 
 
 def fence_ranges(text: str):
     ranges = []
     lines = text.splitlines()
-    inside = None
+    opener = None
+    opener_indent = 0
     start = 0
     for i, line in enumerate(lines, 1):
-        if re.match(r"^\s*(```|~~~)", line):
-            if inside is None:
-                inside = True
-                start = i
-            else:
-                inside = None
-                ranges.append((start, i))
-    if inside is not None:  # unterminated fence
+        m = FENCE.match(line.expandtabs(4))
+        if not m:
+            continue
+        indent, run, rest = len(m.group(1)), m.group(2), m.group(3)
+        if opener is None:
+            opener, opener_indent, start = run, indent, i
+        elif (run[0] == opener[0] and len(run) >= len(opener)
+              and not rest.strip() and indent <= opener_indent + 3):
+            ranges.append((start, i))
+            opener = None
+    if opener is not None:  # unterminated fence
         ranges.append((start, len(lines)))
-    return ranges, inside is not None
+    return ranges, opener is not None
 
 
 def in_ranges(n, ranges):
@@ -115,6 +136,11 @@ def lint_file(path: Path):
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
+        return 2
+    missing = [a for a in sys.argv[1:] if not Path(a).exists()]
+    if missing:
+        for a in missing:
+            print(f"error: no such file or directory: {a}", file=sys.stderr)
         return 2
     blocking = 0
     for arg in sys.argv[1:]:
