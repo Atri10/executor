@@ -7,6 +7,59 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+### Added — executor v2 engine (preview, alongside the v1 shell suite)
+
+A new Python engine under `engine/executor/` implements the executor
+protocol as an event-sourced, typed-payload state machine. The v1 shell
+skills remain the production path; v2 is the hardened controller being
+built out alongside them (`design/executor-v2.md`).
+
+- **Canonical layout, single path authority.** `paths.py` holds ~40
+  `*_file`/`*_dir` functions; nothing else builds a path. Runtime store:
+  `.executor/INIT-NNNN/{meta,journal,dispatches,artifacts,plans,fixes,
+  reviews,views}` with every dispatch in its own
+  `dispatches/d-NNNNN-<entity>-<role>/{slot,payload,prompt}` dir and
+  uniform `<ID>.<role>.<ext>` filenames. Committed store:
+  `docs/executor/INIT-NNNN/{meta,artifacts,plans}` with each artifact in
+  its own `<AID>/{artifact.json,artifact.md}` dir.
+- **`emit_next` carries a resume manifest** (`initiative`, `phase`,
+  `phase_state`, `last_event`, `last_seq`, `open_concerns`, `tasks_done`,
+  `tasks_total`) so a context-less pump resumes cold; the livelock
+  detector keys emits on a state digest — identical action over unchanged
+  state streaks to ESCALATE, real progress resets.
+- **MERGE is now a slot-minted action**: `emit_next` returns
+  `{action:"MERGE", run:"git merge --no-ff task/<pid>", respond_to,
+  dispatch_id}`; the pump performs the merge and ingests a
+  `{kind:"merge",plan,merge_sha,branch}` payload. `merge_sha` must
+  resolve and `plan` must exist.
+- **Slot consumption works without `dispatch_id` echo.** `_after` matches
+  the consumed slot by `dispatch_id` when present, else by entity+schema —
+  agents don't reliably echo ids, and the first e2e leaked 24 open slots
+  before this fell back.
+- **`check` no longer lies about the chain.** `chain:"broken"` is reported
+  only for hash-chain problems; a stale `state.json` is listed under
+  `problems` and repaired in place, not reported as chain damage.
+- **Validation is schema-first, hand-rolled** (no `jsonschema` dep):
+  `required`, `minLength`, `minItems`, `enum`, `pattern`, `additionalProperties`,
+  plus semantic checks over live state and git — unknown task/criterion,
+  unresolvable commits, dangling cites/edges, round-must-be-minted,
+  empty-diff rejection.
+- **Payload kinds**: `charter/options/brainstorm/adr/ifce/design/vrfy/
+  spec/plan` (artifacts), `report`, `verdict`, `audit`, `repair`,
+  `evidence`, `gate_decision`, `ruling`, `heartbeat`, `merge`, `halt`,
+  `needs_context`, `spawn_error`.
+- **Actions**: `PHASE-ENTER`, `DISPATCH`, `MERGE`, `GATE`, `ASK`, `WAIT`,
+  `DONE`, `ESCALATE`, `HALT`.
+- **CLI**: `new`, `next`, `ingest`, `dispatch`, `resume`, `check`,
+  `autonomy`, `status` — all exercised against a scratch repo in e2e.
+- **Test suite** `engine/tests/test_engine.py`: 18 contract tests covering
+  store integrity, schemas, loop behavior, semantic gates, and `check` —
+  all green.
+
+Verified end-to-end on a scratch repo: `new` → 11 phases → merge →
+`DONE`, 136 events, `chain:ok`, `open_slots:0`, `dangling:[]`.
+
+
 ## [0.7.1] — 2026-10-05
 
 Patch release: the store helpers could invent a filesystem root, and the
