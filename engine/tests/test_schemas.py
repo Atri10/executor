@@ -22,6 +22,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from executor import paths as P, schemas as S  # noqa: E402
@@ -908,6 +909,236 @@ class ArtifactPayloadTests(SchemaCase):
                  schema_for("charter"))
         self.kind_rejects({**GOOD["charter"], "cites": [1]}, "type",
                           "$.cites[0]")
+
+
+# ------------------------------------------------- keyword scope and bounds
+
+class KeywordScopeTests(SchemaCase):
+    """A keyword only constrains the type it belongs to (JSON Schema). A stray
+    one on another type must be ignored: neither a crash nor a rejection."""
+
+    def test_string_keywords_ignore_other_types(self):
+        for kw in ({"minLength": 3}, {"maxLength": 1}, {"pattern": "x"}):
+            with self.subTest(keyword=kw):
+                self.accepts(5, {"type": "integer", **kw})
+
+    def test_integer_keywords_ignore_other_types(self):
+        self.accepts("a", {"type": "string", "minimum": 5})
+
+    def test_object_keywords_ignore_other_types(self):
+        self.accepts([], {"type": "array", "required": ["a"]})
+
+    def test_array_keywords_ignore_other_types(self):
+        self.accepts({}, {"type": "object", "minItems": 2})
+        self.accepts({"x": 1}, {"type": "object", "items": S._str(minLength=9)})
+
+
+# The numeric contract of the vocabulary, pinned as literals so that a changed
+# bound cannot hide behind a test that reads the very schema it is checking.
+# Rows are (group, path, constraint) -> value. Group "artifact" covers every
+# artifact kind, "*" the envelope every payload carries.
+BOUNDS = {
+    ("*", "v", "minLength"): 1,
+    ("artifact", "title", "minLength"): 1,
+    ("artifact", "summary", "minLength"): 1,
+    ("artifact", "sections[].id", "minLength"): 1,
+    ("artifact", "sections[].title", "minLength"): 1,
+    ("artifact", "sections[].body", "minLength"): 1,
+    ("artifact", "sections[].body", "maxLength"): 12000,
+    ("artifact", "requirements[].requirement", "minLength"): 1,
+    ("artifact", "constraints[].constraint", "minLength"): 1,
+    ("artifact", "criteria", "minItems"): 1,
+    ("artifact", "criteria[].criterion", "minLength"): 1,
+    ("artifact", "criteria[].procedure", "minLength"): 1,
+    ("artifact", "objective", "minLength"): 1,
+    ("artifact", "tasks", "minItems"): 1,
+    ("artifact", "tasks[].title", "minLength"): 1,
+    ("artifact", "tasks[].goal", "minLength"): 1,
+    ("artifact", "tasks[].files", "minItems"): 1,
+    ("artifact", "tasks[].files[]", "minLength"): 1,
+    ("artifact", "tasks[].accepts", "minItems"): 1,
+    ("artifact", "tasks[].accepts[]", "minLength"): 1,
+    ("artifact", "adrs[].id", "minLength"): 1,
+    ("artifact", "adrs[].title", "minLength"): 1,
+    ("artifact", "adrs[].decision", "minLength"): 1,
+    ("artifact", "adrs[].why", "minLength"): 1,
+    ("artifact", "ifces[].id", "minLength"): 1,
+    ("artifact", "ifces[].title", "minLength"): 1,
+    ("artifact", "risks[].id", "minLength"): 1,
+    ("artifact", "risks[].risk", "minLength"): 1,
+    ("artifact", "risks[].mitigation", "minLength"): 1,
+    ("report", "summary", "minLength"): 1,
+    ("report", "commits[]", "minLength"): 1,
+    ("report", "tests[].name", "minLength"): 1,
+    ("verdict", "round", "minimum"): 1,
+    ("verdict", "findings[].id", "minLength"): 1,
+    ("verdict", "findings[].claim", "minLength"): 1,
+    ("verdict", "commit_base", "minLength"): 4,
+    ("verdict", "commit_head", "minLength"): 4,
+    ("verdict", "reviewed_package_sha", "minLength"): 4,
+    ("heartbeat", "note", "maxLength"): 400,
+    ("evidence", "command", "minLength"): 1,
+    ("evidence", "observed", "minLength"): 1,
+    ("evidence", "state_commit", "minLength"): 4,
+    ("ruling", "decision", "minLength"): 1,
+    ("ruling", "why", "minLength"): 1,
+    ("audit", "round", "minimum"): 1,
+    ("audit", "findings[].id", "minLength"): 1,
+    ("audit", "findings[].claim", "minLength"): 1,
+    ("repair", "round", "minimum"): 1,
+    ("repair", "introduced[].id", "minLength"): 1,
+    ("repair", "introduced[].claim", "minLength"): 1,
+    ("halt", "reason", "minLength"): 1,
+    ("needs_context", "question", "minLength"): 1,
+    ("merge", "merge_sha", "minLength"): 4,
+}
+ALL_KINDS = RUNTIME_KINDS + S.ARTIFACT_KINDS
+CONSTRAINTS = ("minLength", "maxLength", "minItems", "minimum")
+
+# One valid example per pattern in use. A new pattern with no sample here
+# fails test_every_pattern_in_use_has_a_sample_value.
+PATTERN_SAMPLES = {
+    P.TASK_ID: TASK, P.PLAN_ID: PLAN, P.DISPATCH_ID: "D00001",
+    S.ARTIFACT_OR_PLAN: PLAN, S.TASK_LOCAL: "T01",
+    r"R\d+": "R1", r"C\d+": "C1", r"V\d+": "V1",
+    **{P.artifact_pattern(k): f"{INIT}-{seg}-01"
+       for k, seg in P.ARTIFACT_SEGMENTS.items()},
+}
+
+
+def walk(node, path=()):
+    """(path, constraint, value) for every bound in a schema, depth first."""
+    for c in CONSTRAINTS:
+        if c in node:
+            yield path, c, node[c]
+    for key, sub in node.get("properties", {}).items():
+        yield from walk(sub, path + (key,))
+    if "items" in node:
+        yield from walk(node["items"], path + ("[]",))
+
+
+def dotted(path) -> str:
+    out = ""
+    for step in path:
+        out += "[]" if step == "[]" else ("." if out else "") + step
+    return out
+
+
+def steps_of(text: str) -> list[str]:
+    return re.findall(r"[^.\[\]]+|\[\]", text)
+
+
+def observed_bounds():
+    """The bounds the schemas actually carry, grouped like BOUNDS, with a
+    kind that owns each one and any two kinds that disagree."""
+    rows, home, clashes = {}, {}, []
+    groups = [("artifact", S.ARTIFACT_KINDS)] + \
+             [(k, [k]) for k in RUNTIME_KINDS]
+    for group, kinds in groups:
+        for kind in kinds:
+            for path, c, v in walk(schema_for(kind)):
+                d = dotted(path)
+                key = ("*", d, c) if d == "v" else (group, d, c)
+                if key in rows and rows[key] != v:
+                    clashes.append((key, rows[key], v))
+                rows[key] = v
+                home.setdefault(key, kind)
+    return rows, home, clashes
+
+
+def minimal(node: dict) -> Any:
+    """The smallest value a schema accepts."""
+    if "enum" in node:
+        return node["enum"][0]
+    kind = node["type"]
+    if kind == "string":
+        if "pattern" in node:
+            return PATTERN_SAMPLES[node["pattern"]]
+        return "x" * node.get("minLength", 0)
+    if kind == "integer":
+        return node.get("minimum", 0)
+    if kind == "boolean":
+        return False
+    if kind == "array":
+        return [minimal(node["items"]) for _ in range(node.get("minItems", 0))]
+    return {k: minimal(node["properties"][k]) for k in node.get("required", [])}
+
+
+def inject(node: dict, steps: list[str], value: Any) -> Any:
+    """minimal(node) with `value` placed at `steps`, creating optional
+    properties and array items on the way down."""
+    if not steps:
+        return value
+    head, rest = steps[0], steps[1:]
+    if head == "[]":
+        return [inject(node["items"], rest, value)]
+    obj = minimal(node)
+    obj[head] = inject(node["properties"][head], rest, value)
+    return obj
+
+
+def node_at(schema: dict, steps: list[str]) -> dict:
+    for step in steps:
+        schema = schema["items"] if step == "[]" else \
+            schema["properties"][step]
+    return schema
+
+
+def boundary(constraint: str, value: int, node: dict) -> tuple[Any, Any]:
+    """(an accepted value, the nearest rejected one) at the literal bound."""
+    if constraint == "minLength":
+        return "x" * value, "x" * (value - 1)
+    if constraint == "maxLength":
+        return "x" * value, "x" * (value + 1)
+    if constraint == "minItems":
+        item = minimal(node["items"])
+        return [item] * value, [item] * (value - 1)
+    return value, value - 1                     # minimum
+
+
+class BoundsContractTests(SchemaCase):
+    def test_every_bound_in_every_schema_is_pinned_and_nothing_else_is(self):
+        rows, _home, clashes = observed_bounds()
+        self.assertEqual(clashes, [])               # kinds agree on a path
+        self.assertEqual(rows, BOUNDS)
+
+    def test_every_pattern_in_use_has_a_sample_value(self):
+        used: set[str] = set()
+
+        def collect(node):
+            if "pattern" in node:
+                used.add(node["pattern"])
+            for sub in node.get("properties", {}).values():
+                collect(sub)
+            if "items" in node:
+                collect(node["items"])
+
+        for kind in ALL_KINDS:
+            collect(schema_for(kind))
+        self.assertEqual(used - set(PATTERN_SAMPLES), set())
+        for pattern in used:
+            with self.subTest(pattern=pattern):
+                self.assertIsNotNone(
+                    re.fullmatch(pattern, PATTERN_SAMPLES[pattern]))
+
+    def test_the_minimal_instance_of_every_schema_is_valid(self):
+        for kind in ALL_KINDS:
+            with self.subTest(kind=kind):
+                validate(minimal(schema_for(kind)), schema_for(kind))
+
+    def test_each_pinned_bound_is_enforced_at_exactly_its_value(self):
+        _rows, home, _clashes = observed_bounds()
+        self.assertGreater(len(BOUNDS), 50)
+        for (group, path, constraint), value in BOUNDS.items():
+            schema = schema_for(home[(group, path, constraint)])
+            steps = steps_of(path)
+            ok, bad = boundary(constraint, value, node_at(schema, steps))
+            field = "$" + "".join("[0]" if s == "[]" else f".{s}"
+                                  for s in steps)
+            with self.subTest(group=group, path=path, bound=constraint):
+                validate(inject(schema, steps, ok), schema)
+                self.rejects(inject(schema, steps, bad), schema, constraint,
+                             field)
 
 
 # ----------------------------------------------------------------- fuzzing

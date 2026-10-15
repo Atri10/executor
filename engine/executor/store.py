@@ -187,32 +187,37 @@ def sha_line(line: bytes) -> str:
     return hashlib.sha256(line.rstrip(b"\n")).hexdigest()
 
 
-def scan_journal(idir: Path) -> tuple[list[dict], int]:
-    """Parse the journal line by line. Returns (events, torn): a non-empty
+def parse_journal(raw: bytes) -> tuple[list[dict], int]:
+    """Parse journal bytes line by line. Returns (events, torn): a non-empty
     line that is not a JSON event object is counted and skipped. It neither
     stops the scan nor is trusted, so a crash mid-append (even one that cut a
     multibyte character in half) can never hide the events written after it.
-    `verify_chain` is what notices a gap."""
-    path = journal_file(idir)
+    `verify_chain` is what notices a gap. Pure, so corruption can be tested
+    exhaustively without touching the filesystem."""
     events: list[dict] = []
     torn = 0
-    if not path.exists():
-        return events, torn
-    with open(path, "rb") as f:
-        for raw in f:
-            line = raw.rstrip(b"\r\n")
-            if not line.strip():
-                continue
-            try:
-                ev = json.loads(line)
-            except ValueError:  # JSONDecodeError and UnicodeDecodeError
-                torn += 1
-                continue
-            if isinstance(ev, dict) and isinstance(ev.get("seq"), int):
-                events.append(ev)
-            else:
-                torn += 1
+    for chunk in raw.split(b"\n"):
+        line = chunk.rstrip(b"\r")
+        if not line.strip():
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:  # JSONDecodeError and UnicodeDecodeError
+            torn += 1
+            continue
+        if isinstance(ev, dict) and isinstance(ev.get("seq"), int):
+            events.append(ev)
+        else:
+            torn += 1
     return events, torn
+
+
+def scan_journal(idir: Path) -> tuple[list[dict], int]:
+    """The journal file's (events, torn); a missing file is empty."""
+    path = journal_file(idir)
+    if not path.exists():
+        return [], 0
+    return parse_journal(path.read_bytes())
 
 
 def read_events(idir: Path) -> list[dict]:
@@ -411,8 +416,20 @@ class Initiative:
         return self
 
 
+def _finished(idir: Path) -> bool:
+    """A run is finished once its handoff gate was approved. The cached phase
+    alone does not say so: an initiative parked at handoff with the gate still
+    open is in flight. A missing or unreadable cache means not finished."""
+    state = read_json(state_file(idir))
+    phases = state.get("phase_state") if isinstance(state, dict) else None
+    return isinstance(phases, dict) and phases.get("handoff") == "passed"
+
+
 def find_initiative(root: Path, init_id: str | None = None) -> Initiative:
-    """Resolve an initiative dir by id, or the single active one."""
+    """Resolve an initiative by id, or the one in flight. Two in flight is an
+    error, never a silent pick: acting on the wrong initiative is worse than
+    asking. When every initiative is finished the newest is returned, so
+    status and check still work on a completed run."""
     store = run_root(root)
     if init_id:
         idir = init_dir(root, init_id)
@@ -421,13 +438,15 @@ def find_initiative(root: Path, init_id: str | None = None) -> Initiative:
                             "no_initiative")
         check_store_version(idir)
         return Initiative(init_id, root, idir).reload()
-    # otherwise: the single in-flight initiative (multiple → ambiguous)
     cands = [d for d in sorted(store.glob("INIT-*")) if d.is_dir()]
     if not cands:
         raise ExecError("no initiatives in .executor/ — run `executor new`",
                         "no_initiative")
-    actives = [d for d in cands
-               if (read_json(state_file(d)) or {}).get("phase") != "handoff"]
-    pick = actives[0] if len(actives) == 1 else cands[-1]
+    actives = [d for d in cands if not _finished(d)]
+    if len(actives) > 1:
+        names = ", ".join(d.name for d in actives)
+        raise ExecError(f"{len(actives)} active initiatives ({names}); "
+                        f"pass INIT-ID", "ambiguous")
+    pick = actives[0] if actives else cands[-1]
     check_store_version(pick)
     return Initiative(pick.name, root, pick).reload()

@@ -1,0 +1,32 @@
+[
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "elif isinstance(ap, dict):",
+    "mutation": "if-test -> True",
+    "why": "validate() returns at once for a non-dict schema, so for additionalProperties=True both paths accept every extra key; the isinstance check is redundant."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "continue",
+    "mutation": "continue -> pass",
+    "why": "continue is the last statement of the oneOf loop body, so falling through to the next iteration is exactly what it does."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "\"kind\": {\"type\": \"string\", \"minLength\": 1},",
+    "mutation": "1 -> 2",
+    "why": "BASE['kind'] is replaced by the pinned enum in _base() for every schema; the entry only documents the envelope and is never used to validate."
+  },
+  {
+    "file": "engine/executor/store.py",
+    "code": "return f.read(1) == b\"\\n\"",
+    "mutation": "1 -> 2",
+    "why": "after seek(-1, SEEK_END) exactly one byte remains, so read(1) and read(2) return the same byte."
+  },
+  {
+    "file": "engine/executor/store.py",
+    "code": "if not d.exists():",
+    "mutation": "if-test -> False",
+    "why": "Path.glob on a missing directory yields nothing, so the early return only skips a no-op."
+  }
+]

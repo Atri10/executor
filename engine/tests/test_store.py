@@ -14,6 +14,7 @@ import calendar
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,10 @@ class ErrorTests(unittest.TestCase):
             "got": "'MAYBE'", "hint": "pick one"})
         self.assertEqual(Rejection("a", "b", "c", "d").hint, "")
 
+    def test_exec_error_built_by_keyword_still_prints_its_message(self):
+        e = ExecError(msg="boom", code="c")
+        self.assertEqual((str(e), e.msg, e.code), ("boom", "boom", "c"))
+
 
 class AtomicIoTests(TmpCase):
     def names(self) -> list[str]:
@@ -160,6 +165,34 @@ class AtomicIoTests(TmpCase):
                 self.assertIsNone(store.read_json(path))
                 self.assertEqual(store.read_json(path, {"d": 1}), {"d": 1})
 
+    def test_data_is_flushed_then_fsynced_before_the_rename(self):
+        target = self.root / "f.json"
+        tmp = target.with_suffix(".json.tmp")
+        seen = []
+
+        def spy(_fd):
+            seen.append((tmp.read_bytes(), target.exists()))
+
+        with mock.patch.object(store.os, "fsync", side_effect=spy) as fsync:
+            store.atomic_write(target, b"payload")
+        # one fsync, and when it ran the whole payload was already in the
+        # temp file while the target had not been replaced yet
+        self.assertEqual(fsync.call_count, 1)
+        self.assertEqual(seen, [(b"payload", False)])
+        self.assertEqual(target.read_bytes(), b"payload")
+
+    def test_a_failure_before_the_temp_file_exists_is_not_masked(self):
+        with mock.patch.object(store, "open", create=True,
+                               side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                store.atomic_write(self.root / "f.json", b"x")
+
+    def test_write_json_is_two_space_indented_and_newline_terminated(self):
+        target = self.root / "x.json"
+        store.write_json(target, {"a": 1, "b": [2]})
+        self.assertEqual(target.read_text(encoding="utf-8"),
+                         '{\n  "a": 1,\n  "b": [\n    2\n  ]\n}\n')
+
 
 CHILD = """
 import sys, time
@@ -172,6 +205,22 @@ for _ in range(int(sys.argv[4])):
         n = int(counter.read_text())
         time.sleep(0.002)
         counter.write_text(str(n + 1))
+"""
+
+
+FD0_CHILD = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from executor.store import StoreLock
+os.close(0)                       # free descriptor 0 so the lock lands on it
+with StoreLock(Path(sys.argv[2])) as lock:
+    assert lock.fd == 0, lock.fd
+try:
+    os.fstat(0)
+except OSError:
+    sys.exit(0)                   # released and closed, as it must be
+sys.exit("descriptor 0 leaked past the lock")
 """
 
 
@@ -236,8 +285,7 @@ class StoreLockTests(TmpCase):
         with self.assertRaises(RuntimeError):
             with store.StoreLock(self.idir):
                 raise RuntimeError("boom")
-        with store.StoreLock(self.idir) as again:     # must not block
-            self.assertGreaterEqual(again.fd, 0)
+        self.assertTrue(self.free_within())
 
     def test_the_descriptor_is_closed_on_exit(self):
         lock = store.StoreLock(self.idir)
@@ -305,6 +353,56 @@ class StoreLockTests(TmpCase):
         self.assertEqual(err.exception.code, "store_locked")
         self.assertEqual(lock.fd, -1)
 
+    def free_within(self, seconds: float = 10.0) -> bool:
+        """Whether another acquirer gets the lock promptly. It runs in a daemon
+        thread so a lock that was never released fails the test instead of
+        hanging the whole suite."""
+        got = threading.Event()
+
+        def grab():
+            try:
+                with store.StoreLock(self.idir):
+                    got.set()
+            except ExecError:
+                pass
+
+        threading.Thread(target=grab, daemon=True).start()
+        return got.wait(seconds)
+
+    def test_the_lock_is_held_while_inside_and_free_after(self):
+        with store.StoreLock(self.idir):
+            self.assertFalse(self.free_within(0.3))
+        self.assertTrue(self.free_within())
+
+    def test_a_fresh_lock_holds_no_descriptor(self):
+        self.assertEqual(store.StoreLock(self.idir).fd, -1)
+
+    def test_a_failed_lock_closes_the_descriptor_it_opened(self):
+        opened: list[int] = []
+        real_open = os.open
+
+        def spy(*args, **kwargs):
+            fd = real_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        with mock.patch.object(store, "_WINDOWS", False), \
+                mock.patch.dict(sys.modules,
+                                {"fcntl": fake_fcntl([], fail="busy")}), \
+                mock.patch.object(store.os, "open", side_effect=spy):
+            with self.assertRaises(ExecError):
+                store.StoreLock(self.idir).__enter__()
+        (fd,) = opened
+        with self.assertRaises(OSError):
+            os.fstat(fd)
+
+    def test_the_lock_works_when_it_lands_on_descriptor_zero(self):
+        r = subprocess.run(
+            [sys.executable, "-c", FD0_CHILD, str(ENGINE), str(self.idir)],
+            capture_output=True, text=True, timeout=60,
+            stdin=subprocess.DEVNULL)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+
 
 class JournalTests(TmpCase):
     def chain(self, n: int = 3) -> list[dict]:
@@ -366,8 +464,37 @@ class JournalTests(TmpCase):
         self.append()
         self.assertTrue(P.journal_file(self.idir).is_file())
 
+    def test_append_returns_the_event_it_wrote(self):
+        ev = store.make_event(self.idir, "engine", "emit", "INIT-0001", {})
+        self.assertIs(store.append_event(self.idir, ev), ev)
+
+    def test_events_are_written_in_reading_order_not_sorted(self):
+        self.append()
+        line = P.journal_file(self.idir).read_text(encoding="utf-8")
+        keys = list(json.loads(line))
+        self.assertTrue(line.startswith('{"seq": 1, "ts": '))
+        self.assertEqual(keys[:3], ["seq", "ts", "v"])
+        self.assertEqual(keys[-1], "line_sha")
+
+    def test_an_append_is_flushed_then_fsynced_exactly_once(self):
+        ev = store.make_event(self.idir, "engine", "emit", "INIT-0001", {})
+        on_disk = []
+
+        def spy(_fd):
+            on_disk.append(P.journal_file(self.idir).read_bytes())
+
+        with mock.patch.object(store.os, "fsync", side_effect=spy) as fsync:
+            store.append_event(self.idir, ev)
+        self.assertEqual(fsync.call_count, 1)
+        self.assertEqual(len(on_disk), 1)
+        self.assertIn(b'"seq": 1', on_disk[0])      # flushed before the fsync
+
     def test_a_clean_chain_has_no_problems(self):
         self.assertEqual(store.verify_chain(self.chain(5)), [])
+
+    def test_genesis_is_a_zero_sha_as_long_as_a_real_one(self):
+        self.assertEqual(store.GENESIS_SHA, "0" * 64)
+        self.assertEqual(len(store.GENESIS_SHA), len(store.sha256({})))
 
     def test_an_edited_event_is_detected_even_when_it_is_the_last(self):
         events = self.chain()
@@ -387,7 +514,7 @@ class JournalTests(TmpCase):
         events = self.chain()
         del events[1]
         problems = store.verify_chain(events)
-        self.assertTrue(any("seq 3 != 2" in p for p in problems), problems)
+        self.assertIn("event 2: seq 3 != 2", problems)
         self.assertTrue(any("prev_sha mismatch" in p for p in problems))
 
     def test_reordered_events_are_detected(self):
@@ -409,6 +536,23 @@ class JournalTests(TmpCase):
 
     def test_a_missing_journal_reads_empty(self):
         self.assertEqual(store.scan_journal(self.idir), ([], 0))
+
+    def test_parsing_nothing_or_only_blanks_is_empty(self):
+        self.assertEqual(store.parse_journal(b""), ([], 0))
+        self.assertEqual(store.parse_journal(b"\n\r\n \n"), ([], 0))
+
+    def test_the_file_scan_is_the_pure_parser_over_the_file_bytes(self):
+        self.write_journal(self.event_line(note="a") + b'{"seq": 2, "kin')
+        raw = P.journal_file(self.idir).read_bytes()
+        self.assertEqual(store.scan_journal(self.idir),
+                         store.parse_journal(raw))
+        self.assertEqual(store.scan_journal(self.idir)[1], 1)
+
+    def test_a_carriage_return_inside_a_line_is_json_whitespace(self):
+        line = self.event_line(note="a").rstrip(b"\n")
+        joined = line.replace(b'{"seq": 1,', b'{"seq": 1,\r')
+        self.assertEqual(store.parse_journal(joined + b"\r\n")[1], 0)
+        self.assertEqual(len(store.parse_journal(joined + b"\r\n")[0]), 1)
 
     def test_blank_lines_and_crlf_endings_are_tolerated(self):
         first = self.event_line(note="a")
@@ -578,6 +722,14 @@ class InitStoreTests(TmpCase):
         self.assertEqual(
             must(store.read_json(P.meta_file(idir)))["title"], "t")
 
+    def test_an_existing_committed_docs_dir_is_kept_not_an_error(self):
+        docs = P.docs_init_dir(self.root, "INIT-0001")
+        docs.mkdir(parents=True)
+        (docs / "keep.md").write_text("tracked", encoding="utf-8")
+        store.init_store(self.root, "INIT-0001", "t")
+        self.assertEqual((docs / "keep.md").read_text(encoding="utf-8"),
+                         "tracked")
+
 
 class VersionTests(TmpCase):
     def put_meta(self, **meta) -> None:
@@ -662,6 +814,65 @@ class InitiativeTests(TmpCase):
     def test_a_single_initiative_is_found_without_an_id(self):
         store.init_store(self.root, "INIT-0001", "t")
         self.assertEqual(store.find_initiative(self.root).id, "INIT-0001")
+
+    FINISHED = {"phase": "handoff", "phase_state": {"handoff": "passed"}}
+    HANDOFF_IN_PROGRESS = {"phase": "handoff",
+                           "phase_state": {"handoff": "in_progress"}}
+
+    def make(self, init_id: str, state=None) -> Path:
+        idir = store.init_store(self.root, init_id, init_id)
+        if state is not None:
+            store.write_json(P.state_file(idir), state)
+        return idir
+
+    def test_the_active_initiative_is_chosen_over_a_newer_finished_one(self):
+        self.make("INIT-0001")
+        self.make("INIT-0002", self.FINISHED)
+        self.assertEqual(store.find_initiative(self.root).id, "INIT-0001")
+
+    def test_a_handoff_still_in_progress_is_not_finished(self):
+        self.make("INIT-0001", self.HANDOFF_IN_PROGRESS)
+        self.make("INIT-0002", self.FINISHED)
+        self.assertEqual(store.find_initiative(self.root).id, "INIT-0001")
+
+    def test_an_unreadable_state_cache_counts_as_active(self):
+        for junk in ("{broken", "[]", '{"phase_state": 5}', "null"):
+            with self.subTest(junk=junk):
+                idir = self.make("INIT-0001")
+                P.state_file(idir).write_text(junk, encoding="utf-8")
+                self.make("INIT-0002", self.FINISHED)
+                self.assertEqual(store.find_initiative(self.root).id,
+                                 "INIT-0001")
+                shutil.rmtree(P.run_root(self.root))
+
+    def test_two_active_initiatives_are_ambiguous_and_both_are_named(self):
+        self.make("INIT-0001")
+        self.make("INIT-0002")
+        with self.assertRaises(ExecError) as err:
+            store.find_initiative(self.root)
+        self.assertEqual(err.exception.code, "ambiguous")
+        self.assertIn("INIT-0001", err.exception.msg)
+        self.assertIn("INIT-0002", err.exception.msg)
+
+    def test_when_every_initiative_is_finished_the_newest_is_returned(self):
+        self.make("INIT-0001", self.FINISHED)
+        self.make("INIT-0002", self.FINISHED)
+        self.assertEqual(store.find_initiative(self.root).id, "INIT-0002")
+
+    def test_an_explicit_id_wins_over_the_active_initiative(self):
+        self.make("INIT-0001", self.FINISHED)
+        self.make("INIT-0002")
+        self.assertEqual(store.find_initiative(self.root, "INIT-0001").id,
+                         "INIT-0001")
+
+    def test_the_auto_selected_initiative_is_version_checked(self):
+        idir = self.make("INIT-0001")
+        meta = must(store.read_json(P.meta_file(idir)))
+        meta["engine_version"] = "99.0.0"
+        store.write_json(P.meta_file(idir), meta)
+        with self.assertRaises(ExecError) as err:
+            store.find_initiative(self.root)
+        self.assertEqual(err.exception.code, "engine_too_old")
 
     def test_a_version_skew_is_refused_when_finding_by_id(self):
         store.init_store(self.root, "INIT-0001", "t")

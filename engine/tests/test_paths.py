@@ -9,6 +9,7 @@ verbose dispatch ids, atomic-write residue.
 """
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import re
 import sys
@@ -301,6 +302,12 @@ class GrammarRoundTrip(unittest.TestCase):
         win = PureWindowsPath(f"{INIT}\\journal\\state.json")
         self.assertEqual(P.classify(win, "run"),
                          P.Entry("run", "state", {"init": INIT}))
+
+    def test_entries_are_immutable(self):
+        entry = P.classify(f"{INIT}/meta/meta.json", "run")
+        assert entry is not None
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            entry.kind = "other"  # type: ignore[misc]
 
     def test_a_string_path_is_read_as_posix(self):
         self.assertEqual(P.classify(f"{INIT}/meta/autonomy.json", "run"),
