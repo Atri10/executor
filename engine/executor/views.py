@@ -43,15 +43,17 @@ def _progress(init, s, vdir) -> None:
 
 def _dispatches(init, s, vdir) -> None:
     lines = [f"# {init.id} — dispatches", "",
-             "| Dispatch | Task | Role | Model | At | Outcome |",
+             "| Dispatch | Entity | Role | Schema | At | Outcome |",
              "|---|---|---|---|---|---|"]
     for did, d in sorted(s["dispatches"].items()):
-        out = d.get("spawn_error") or (
-            "complete" if s["tasks"].get(d["task"], {})
-                         .get("state") in ("complete", "reported")
-            else "in-flight")
-        lines.append(f"| {did} | {d['task']} | {d['role']} | "
-                     f"{d.get('model') or '—'} | {d['at']} | {out} |")
+        if d.get("spawn_error"):
+            out = f"spawn_error: {d['spawn_error']}"
+        elif did in s["answered"]:
+            out = "answered"
+        else:
+            out = "open"
+        lines.append(f"| {did} | {d['entity']} | {d['role']} | {d['schema']} | "
+                     f"{d['at']} | {out} |")
     (vdir / "dispatches.md").write_text("\n".join(lines) + "\n",
                                        encoding="utf-8")
 
@@ -92,21 +94,22 @@ def _graph_json(init, s, vdir) -> None:
 
 
 def status_card(init: Initiative, s: dict) -> str:
-    """The gate card `executor status` prints — never artifact bytes."""
-    lines = [f"INITIATIVE {init.id} — {init.meta.get('title','')}",
-             f"phase: {s['phase']} ({s['phase_state'].get(s['phase'],'—')})",
-             f"events: {s['seq']} · artifacts: {len(s['artifacts'])} · "
+    """The gate card `executor status` prints. Never artifact bytes, and plain
+    ASCII: Windows consoles on legacy code pages cannot draw the glyphs that
+    make a card pretty, and a crash on the status command is worse."""
+    lines = [f"INITIATIVE {init.id} - {init.meta.get('title', '')}",
+             f"phase: {s['phase']} ({s['phase_state'].get(s['phase'], '-')})",
+             f"events: {s['seq']} | artifacts: {len(s['artifacts'])} | "
              f"tasks: {len(s['tasks'])}"]
-    open_c = sum(len(c.get("open", [])) for c in s["critiques"].values())
+    open_c = sum(len(c["open"]) for c in s["critiques"].values())
     if open_c:
         lines.append(f"open critique findings: {open_c}")
-    if s.get("needs_ruling"):
-        unruled = [n for n in s["needs_ruling"] if not n.get("ruled")]
-        if unruled:
-            lines.append(f"⚠ {len(unruled)} concern(s) awaiting rulings")
+    unruled = [n for n in s["needs_ruling"] if not n["ruled"]]
+    if unruled:
+        lines.append(f"! {len(unruled)} concern(s) awaiting rulings")
     if s["halt"]:
-        lines.append(f"⛔ HALTED: {s['halt']}")
+        lines.append(f"HALTED: {s['halt']}")
     if s["phase_state"].get(s["phase"]) == "gate_pending":
-        lines.append(f"→ GATE {s['phase']} — awaiting human decision "
+        lines.append(f"-> GATE {s['phase']}: awaiting a human decision "
                      f"(ingest a gate_decision payload)")
     return "\n".join(lines)

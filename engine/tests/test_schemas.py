@@ -30,55 +30,11 @@ from executor.store import PHASES, Rejection  # noqa: E402
 
 validate, schema_for = S.validate, S.schema_for
 
-INIT = "INIT-0001"
-PLAN = f"{INIT}-P01"
-TASK = f"{PLAN}-T01"
-SEC = [{"id": "s1", "title": "Why", "body": "Because."}]
+from _payloads import GOOD, INIT, PLAN, TASK
+
 BASE_KEYS = {"kind", "v", "engine_version", "dispatch_id"}
 ART_KEYS = BASE_KEYS | {"id", "title", "summary", "sections", "cites"}
 
-
-def art(kind: str, **extra) -> dict:
-    seg = P.ARTIFACT_SEGMENTS[kind]
-    return {"kind": kind, "v": "v1", "id": f"{INIT}-{seg}-01", "title": "t",
-            "summary": "s", "sections": SEC, **extra}
-
-
-GOOD: dict[str, dict] = {
-    **{k: art(k) for k in ("charter", "options", "brainstorm", "arch", "adr",
-                           "ifce", "design", "spec", "risk")},
-    "vrfy": art("vrfy", criteria=[
-        {"id": "V1", "criterion": "works", "procedure": "run it"}]),
-    "plan": {"kind": "plan", "v": "v1", "id": PLAN, "plan_id": PLAN,
-             "title": "t", "summary": "s", "sections": SEC, "objective": "o",
-             "tasks": [{"id": "T01", "title": "t", "goal": "g",
-                        "files": ["a.py"], "accepts": ["x"]}]},
-    "report": {"kind": "report", "v": "v1", "task": TASK, "result": "DONE",
-               "summary": "done", "commits": ["abc1234"]},
-    "verdict": {"kind": "verdict", "v": "v1", "task": TASK, "round": 1,
-                "spec_verdict": "PASS", "quality_verdict": "APPROVED",
-                "commit_base": "abc1234", "commit_head": "def5678",
-                "reviewed_package_sha": "0123456789"},
-    "heartbeat": {"kind": "heartbeat", "v": "v1", "task": TASK},
-    "evidence": {"kind": "evidence", "v": "v1", "criterion": "V1",
-                 "command": "make test", "observed": "ok",
-                 "verdict": "proven", "state_commit": "abc1234"},
-    "gate_decision": {"kind": "gate_decision", "v": "v1", "phase": "intake",
-                      "decision": "approved", "by": "human"},
-    "ruling": {"kind": "ruling", "v": "v1", "decision": "use X",
-               "why": "cheaper"},
-    "audit": {"kind": "audit", "v": "v1", "target": f"{INIT}-CHTR-01",
-              "round": 1, "verdict": "PASS", "findings": []},
-    "repair": {"kind": "repair", "v": "v1", "target": f"{INIT}-CHTR-01",
-               "round": 1},
-    "halt": {"kind": "halt", "v": "v1", "reason": "stop"},
-    "spawn_error": {"kind": "spawn_error", "v": "v1",
-                    "dispatch_id": "D00001", "error_class": "network"},
-    "needs_context": {"kind": "needs_context", "v": "v1", "task": TASK,
-                      "question": "which db?"},
-    "merge": {"kind": "merge", "v": "v1", "plan": PLAN,
-              "merge_sha": "abc1234"},
-}
 
 # The contract: what each kind must carry, and everything it may carry.
 REQUIRED = {

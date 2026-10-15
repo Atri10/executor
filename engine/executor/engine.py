@@ -80,157 +80,97 @@ def branch_head(root: Path, branch: str) -> str:
 
 # ------------------------------------------------------------ fold
 
+# A heartbeat only proves liveness and a dispatch event is the question, not
+# the answer: neither closes the dispatch it carries.
+NON_ANSWERING = frozenset({"heartbeat", "task_dispatched"})
+CLEAN_QUALITY = ("APPROVED", "APPROVED_WITH_ROUTED_RESIDUALS")
+
+
 def fold(events: list[dict]) -> dict:
-    """Pure: journal → folded state. The single source of truth."""
+    """Pure: journal → folded state. The single source of truth.
+
+    `answered` maps each dispatch id to the digest of the payload that
+    answered it, so whether a dispatch is still open is a fact of the journal,
+    not of a mutable file that a crash can leave behind."""
     s: dict = {
         "phase": "intake", "phase_state": {},
         "artifacts": {}, "critiques": {},
         "plans": {}, "plan_order": [],
         "tasks": {}, "verdicts": {}, "reports": {},
-        "rulings": [], "evidence": {}, "dispatches": {},
+        "rulings": [], "evidence": {}, "dispatches": {}, "answered": {},
+        "needs_ruling": [], "questions": [], "model_deviations": [],
         "halt": None, "done": False, "entities": {}, "edges": [],
-        "pending": {}, "seq": len(events), "last_emit": None,
-        "emit_streak": 0, "reject_streak": {},
+        "seq": len(events), "last_emit": None, "emit_streak": 0,
     }
     for ev in events:
         _apply(s, ev)
     return s
 
 
+def _crit_key(s: dict, target: str) -> str:
+    """Critiques are per phase: plan_regression re-audits what planning
+    already cleared, and must not find that old verdict standing in its way."""
+    return f"{s['phase']}:{target}"
+
+
 def _apply(s: dict, ev: dict) -> None:
-    k, d, e = ev["kind"], ev.get("data", {}), ev["entity"]
-    seq = ev["seq"]
+    k, d, e = ev["kind"], ev.get("data") or {}, ev["entity"]
+    did = ev.get("dispatch_id")
+    if did and k not in NON_ANSWERING:
+        s["answered"][did] = ev.get("payload_sha")
     if k == "created":
-        s["phase"] = "intake"
         _node(s, e, "initiative")
     elif k == "phase_entered":
-        s["phase"] = d["phase"]; s["phase_state"][d["phase"]] = "in_progress"
+        s["phase"] = d["phase"]
+        s["phase_state"][d["phase"]] = "in_progress"
+    elif k == "gate_opened":
+        s["phase_state"][d["phase"]] = "gate_pending"
+    elif k == "gate_decision":
+        _apply_gate(s, d)
     elif k == "phase_passed":
         s["phase_state"][d["phase"]] = "passed"
     elif k == "phase_skipped":
         s["phase_state"][d["phase"]] = "skipped"
     elif k == "halt":
         s["halt"] = d.get("reason", "halted")
-    elif k == "resumed":
+    elif k == "resume":
         s["halt"] = None
     elif k in ARTIFACT_KINDS:
-        a = s["artifacts"].setdefault(e, {"kind": k, "status": "drafted",
-                                        "round": 0, "data": d})
-        a.update(status="drafted", round=a["round"] + 1, data=d)
-        _node(s, e, "artifact")
-        for c in d.get("cites", []):
-            _edge(s, e, c, "cites")
-        if k == "plan":
-            pid = e
-            s["plans"].setdefault(pid, {"status": "draft", "round": 0})
-            if pid not in s["plan_order"]:
-                s["plan_order"].append(pid)
-            for t in d.get("tasks", []):
-                tid = f"{pid}-{t['id']}"
-                s["tasks"].setdefault(tid, {
-                    "state": "pending", "round": 0, "fix_rounds": 0,
-                    "files": t["files"], "depends_on": t.get("depends_on", []),
-                    "plan": pid, "title": t["title"], "goal": t["goal"],
-                    "accepts": t["accepts"], "retries": 0})
-                _node(s, tid, "task"); _edge(s, pid, tid, "contains")
+        _apply_artifact(s, k, e, d)
     elif k == "audit":
-        tgt = d["target"]
-        c = s["critiques"].setdefault(tgt, {"round": 0, "open": []})
-        if d["verdict"] == "PASS":
-            c["status"] = "clean"; c["open"] = []
-            if tgt in s["artifacts"]:
-                s["artifacts"][tgt]["status"] = "cleared"
-        else:
-            c["status"] = "fail"; c["round"] = d["round"]
-            c["open"] = [f for f in d.get("findings", [])
-                         if f.get("status", "open") == "open"]
-            if tgt in s["artifacts"]:
-                s["artifacts"][tgt]["status"] = "under_audit"
-        _edge(s, e, tgt, "reviews")
+        _apply_audit(s, d)
     elif k == "repair":
-        tgt = d.get("target")
-        if tgt in s["critiques"]:
-            s["critiques"][tgt]["status"] = "repaired"
+        c = s["critiques"].get(_crit_key(s, d["target"]))
+        if c is not None:
+            c["status"] = "repaired"
     elif k == "task_dispatched":
-        t = s["tasks"].get(d["task"])
-        if t:
-            t.update(state="dispatched", role=d["role"],
-                     dispatch_id=ev["dispatch_id"], model=d.get("model"),
-                     dispatched_at=ev["ts"], deadline=ev["ts"],
-                     base=d.get("base"), slot=d.get("respond_to"))
-        s["dispatches"][ev["dispatch_id"]] = {
-            "task": d["task"], "role": d["role"], "model": d.get("model"),
-            "at": ev["ts"], "respond_to": d.get("respond_to")}
-        _edge(s, ev["dispatch_id"], d["task"], "dispatched")
+        _apply_dispatch(s, ev, d)
     elif k == "report":
-        t = s["tasks"].get(d["task"])
-        if t:
-            t["state"] = "reported"
-        s["reports"][d["task"]] = d
-        if d.get("concerns"):
-            s.setdefault("needs_ruling", []).extend(
-                {"task": d["task"], "concern": c} for c in d["concerns"])
-        if d.get("model_actual") and t and t.get("model") \
-                and d["model_actual"] != t["model"]:
-            s.setdefault("model_deviations", []).append(
-                {"task": d["task"], "expected": t["model"],
-                 "got": d["model_actual"]})
+        _apply_report(s, e, d)
     elif k == "heartbeat":
-        t = s["tasks"].get(d["task"])
-        if t:
+        t = s["tasks"].get(e)
+        if t is not None:
             t["last_beat"] = ev["ts"]
     elif k == "verdict":
-        t = s["tasks"].get(d["task"])
-        if t:
-            t["round"] = d["round"]
-            clean = (d["spec_verdict"] == "PASS" and
-                     d["quality_verdict"] in ("APPROVED",
-                                              "APPROVED_WITH_ROUTED_RESIDUALS"))
-            t["state"] = "complete" if clean else "fix_needed"
-            if not clean:
-                t["fix_rounds"] = t.get("fix_rounds", 0) + 1
-        s["verdicts"][f"{d['task']}-R{d['round']:02d}"] = d
-        _edge(s, e, d["task"], "reviews")
+        _apply_verdict(s, e, d)
     elif k == "spawn_error":
-        s["dispatches"].get(d["dispatch_id"], {}).update(
-            spawn_error=d["error_class"])
-        t = s["tasks"].get(s["dispatches"].get(d["dispatch_id"], {})
-                           .get("task"))
-        if t:
-            t["state"] = "spawn_error"
+        _apply_spawn_error(s, did, d)
     elif k == "needs_context":
-        t = s["tasks"].get(d["task"])
-        if t:
-            t["state"] = "needs_context"; t["question"] = d["question"]
-        s.setdefault("questions", []).append(d)
+        t = s["tasks"].get(e)
+        if t is not None:
+            t.update(state="needs_context", question=d["question"])
+        s["questions"].append({"task": e, "question": d["question"],
+                               "ruled": False})
     elif k == "ruling":
-        s["rulings"].append(d)
-        if d.get("stop"):
-            s["halt"] = d.get("decision", "halted")
-        for nr in s.get("needs_ruling", []):
-            if d.get("for_task") == nr.get("task"):
-                nr["ruled"] = True
-        for nr in s.get("questions", []):
-            if d.get("answered") and d["answered"] in nr.get("question", ""):
-                nr["ruled"] = True
-        t = s["tasks"].get(d.get("for_task", ""))
-        if t and t["state"] in ("blocked", "needs_context", "escalated"):
-            t["state"] = "pending"
+        _apply_ruling(s, d)
     elif k == "evidence":
         s["evidence"].setdefault(d["criterion"], []).append(d)
-        _edge(s, e, d["criterion"], "proves")
-    elif k == "gate_decision":
-        ph = d["phase"]
-        if d["decision"] == "approved":
-            s["phase_state"][ph] = "passed"
-        elif d["decision"] == "rejected":
-            s["phase_state"][ph] = "in_progress"
     elif k == "plan_started":
         s["plans"].setdefault(d["plan"], {"status": "running"})\
             .update(status="running")
     elif k in ("plan_merged", "merge"):
-        s["plans"].setdefault(d["plan"], {"status": "merged"})\
-            .update(status="merged", merge=d.get("merge_sha") or d.get("merge"))
+        p = s["plans"].setdefault(d["plan"], {"status": "draft", "round": 0})
+        p.update(status="merged", merge=d.get("merge_sha") or d.get("merge"))
     elif k == "emit":
         # streak on identical action over unchanged state (v1 exec-step)
         key = f"{d.get('action')}:{d.get('key', '')}"
@@ -238,11 +178,144 @@ def _apply(s: dict, ev: dict) -> None:
             s["emit_streak"] = s.get("emit_streak", 0) + 1
         else:
             s["last_emit"], s["emit_streak"] = key, 0
-    elif k == "reject":
-        dk = d.get("dispatch_id")
-        s["reject_streak"][dk] = s["reject_streak"].get(dk, 0) + 1
-    elif k == "done":
+
+
+def _apply_gate(s: dict, d: dict) -> None:
+    ph = d["phase"]
+    if d["decision"] == "rejected":
+        s["halt"] = f"gate {ph} rejected: {d.get('note') or 'no note'}"
+        return
+    s["phase_state"][ph] = "passed"          # approved or waived
+    if ph == "handoff":
         s["done"] = True
+
+
+def _apply_artifact(s: dict, kind: str, aid: str, d: dict) -> None:
+    a = s["artifacts"].setdefault(aid, {"kind": kind, "status": "drafted",
+                                        "round": 0, "data": d})
+    a.update(status="drafted", round=a["round"] + 1, data=d)
+    _node(s, aid, "artifact")
+    for c in d.get("cites", []):
+        _edge(s, aid, c, "cites")
+    if kind == "plan":
+        s["plans"].setdefault(aid, {"status": "draft", "round": 0})
+        if aid not in s["plan_order"]:
+            s["plan_order"].append(aid)
+        _apply_plan_tasks(s, aid, d.get("tasks", []))
+
+
+def _apply_plan_tasks(s: dict, pid: str, rows: list[dict]) -> None:
+    """A redrafted plan updates the tasks that have not started and drops the
+    ones it no longer lists; a task already under way keeps its contract and
+    its state."""
+    wanted = {f"{pid}-{t['id']}": t for t in rows}
+    for tid, t in list(s["tasks"].items()):
+        if t["plan"] == pid and tid not in wanted and t["state"] == "pending":
+            del s["tasks"][tid]
+    for tid, row in wanted.items():
+        fields = {"title": row["title"], "goal": row["goal"],
+                  "files": row["files"], "accepts": row["accepts"],
+                  "depends_on": row.get("depends_on", [])}
+        cur = s["tasks"].get(tid)
+        if cur is None:
+            s["tasks"][tid] = {"state": "pending", "round": 0,
+                               "fix_rounds": 0, "plan": pid, **fields}
+            _node(s, tid, "task")
+            _edge(s, pid, tid, "contains")
+        elif cur["state"] == "pending":
+            cur.update(fields)
+
+
+def _apply_audit(s: dict, d: dict) -> None:
+    tgt = d["target"]
+    c = s["critiques"].setdefault(_crit_key(s, tgt),
+                                  {"round": 0, "status": None, "open": []})
+    c["round"] = d["round"]
+    art = s["artifacts"].get(tgt)
+    if d["verdict"] == "PASS":
+        c.update(status="clean", open=[])
+        if art is not None:
+            art["status"] = "cleared"
+    else:
+        c.update(status="fail",
+                 open=[f for f in d.get("findings", [])
+                       if f.get("status", "open") == "open"])
+        if art is not None:
+            art["status"] = "under_audit"
+
+
+def _apply_dispatch(s: dict, ev: dict, d: dict) -> None:
+    did, e = ev["dispatch_id"], ev["entity"]
+    s["dispatches"][did] = {"entity": e, "role": d["role"],
+                            "schema": d["schema"], "at": ev["ts"],
+                            "respond_to": d["respond_to"]}
+    if d["schema"] in ARTIFACT_KINDS:
+        _node(s, e, "artifact")         # the artifact this dispatch will author
+    t = s["tasks"].get(e)
+    if t is not None:
+        t.update(state="dispatched", role=d["role"], dispatch_id=did,
+                 model=d.get("model"), dispatched_at=ev["ts"],
+                 last_beat=ev["ts"], base=d.get("base"))
+    _edge(s, did, e, "dispatched")
+
+
+def _apply_report(s: dict, tid: str, d: dict) -> None:
+    t = s["tasks"].get(tid)
+    s["reports"][tid] = d
+    if t is not None:
+        t["state"] = "blocked" if d["result"] == "BLOCKED" else "reported"
+    for concern in d.get("concerns", []):
+        s["needs_ruling"].append({"task": tid, "concern": concern,
+                                  "ruled": False})
+    if d["result"] == "BLOCKED":
+        s["needs_ruling"].append({"task": tid, "ruled": False,
+                                  "concern": f"BLOCKED: {d['summary']}"})
+    if d.get("model_actual") and t and t.get("model") \
+            and d["model_actual"] != t["model"]:
+        s["model_deviations"].append({"task": tid, "expected": t["model"],
+                                      "got": d["model_actual"]})
+
+
+def _apply_verdict(s: dict, tid: str, d: dict) -> None:
+    s["verdicts"][f"{tid}-R{d['round']:02d}"] = d
+    t = s["tasks"].get(tid)
+    if t is None:
+        return
+    t["round"] = d["round"]
+    clean = (d["spec_verdict"] == "PASS"
+             and d["quality_verdict"] in CLEAN_QUALITY)
+    t["state"] = "complete" if clean else "fix_needed"
+    if not clean:
+        t["fix_rounds"] += 1
+
+
+def _apply_spawn_error(s: dict, did: str | None, d: dict) -> None:
+    dsp = s["dispatches"].get(did)
+    if dsp is None:
+        return
+    dsp["spawn_error"] = d["error_class"]
+    t = s["tasks"].get(dsp["entity"])
+    if t is not None:
+        t["state"] = "spawn_error"
+
+
+def _apply_ruling(s: dict, d: dict) -> None:
+    s["rulings"].append(d)
+    if d.get("stop"):
+        s["halt"] = d["decision"]
+    tgt, quoted = d.get("for_task"), d.get("answered")
+    for n in s["needs_ruling"]:
+        if tgt and n["task"] == tgt:
+            n["ruled"] = True
+    freed = {tgt} if tgt else set()
+    for q in s["questions"]:
+        if (tgt and q["task"] == tgt) or (quoted and quoted in q["question"]):
+            q["ruled"] = True
+            freed.add(q["task"])
+    for tid in freed:
+        t = s["tasks"].get(tid)
+        if t is not None and t["state"] in ("blocked", "needs_context"):
+            t["state"] = "pending"
 
 
 def _node(s: dict, nid: str, ntype: str) -> None:
@@ -250,7 +323,9 @@ def _node(s: dict, nid: str, ntype: str) -> None:
 
 
 def _edge(s: dict, a: str, b: str, kind: str) -> None:
-    s["edges"].append({"from": a, "to": b, "kind": kind})
+    edge = {"from": a, "to": b, "kind": kind}
+    if edge not in s["edges"]:
+        s["edges"].append(edge)
 
 
 # ------------------------------------------------------------ emit next
@@ -334,7 +409,7 @@ def _compute(init: Initiative, s: dict) -> dict:
                                  schema=kind, role_detail=kind)
         # critique stage — audit each drafted artifact until it clears
         for aid in _phase_artifacts(s, ph):
-            c = s["critiques"].get(aid, {})
+            c = s["critiques"].get(_crit_key(s, aid), {})
             if c.get("status") in (None, "repaired"):
                 rnd = c.get("round", 0) + 1
                 return _dispatch(init, s, "audit", aid,
@@ -348,7 +423,7 @@ def _compute(init: Initiative, s: dict) -> dict:
     # ----- plan_regression: audit every plan, loop
     if ph == "plan_regression":
         for pid in s["plan_order"]:
-            c = s["critiques"].get(pid, {})
+            c = s["critiques"].get(_crit_key(s, pid), {})
             if c.get("status") in (None, "repaired"):
                 return _dispatch(init, s, "audit", pid, schema="audit",
                                  role_detail=str(c.get("round", 0) + 1))
@@ -589,7 +664,7 @@ def _write_prompt(init: Initiative, slot: dict, s: dict) -> None:
         body += ["## Prior round findings — confirm or refute each",
                  *[f"- {f['id']} ({f['severity']}): {f['claim']}"
                    for f in last.get("findings", [])], ""]
-    crit = s["critiques"].get(slot["entity"])
+    crit = s["critiques"].get(_crit_key(s, slot["entity"]))
     if crit and crit.get("open") and slot["schema"] == "repair":
         body += ["## Open findings you must close",
                  *[f"- {f.get('id','?')} ({f.get('severity','?')}): "

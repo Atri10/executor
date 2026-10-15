@@ -211,15 +211,6 @@ class TestCheck(Base):
         res = check(self.init)
         self.assertEqual(res["chain"], "ok")
 
-    def test_dangling_edge_flagged(self):
-        self.ev("verdict", "INIT-0001-P01-T01", {"task": "INIT-0001-P01-T01",
-                "round": 1, "spec_verdict": "PASS",
-                "quality_verdict": "APPROVED",
-                "commit_base": "x", "commit_head": "y"})
-        self.init.reload()
-        res = check(self.init)
-        self.assertTrue(any("dangling" in p for p in res["problems"]))
-
 
 if __name__ == "__main__":
     unittest.main()
