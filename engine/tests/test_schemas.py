@@ -759,6 +759,21 @@ class StructuredSections(SchemaCase):
         self.kind_rejects(self.charter([{"id": "s", "title": "t"}]),
                           "empty_section", "$.sections[0]")
 
+    def test_a_nullable_field_accepts_none_and_nothing_else(self):
+        """`mitigation: null` is a real disposition — accepted without
+        mitigation — and the constraints that describe a string must be
+        skipped for it, not applied to None."""
+        row = {"id": "R1", "risk": "r", "likelihood": "high",
+               "impact": "high", "mitigation": None}
+        base = {"kind": "risk", "v": "v1", "id": "INIT-0001-RISK-01",
+                "title": "t", "summary": "s",
+                "sections": [{"id": "x", "title": "X", "prose": "p"}]}
+        validate({**base, "risks": [row]}, schema_for("risk"))
+        self.kind_rejects({**base, "risks": [{**row, "mitigation": ""}]},
+                          "nonBlank", "$.risks[0].mitigation")
+        self.kind_rejects({**base, "risks": [{**row, "mitigation": "  "}]},
+                          "nonBlank", "$.risks[0].mitigation")
+
     def test_prose_carries_no_markdown_syntax(self):
         for bad in ("| a | b |", "|--|", "```", "```ts", "## Heading",
                     "# H", "text\n| a | b |"):
@@ -1061,7 +1076,6 @@ BOUNDS = {
     ("artifact", "ifces[].title", "minLength"): 1,
     ("artifact", "risks[].id", "minLength"): 1,
     ("artifact", "risks[].risk", "minLength"): 1,
-    ("artifact", "risks[].mitigation", "minLength"): 1,
     ("report", "summary", "minLength"): 1,
     ("report", "commits[]", "minLength"): 1,
     ("report", "tests[].name", "minLength"): 1,

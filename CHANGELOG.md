@@ -7,7 +7,50 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
-### Changed — payloads carry data, the engine renders markdown
+### Changed — the skills tree can no longer teach what the engine rejects
+
+An audit pass over the structured-payload contract, enforced where a
+regression would otherwise need someone to remember.
+
+- **New `engine/tests/test_docs_agreement.py`** — three invariants that
+  walk the tree and the engine and fail on either direction of drift:
+  every rejection code the engine raises is documented in
+  `skills/executor/references/rejections.md` and every documented code is
+  actually raised (37 of them); every ID example uses a segment
+  `ARTIFACT_SEGMENTS` declares; and every JSON payload skeleton the skills
+  show validates against its schema, with placeholder tokens replaced by
+  the smallest accepted value.
+- **`spec/references/risk-template.md` and `verification-template.md`
+  converted to the payload contract.** Both still taught the v1
+  frontmatter protocol, a file path `paths.py` no longer defines, and
+  markdown tables a worker would paste into a payload. The `vrfy`
+  template's coverage and status guidance moved into typed sections.
+- **`arch`, `design`, and `ifce` templates fixed to their real schemas**:
+  `arch`/`design` carry `adrs[]` and `ifces[]` as objects (id, title,
+  decision, why, cost_if_wrong, alternatives), not ID strings, and neither
+  carries `components` or `component`; the interface's provides/consumes
+  and stability lifecycle moved into the scope section.
+- **The brainstorm lane wrapper is now `"kind": "brainstorm-lane"`** —
+  deliberately not an artifact kind, so a reader can never mistake it for
+  a payload the engine ingests. The skill states that only `sections[]` is
+  validated and merged.
+
+### Fixed
+
+- **`validate()` crashed on a nullable `None`**: the string constraints
+  after the type check called `len(None)`. A nullable field now skips
+  value constraints entirely.
+- **The risk register could not express "accepted without mitigation"** —
+  the schema required a non-empty string, so a payload had to write
+  "none". `mitigation` is nullable prose.
+- A pre-existing example in the verification skill used a criterion ID the
+  schema rejects (`INIT-0004-VRFY-01-#3` instead of `V03`); a worker
+  copying it would have been refused.
+- `executor status` printed no evidence counts although the verification
+  skill promised them, and the card now also omits quiet sections entirely
+  rather than printing zeros.
+
+### Changed — payloads carry data; the engine renders markdown
 
 A payload is machine-readable data and nothing else. Sections are four
 typed shapes — `prose`, `bullets`, `tables` (`columns` + `rows`), and

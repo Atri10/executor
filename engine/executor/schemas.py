@@ -51,7 +51,14 @@ def validate(obj, schema: dict, field: str = "$") -> None:
         if stype in ("integer", "number") and isinstance(obj, bool):
             raise Rejection("type", field, stype, json_type(obj))
         if not isinstance(obj, expected):
-            raise Rejection("type", field, stype, json_type(obj))
+            # A nullable field accepts None for a real absent state, so a
+            # document never has to write a string that means "no value".
+            if not (schema.get("nullable") and obj is None):
+                raise Rejection("type", field, stype, json_type(obj))
+        # The value constraints below (length, pattern) describe a string;
+        # on a nullable None there is nothing to measure.
+        if stype == "string" and obj is None:
+            return
     if "enum" in schema and obj not in schema["enum"]:
         raise Rejection("enum", field, "|".join(map(str, schema["enum"])),
                         repr(obj))
@@ -345,11 +352,14 @@ def artifact_schema(artifact_kind: str) -> dict:
             }, req=["id", "title"])),
         })
     if artifact_kind == "risk":
+        # `mitigation` is nullable because "accepted without mitigation"
+        # is a real disposition the human must be able to overrule; forcing
+        # the string "none" would hide it.
         props["risks"] = _arr(_obj({
             "id": _str(minLength=1), "risk": _str(minLength=1),
             "likelihood": _enum("high", "medium", "low"),
             "impact": _enum("high", "medium", "low"),
-            "mitigation": _str(minLength=1),
+            "mitigation": _prose(nullable=True),
         }, req=["id", "risk", "likelihood", "impact", "mitigation"]))
     return _obj({**_base(artifact_kind), **props}, req=["kind", "v", *req])
 

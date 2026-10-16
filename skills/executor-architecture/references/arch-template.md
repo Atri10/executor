@@ -18,9 +18,13 @@ describe") rather than being cut.
  "title": "System structure",
  "summary": "…",
  "cites": ["INIT-0004-CHTR-01", "INIT-0004-OPTS-01", "INIT-0004-SPEC-01"],
- "components": ["router", "placement-service", "admission-control", "cell-store"],
- "interfaces": ["INIT-0004-IFCE-01"],
- "decisions": ["INIT-0004-ADR-01", "INIT-0004-ADR-02"],
+ "adrs": [{"id": "INIT-0004-ADR-01", "title": "Storage engine for cell state",
+           "decision": "per-cell SQLite over a shared cluster",
+           "why": "no network on the placement path; isolation becomes physical",
+           "cost_if_wrong": "N files per node to back up; no cross-cell transaction",
+           "alternatives": ["shared Postgres cluster", "embedded key-value store"]}],
+ "ifces": [{"id": "INIT-0004-IFCE-01", "title": "Cell store and placement error contract",
+            "provides": ["CellStore.candidates", "CellStore.bind"], "consumes": []}],
  "sections": [
    {"id": "context", "title": "Context and forces",
     "prose": "…",
@@ -58,8 +62,8 @@ diagram is `code` with `lang: "mermaid"`, not a fence in a string: a pipe
 table, a fence, or a heading inside `prose` is a schema rejection,
 because the engine renders every `.md` from this data.
 
-`interfaces` and `decisions` are filled as those artifacts are written —
-every ID begins with this initiative's ID, no exceptions.
+`adrs` and `ifces` are filled as those artifacts are written — every ID
+begins with this initiative's ID, no exceptions.
 
 ## 1. Context and forces
 
