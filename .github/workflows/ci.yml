@@ -11,24 +11,49 @@ permissions:
   contents: read
 
 jobs:
-  prompt-injection:
-    name: Prompt-injection lint (skills are prompts)
+  tests:
+    name: Engine suite (${{ matrix.os }})
+    # Three OSes, always. The engine ships to users on macOS, Linux and
+    # Windows, and the platform differences that bite are the ones CI never
+    # ran: path separators, a filename that is legal on one and not the
+    # other, and UTF-8 output under a legacy console. A Linux-only gate
+    # catches none of them.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Entry point (python -m executor)
+        # Proves the package runs as a module on this platform, not just
+        # when its test runner imports it.
+        run: python -m executor --version
+      - name: Suite at 100% branch coverage
+        # run_tests.py is the only entry point: it runs the suite AND
+        # enforces the fail_under=100 branch floor from pyproject.toml. A
+        # green suite below 100% fails this step by design.
+        run: python scripts/run_tests.py
+
+  contract:
+    name: Skill contract and prompt lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint skill markdown for injection patterns
+      - name: Skill files, registry, payload shapes, refusals
+        # validate_skills.py checks frontmatter, the dispatch registry,
+        # that no prompt teaches a second markdown renderer, that every
+        # payload-writing prompt states the refusal contract, and that no
+        # ID example or JSON skeleton teaches something the engine rejects.
+        run: python scripts/validate_skills.py
+      - name: Prompt-injection lint
         # Every SKILL.md is executed as instruction by agents. This blocks
         # override directives, concealment, exfiltration endpoints,
         # fetch-and-execute, and credential literals from entering main.
-        run: python3 scripts/lint-prompt-injection.py skills/
-
-  skill-validation:
-    name: Skill contract (frontmatter, triggers, fences)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate skill files
-        run: bash scripts/validate-skills.sh skills
+        run: python scripts/lint-prompt-injection.py skills/
 
   secret-scan:
     name: Secret scan (both stores)
@@ -37,149 +62,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Executor secret scan on the repo itself
-        run: bash skills/executor/scripts/exec-scan-secrets .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: The engine's own scanner finds nothing in a store it just wrote
+        # Not a lint of this file: this runs the shipped `executor check
+        # --secrets` against a real initiative, so the scanner that users
+        # depend on is exercised here, and it must report no findings.
+        run: |
+          set -e
+          git config user.email ci@example.com
+          git config user.name ci
+          python -m executor new "ci secret-scan smoke"
+          python -m executor check --secrets
       - name: Gitleaks (defense in depth, full history)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  script-smoke:
-    name: Script smoke (${{ matrix.os }})
-    # Both platforms, always. The scripts ship to users on macOS and Linux,
-    # and the two awk implementations disagree: mawk (Debian/Ubuntu) is
-    # byte-oriented, BSD awk is character-oriented, and a multibyte bracket
-    # expression means two different things to them. The same class also
-    # bit `date`: BSD's `date -j -f` ignores the date it was handed, so a
-    # dispatch row read "alive" on macOS and "dead" on Linux. A Linux-only
-    # job catches that only if the author is on Linux; a macOS-only one
-    # never would have. Both is the only arrangement that cannot miss.
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Every script parses
-        run: |
-          set -e
-          while IFS= read -r -d '' f; do
-            bash -n "$f"
-          done < <(find skills/executor/scripts scripts -type f \
-                     \( -name 'exec-*' -o -name '*.sh' \) -print0)
-      - name: Plan lint accepts a conforming plan, and rejects a store path and only that
-        run: |
-          set -e
-          # The positive control is a plan that satisfies EVERY contract the
-          # linter enforces today. It used to be a six-line stub written when
-          # the linter only checked store paths; when the task-body contract
-          # landed, the stub silently stopped being valid and this step began
-          # failing on its own control.
-          #
-          # The negative case is DERIVED from the positive by one line, and
-          # asserted to produce exactly one violation. Written as two
-          # independent literals they drifted together, and the negative case
-          # then failed for seven unrelated reasons — so it would still have
-          # passed with the store-path contract deleted outright. A negative
-          # control that cannot fail for the right reason is worse than none.
-          mkdir -p /tmp/fx/plans
-          cat > /tmp/fx/plans/valid.md <<'PLAN'
-          ---
-          id: INIT-0001-P01
-          initiative: INIT-0001
-          kind: plan
-          title: Fixture plan
-          status: active
-          execution_mode: inline
-          spec: S
-          interfaces: []
-          tasks: 1
-          ---
-
-          **Goal:** exercise the plan linter's task-body contract, and nothing else.
-
-          **Branch:** `feat/INIT-0001-P01`
-
-          **Execution order:** none
-
-          ### Task 1: Write the file — `INIT-0001-P01-T01`
-
-          **Implements:** R01
-
-          **Depends on:** none
-
-          **Files:**
-          - Modify: `a.ts`
-          - Test: `a.test.ts`
-
-          **Interfaces:**
-          - consumes: none
-          - produces: none
-
-          **Requirements:** R01 — `a.ts` exports `a()` returning `1`.
-
-          - [ ] Add a failing test asserting `a()` returns 1.
-          - [ ] Implement `a()` in `a.ts`.
-          - [ ] Run the test; confirm it passes.
-
-          Run: `npm test -- a.test.ts`
-          Expected: 1 passing
-          PLAN
-          bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/valid.md
-
-          sed 's|^- Modify: `a.ts`$|- Create: docs/executor/x/y/|' \
-            /tmp/fx/plans/valid.md > /tmp/fx/plans/p.md
-          out=$(bash skills/executor/scripts/exec-plan-lint /tmp/fx/plans/p.md 2>&1) && {
-            echo "lint accepted a forbidden literal store path"; exit 1; }
-          echo "$out" | grep -q "literal docs/executor/ path" || {
-            echo "negative control failed for the wrong reason:"; echo "$out"; exit 1; }
-          echo "$out" | grep -q "1 violation(s)" || {
-            echo "negative control is vacuous — it must produce exactly 1 violation:"
-            echo "$out"; exit 1; }
-      - name: exec-run drift detection fires
-        run: |
-          set -e
-          cd "$(mktemp -d)"
-          git init -q -b main
-          git config user.email ci@example.com
-          git config user.name ci
-          mkdir -p docs/executor/INIT-0001-x/plans
-          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
-          printf '# X\n' > docs/executor/INIT-0001-x/INDEX.md
-          git add -A && git commit -qm init
-          bash "$OLDPWD/skills/executor/scripts/exec-workspace" docs/executor/INIT-0001-x/plans/INIT-0001-P01.md > /dev/null
-          S="$OLDPWD/skills/executor/scripts"
-          P=docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
-          bash "$S/exec-run" "$P" start > /dev/null
-          echo "INIT-0001-P01-T01: complete" >> .executor/INIT-0001/P01/progress.md
-          if bash "$S/exec-run" "$P" check; then
-            echo "check passed with an unjudged completed task"; exit 1
-          fi
-      - name: exec-run check accepts a clean inline run (empty dispatch table)
-        run: |
-          set -e
-          cd "$(mktemp -d)"
-          git init -q -b main
-          git config user.email ci@example.com
-          git config user.name ci
-          mkdir -p docs/executor/INIT-0001-x/plans
-          printf -- '---\nid: INIT-0001-P01\nspec: S\ninterfaces: []\ntasks: 1\nexecution_mode: inline\n---\n\n### Task 1: a — `INIT-0001-P01-T01`\n\n**Files:**\n- Modify: `a.ts`\n' > docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
-          printf '# X\n' > docs/executor/INIT-0001-x/INDEX.md
-          git add -A && git commit -qm init
-          bash "$OLDPWD/skills/executor/scripts/exec-workspace" docs/executor/INIT-0001-x/plans/INIT-0001-P01.md > /dev/null
-          S="$OLDPWD/skills/executor/scripts"
-          P=docs/executor/INIT-0001-x/plans/INIT-0001-P01.md
-          W=.executor/INIT-0001/P01
-          bash "$S/exec-run" "$P" start > /dev/null
-          printf 'INIT-0001-P01-T01: complete\n' >> "$W/progress.md"
-          printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-T01-R01-verdict.md"
-          printf -- '---\nkind: verdict\nspec_verdict: PASS\nquality: APPROVED\n---\nGATE: PASS\n' > "$W/reviews/verdicts/INIT-0001-P01-final-verdict.md"
-          # Empty dispatch table: valid for inline runs, must not fail check.
-          # Frontmatter is part of the seeded-file contract (kind: dispatches).
-          printf -- '---\nkind: dispatches\nplan: INIT-0001-P01\nplan_file: %s\ncreated_at: 2026-09-12T07:00:00Z\nupdated_at: 2026-09-12T07:00:00Z\n---\n\n| Task | Role | Mode | Agent | Status | Notes |\n|---|---|---|---|---|---|\n' "$P" > "$W/dispatches.md"
-          printf -- '| INIT-0001-P01-T01 | complete | — | IMPL-P01-T01 | — |\n' >> "$W/progress.md"
-          bash "$S/exec-run" "$P" complete > /dev/null
-          bash "$S/exec-run" "$P" check
-      - name: Regression suite (scripts/test-executor.sh)
-        run: bash scripts/test-executor.sh
