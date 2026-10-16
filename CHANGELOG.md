@@ -5,7 +5,47 @@ All notable changes to The Executor are documented here. The format follows
 project is tagged; between releases, entries are dated and `main` moves.
 
 
+## [2.0.0] — 2026-10-16 — "New Dawn"
+
+The executor v2 engine becomes the product. A payload is data and the
+engine renders every document; the shell scripts are gone; the skills
+speak the v2 protocol; a payload that means nonsense is refused before it
+lands.
+
+Highlights, newest first:
+
+- **Payloads are data.** Sections carry `prose`, `bullets`, `tables`, and
+  `code`; the engine renders every `.md`, so the store has exactly one
+  renderer and a document can never drift from what the engine would have
+  written. Markdown in a string is `notMatch`; a row wider than its
+  columns is `row_width`; a blank value is `nonBlank`; a section with no
+  shape is `empty_section`.
+- **The contracts are enforced, not hoped for.** `schemas.py` is a closed
+  mini-validator with anchored patterns, pinned numeric bounds, named
+  object invariants, and 37 documented refusal codes that
+  `test_docs_agreement.py` keeps in step with the code in both directions.
+- **The store has one writer.** The journal is the state, hash-chained
+  and recomputed by `check`; views are projections; a dispatch is
+  answered exactly once; a human-only kind cannot be claimed by a worker.
+- **The controller carries no weight.** It dispatches, it never authors,
+  judges, or passes a gate. `executor decide` exists so `gate_decision`,
+  `ruling`, and `resume` carry `actor: human`.
+- **Autonomy is fail-closed.** Every phase defaults to `deny`; the
+  pick-class phases and handoff never clear automatically; an auto-cleared
+  gate is journaled as `by: "auto"`.
+- **Plans are audited as a set** between planning and execution — coverage,
+  seams, ordering, constraint propagation, file ownership — and execution
+  cannot start until every plan is clean or a human waives by ruling.
+- **Tests are the contract.** 717 tests, 100% branch coverage, mutation
+  testing with an explained allow list, and a suite that walks the skills
+  tree so a document cannot teach something the engine rejects.
+
+Everything above is measured, not claimed: the numbers in each entry were
+produced by running the suite.
+
 ## [Unreleased]
+
+### Changed — the skills tree can no longer teach what the engine rejects
 
 ### Changed — the skills tree can no longer teach what the engine rejects
 
@@ -98,7 +138,8 @@ authoritative.
 A new Python engine under `engine/executor/` implements the executor
 protocol as an event-sourced, typed-payload state machine. The v1 shell
 skills remain the production path; v2 is the hardened controller being
-built out alongside them (`design/executor-v2.md`).
+built out alongside them (its design record has since been consolidated
+into the README, the project's single document).
 
 - **Canonical layout, single path authority.** `paths.py` holds ~40
   `*_file`/`*_dir` functions; nothing else builds a path. Runtime store:
