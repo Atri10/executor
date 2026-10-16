@@ -53,6 +53,14 @@ rejects pipe tables and fences in strings, and the engine renders the
 [design-critic](design-critic-prompt.md)); each names the sections its
 output joins.
 
+**Only `sections[]` is validated and merged.** A lane payload also
+carries wrapper keys — `lane`, `session`, `question`, `concepts`,
+`round`, `supersedes`, and a `return` block for its status line. Those
+are the controller's bookkeeping, not artifact fields: the engine would
+reject them as `additionalProperties` if they reached `ingest` as an
+artifact payload. The controller reads them, drops them, and merges only
+the sections.
+
 Outside an initiative there is no engine yet: run the session as a
 plain design document under `docs/executor/`, and when intake creates
 the initiative, re-author it as the `brainstorm` artifact — the charter
@@ -123,6 +131,27 @@ not beat the baseline on the weighted criteria is not worth building.
 
 Summarize each returned concept as a subsection under `Concepts`:
 shape, lens, and the one tradeoff that decides it.
+
+### When a lane comes back BLOCKED
+
+A lane returns `BLOCKED` with a `REASON:` naming the input it could not
+read. A blocked lane is a session defect, not a worker failure, and the
+controller resolves it — the lane cannot resolve it itself:
+
+1. **Fix the named input** (write the missing brief section, finish the
+   concept file, name the focus area that matched nothing) and
+   re-dispatch the same lane once.
+2. **If it blocks again, or the input cannot be fixed**, stop the session
+   and report the blocker. Continuing with a missing map or a missing
+   concept produces a session that looks complete and is grounded in
+   nothing — the artifact's `sections` would carry the gap silently.
+3. **Record either way**: the `Dispatch log` gains the re-dispatch, and
+   the artifact's `sections` gains an `open-questions` entry naming what
+   stayed blocked. An unrecorded blocked lane is indistinguishable later
+   from a lane that never ran.
+
+Never hand a partial lane output back as the section it was meant to
+produce.
 
 ### 4. Stress — the adversarial pass
 

@@ -93,6 +93,25 @@ def _graph_json(init, s, vdir) -> None:
                 "generated": now_iso(), "engine": __version__})
 
 
+def evidence_counts(s: dict) -> dict[str, int]:
+    """Verification counts, unanswered included. A criterion with no
+    evidence event is unproven however obviously it 'must' work, so it is
+    counted rather than absorbed into a sentence about the others."""
+    counts = {"proven": 0, "failed": 0, "unavailable": 0}
+    answered = set()
+    for cid, runs in s["evidence"].items():
+        verdict = runs[-1]["verdict"]
+        if verdict in counts:
+            counts[verdict] += 1
+            answered.add(cid)
+    from executor.engine import _criteria_defs
+    total = {c["id"] for c in _criteria_defs(s)}
+    # Computed, not seeded: a criterion with no evidence event is exactly
+    # the difference between the declared criteria and the answered ones.
+    counts["unanswered"] = len(total - answered)
+    return counts
+
+
 def status_card(init: Initiative, s: dict) -> str:
     """The gate card `executor status` prints. Never artifact bytes, and plain
     ASCII: Windows consoles on legacy code pages cannot draw the glyphs that
@@ -101,6 +120,11 @@ def status_card(init: Initiative, s: dict) -> str:
              f"phase: {s['phase']} ({s['phase_state'].get(s['phase'], '-')})",
              f"events: {s['seq']} | artifacts: {len(s['artifacts'])} | "
              f"tasks: {len(s['tasks'])}"]
+    if any(a["kind"] == "vrfy" for a in s["artifacts"].values()):
+        c = evidence_counts(s)
+        lines.append(f"evidence: {c['proven']} proven | {c['failed']} failed "
+                     f"| {c['unavailable']} unavailable "
+                     f"| {c['unanswered']} unanswered")
     open_c = sum(len(c["open"]) for c in s["critiques"].values())
     if open_c:
         lines.append(f"open critique findings: {open_c}")

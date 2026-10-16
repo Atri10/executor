@@ -46,5 +46,11 @@
     "code": "if shape:",
     "mutation": "if-test -> True",
     "why": "_obj() stores a None shape only when the caller passed none, and validate() tests the stored value for truth before dispatching, so the extra dict entry is inert."
+  },
+  {
+    "file": "engine/executor/engine.py",
+    "code": "if not stamp:",
+    "mutation": "if-test -> False",
+    "why": "Every falsy stamp (None, empty string, 0, False) raises ExecError from _iso2epoch, which the same function catches and answers 0.0 \u2014 so skipping the guard and falling through produces the identical value. The guard is defensive, not behavioural."
   }
 ]

@@ -115,6 +115,13 @@ trigger, not a round: settle it via `executor decide` before dispatching
 further. A journaled ruling is obeyed and never re-litigated inside the
 loop.
 
+**Where the cap comes from.** `max_fix_rounds` is a policy tunable —
+default 5, bounds 1–50 — read from
+`docs/executor/config.json` then `.executor/<INIT>/meta/policy.json`, and
+the effective value is journaled with the run. The engine enforces it; a
+worker never chooses its own cap, and the number is always visible via
+`executor status`.
+
 ## Secret Hygiene in Review
 
 A reviewer that spots credential-shaped content in a diff:

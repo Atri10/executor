@@ -138,8 +138,9 @@ ones that were. Therefore:
 
 - Every criterion starts without an `evidence` event and is only moved
   by a payload `executor ingest` accepts.
-- `executor status` reports the counts: `N proven · N failed ·
-  N unavailable · N unanswered`. They are never omitted for tidiness.
+- `executor status` reports the counts on the gate card —
+  `evidence: N proven | N failed | N unavailable | N unanswered`. They
+  are never omitted for tidiness.
 - A single unanswered criterion blocks the word "complete". The correct
   sentence is "11 of 12 criteria proven, 1 unanswered: <which, and why>".
 - Never write `proven` because a neighbouring criterion passed, because

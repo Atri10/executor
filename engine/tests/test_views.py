@@ -10,7 +10,8 @@ import _payloads as PL
 from _live import Live
 from executor.engine import _render_doc, fold, ingest
 from executor.paths import views_dir
-from executor.views import (render_handoff_index, render_handoff_md,
+from executor.views import (evidence_counts, render_handoff_index,
+                            render_handoff_md,
                             render_report_md, render_verdict_md, status_card)
 
 INIT = PL.INIT
@@ -76,6 +77,96 @@ class GateCard(unittest.TestCase):
         ingest(live.init, {"kind": "halt", "v": "v1", "reason": "client stop"})
         card = status_card(live.init, fold(live.events()))
         self.assertIn("HALTED: client stop", card)
+
+    def test_the_card_counts_evidence_outcomes_and_unanswered_criteria(self):
+        """A criterion nobody ran is unproven however obviously it 'must'
+        work, so the card counts it rather than letting it be absorbed
+        into a sentence about the ones that ran."""
+        live = Live()
+        self.addCleanup(live.close)
+        live.run(lambda a: a["action"] == "GATE")
+        # Author the verification strategy, then land one evidence payload
+        # against a criterion and leave the rest unanswered.
+        vrfy = live.run(lambda a: a["action"] == "DISPATCH"
+                        and a["role"] == "author" and a["schema"] == "vrfy")
+        ingest(live.init, live.answer(vrfy))
+        act = live.run(lambda a: a["action"] == "DISPATCH"
+                       and a["role"] == "evidence")
+        if act is not None:
+            head = live.land_change()
+            payload = PL.evidence(criterion=act["entity"], commit=head,
+                                  verdict="proven")
+            ingest(live.init, payload)
+        card = status_card(live.init, fold(live.events()))
+        self.assertRegex(card, r"evidence: \d+ proven")
+        self.assertIn("unanswered", card)
+
+    def test_the_card_omits_evidence_until_a_vrfy_exists(self):
+        """The counts describe a verification strategy that exists; before
+        one is authored there is nothing to count, and a zero line would
+        read as 'nothing proven' when nothing was even planned."""
+        live = Live()
+        self.addCleanup(live.close)
+        live.run(lambda a: a["action"] == "GATE")
+        card = status_card(live.init, fold(live.events()))
+        self.assertNotIn("evidence:", card)
+
+    def test_the_card_omits_quiet_sections_entirely(self):
+        """A line that reads 'open critique findings: 0' is noise a reader
+        learns to skip — and that reader then skips the line that matters."""
+        live = Live()
+        self.addCleanup(live.close)
+        live.run(lambda a: a["action"] == "GATE")
+        card = status_card(live.init, fold(live.events()))
+        self.assertNotIn("open critique findings", card)
+        self.assertNotIn("awaiting rulings", card)
+        self.assertNotIn("HALTED", card)
+
+    def test_the_gate_line_appears_only_at_a_gate(self):
+        """The line points at a decision that is waiting; printed at any
+        other time it trains the reader to ignore it — and then a real gate
+        goes unanswered."""
+        live = Live()
+        self.addCleanup(live.close)
+        live.run(lambda a: a["action"] == "DISPATCH"
+                 and a["role"] == "author")
+        card = status_card(live.init, fold(live.events()))
+        self.assertNotIn("-> GATE", card)
+
+    def test_the_evidence_counts_separate_every_outcome(self):
+        """The counts a reader acts on: proven, failed, unavailable, and the
+        ones nobody ran. Collapsing two of them hides the difference
+        between a failing criterion and an unobserved one."""
+        self.assertEqual(evidence_counts(fold([])),
+                         {"proven": 0, "failed": 0, "unavailable": 0,
+                          "unanswered": 0})
+        s = {"evidence": {"V1": [{"verdict": "proven"}],
+                          "V2": [{"verdict": "failed"}],
+                          "V3": [{"verdict": "unavailable"},
+                                 {"verdict": "failed"}],
+                          "V4": [{"verdict": "proven"}]},
+             "artifacts": {"A": {"kind": "vrfy", "data": {"criteria": [
+                 {"id": "V1"}, {"id": "V2"}, {"id": "V3"}, {"id": "V4"},
+                 {"id": "V5"}, {"id": "V6"}]}}}}
+        # A criterion's state is its latest verdict: V3 ran twice and the
+        # second run is the one that counts, so `unavailable` is 0.
+        self.assertEqual(evidence_counts(s),
+                         {"proven": 2, "failed": 2, "unavailable": 0,
+                          "unanswered": 2})
+
+    def test_an_unknown_verdict_does_not_crash_the_counts(self):
+        """The schema pins `verdict` to three values, so an out-of-set one
+        means the journal was edited by hand. Counting it as unanswered is
+        honest; raising KeyError from `executor status` is a crash on a
+        store the reader must be able to inspect."""
+        s = {"evidence": {"V1": [{"verdict": "maybe"}],
+                          "V2": [{"verdict": "proven"}]},
+             "artifacts": {"A": {"kind": "vrfy", "data": {"criteria": [
+                 {"id": "V1"}, {"id": "V2"}]}}}}
+        self.assertEqual(evidence_counts(s),
+                         {"proven": 1, "failed": 0, "unavailable": 0,
+                          "unanswered": 1})
+
 
 class FinishedRun(unittest.TestCase):
     def setUp(self) -> None:
@@ -166,6 +257,42 @@ class DocumentRendering(unittest.TestCase):
                    "requirements": [{"id": "R1", "requirement": "must",
                                      "observable": "seen"}]}
         self.assertEqual(_render_doc(payload), _render_doc(payload))
+
+    def test_a_rich_section_renders_exactly_these_bytes(self):
+        """Every shape's contribution is pinned to the byte: a dropped blank
+        line, a lost bullet, or a missing fence closes changes the document a
+        reader sees, and only an exact assertion notices."""
+        payload = {"id": "X", "title": "T", "summary": "s",
+                   "sections": [{"id": "a", "title": "A",
+                                 "prose": "p",
+                                 "bullets": ["b1", "b2"],
+                                 "tables": [{"caption": "cap",
+                                             "columns": ["A", "B"],
+                                             "rows": [["1", "2"],
+                                                      ["3", "4"]]}],
+                                 "code": [{"lang": "ts", "source": "x"}]}]}
+        self.assertEqual(_render_doc(payload),
+                         "# X — T\n\n"
+                         "*s*\n\n"
+                         "## A\n"
+                         "p\n\n"
+                         "- b1\n"
+                         "- b2\n\n"
+                         "*cap*\n\n"
+                         "| A | B |\n"
+                         "| --- | --- |\n"
+                         "| 1 | 2 |\n"
+                         "| 3 | 4 |\n\n"
+                         "```ts\nx\n```\n\n")
+
+    def test_a_table_only_section_has_no_stray_paragraph(self):
+        payload = {"id": "X", "title": "T", "summary": "s",
+                   "sections": [{"id": "a", "title": "A",
+                                 "tables": [{"columns": ["A"],
+                                             "rows": [["1"]]}]}]}
+        self.assertEqual(_render_doc(payload),
+                         "# X — T\n\n*s*\n\n"
+                         "## A\n\n| A |\n| --- |\n| 1 |\n\n")
 
     def test_a_payload_never_needs_its_own_markdown(self):
         """Every construct the old `body` string carried has a typed home:
