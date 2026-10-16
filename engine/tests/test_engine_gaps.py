@@ -250,6 +250,29 @@ class Internals(LiveCase):
         self.assertEqual(_silent_for({}, 10**9), 0.0)
         self.assertEqual(_silent_for({"at": None}, 10**9), 0.0)
 
+    def test_a_live_stamp_produces_real_silence(self):
+        """Zero is the answer for bad data, not the answer for good data: a
+        dispatch that last beat a minute ago is one minute silent, and an
+        inverting guard must not turn every dispatch into a fresh one."""
+        minute_ago = _iso2epoch("2026-01-01T00:00:00Z")
+        self.assertEqual(_silent_for({"at": "2026-01-01T00:00:00Z"},
+                                     minute_ago + 60), 60)
+        self.assertEqual(_silent_for({"at": "2026-01-01T00:00:00Z",
+                                      "last_beat": "2026-01-01T00:01:00Z"},
+                                     minute_ago + 120), 60)
+
+    def test_the_last_beat_outranks_the_dispatch_stamp(self):
+        """A heartbeat moves the clock forward: silence is measured from the
+        most recent sign of life, or a worker that keeps reporting looks
+        abandoned from the moment it was dispatched."""
+        self.assertEqual(_silent_for({"at": "2026-01-01T00:00:00Z",
+                                      "last_beat": "2026-01-01T01:00:00Z"},
+                                     _iso2epoch("2026-01-01T02:00:00Z")),
+                         3600)
+        self.assertGreater(_silent_for({"at": "2026-01-01T00:00:00Z"},
+                                       _iso2epoch("2026-01-01T02:00:00Z")),
+                           3600)
+
     def test_entity_for_falls_back_to_the_dispatch_id_for_unknown_kinds(self):
         """Slot-bearing kinds map to their natural entity; a kind the mapper
         does not know yet still identifies itself by dispatch_id."""
