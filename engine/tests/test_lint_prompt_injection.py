@@ -161,17 +161,24 @@ class LintCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
 
-    def put(self, rel: str, text: str | bytes = "") -> Path:
+    def put(self, rel: str, text: str | bytes = "",
+            newline: str | None = None) -> Path:
         p = self.root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(text, bytes):
             p.write_bytes(text)
         else:
-            p.write_text(text, encoding="utf-8")
+            # newline="" writes \r\n verbatim; the default would translate it
+            # to \n and the CRLF test would pass on Windows for the wrong
+            # reason — it would never see a CRLF file at all.
+            with open(p, "w", encoding="utf-8", newline=newline) as f:
+                f.write(text)
         return p
 
     def lint(self, text: str | bytes) -> list[tuple]:
-        return L.lint_file(self.put("x.md", text))
+        # newline="" keeps \r\n exactly as written, so a CRLF fixture is
+        # linted the same way on every platform.
+        return L.lint_file(self.put("x.md", text, newline=""))
 
     def names(self, text: str | bytes) -> list[tuple[str, str]]:
         return [(name, sev) for _n, sev, name, _note, _e in self.lint(text)]
