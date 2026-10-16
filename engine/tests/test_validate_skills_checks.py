@@ -60,7 +60,10 @@ class TreeCase(unittest.TestCase):
 
     def run_check(self, check, path: Path) -> list[str]:
         fail: list[str] = []
-        check(path, str(path.relative_to(self.root)), fail)
+        # POSIX, like the validator's own diagnostics: the tests must not
+        # depend on the host's separator, or they pass on macOS and fail on
+        # Windows for a reason that has nothing to do with the check.
+        check(path, path.relative_to(self.root).as_posix(), fail)
         return fail
 
     def main_result(self, *argv: str):
