@@ -218,8 +218,22 @@ def _section_has_content(obj: dict, field: str) -> None:
                         "prose, bullets, tables, or code", "none present")
 
 
+def _section_ids_unique(obj: dict, field: str) -> None:
+    """A reviewer cites `§<section id>`, so an id must name one section.
+    Two sections sharing an id make the citation ambiguous — and the
+    prompt promises the citation."""
+    seen: set[str] = set()
+    for i, sec in enumerate(obj.get("sections", [])):
+        sid = sec.get("id")
+        if sid in seen:
+            raise Rejection("duplicate", f"{field}.sections[{i}].id",
+                            "a section id used once", sid)
+        seen.add(sid)
+
+
 SHAPES = {"table": _table_rows_match_columns,
-          "section": _section_has_content}
+          "section": _section_has_content,
+          "artifact": _section_ids_unique}
 
 
 def _prose(**kw):
@@ -361,7 +375,8 @@ def artifact_schema(artifact_kind: str) -> dict:
             "impact": _enum("high", "medium", "low"),
             "mitigation": _prose(nullable=True),
         }, req=["id", "risk", "likelihood", "impact", "mitigation"]))
-    return _obj({**_base(artifact_kind), **props}, req=["kind", "v", *req])
+    return _obj({**_base(artifact_kind), **props},
+                req=["kind", "v", *req], shape="artifact")
 
 
 ARTIFACT_KINDS = ["charter", "options", "brainstorm", "arch", "adr", "ifce",
