@@ -15,10 +15,15 @@ a raise inside a branch no test exercises still counts.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import unittest
 
 from _scripts import REPO
+import sys
+
+sys.path.insert(0, str(REPO / "engine"))
+from executor import schemas as S
 
 ENGINE = REPO / "engine" / "executor"
 REFERENCE = (REPO / "skills" / "executor" / "references" / "rejections.md")
@@ -120,6 +125,94 @@ class IdExamplesAreReal(unittest.TestCase):
                     if seg not in declared:
                         bad.setdefault(token, []).append(f"{f}:{i}")
         self.assertEqual(bad, {}, f"IDs with no declared segment: {bad}")
+
+
+def _fill(obj, schema):
+    """Replace a placeholder token in a value with the smallest value the
+    schema accepts, so a skeleton written for a reader (`[D<NNNNN>]`) is
+    still checked for shape: the keys it carries, the types they hold, and
+    the patterns and bounds it claims. A value whose shape the schema does
+    not allow is returned untouched — `validate` rejects it, which is the
+    point of the check."""
+    if not isinstance(schema, dict):
+        return obj
+    if "enum" in schema and obj not in schema["enum"]:
+        # "A | B | C" is the vocabulary written out for a reader: any member
+        # satisfies it. A plain wrong value ("MAYBE") is a doc defect, so it
+        # is left for `validate` to reject.
+        if isinstance(obj, str) and "|" in obj:
+            return schema["enum"][0]
+        return obj
+    stype = schema.get("type")
+    if stype == "object":
+        props = schema.get("properties", {})
+        if not isinstance(obj, dict):
+            return obj
+        return {k: (_fill(v, props[k]) if k in props else v)
+                for k, v in obj.items()}
+    if stype == "array" and isinstance(obj, list):
+        return [_fill(v, schema.get("items", {})) for v in obj]
+    if stype == "string" and isinstance(obj, str) and (
+            "[" in obj or "<" in obj):
+        node = {k: v for k, v in schema.items() if k in
+                ("minLength", "maxLength", "pattern", "enum", "notMatch")}
+        node["type"] = "string"
+        from test_schemas import minimal
+        return minimal(node)
+    return obj
+
+
+class PayloadSkeletonsValidate(unittest.TestCase):
+    """Every JSON payload the skills show an agent must be one the engine
+    accepts. A skeleton with a field the schema deleted, a criterion ID
+    that fails its pattern, or a required field missing teaches a worker
+    to emit a rejection — and the worker has no way to tell the document
+    wrong from the engine wrong."""
+
+    def skeletons(self) -> list[tuple[str, dict]]:
+        out = []
+        for p in sorted((REPO / "skills").rglob("*.md")):
+            for m in re.finditer(r"```json\n(.*?)```", p.read_text(), re.S):
+                block = m.group(1)
+                depth, start = 0, None
+                for i, ch in enumerate(block):
+                    if ch == "{":
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0 and start is not None:
+                            chunk = block[start:i + 1]
+                            if '"kind"' in chunk:
+                                try:
+                                    obj = json.loads(chunk)
+                                except ValueError:
+                                    obj = None
+                                if isinstance(obj, dict) and "kind" in obj:
+                                    out.append((p.name, obj))
+                            start = None
+        return out
+
+    def test_every_skeleton_parses(self):
+        for name, obj in self.skeletons():
+            with self.subTest(file=name):
+                self.assertIsInstance(obj, dict)
+
+    def test_a_skeleton_naming_a_real_kind_validates(self):
+        kinds = set(S.ARTIFACT_KINDS) | {
+            "report", "verdict", "heartbeat", "evidence", "gate_decision",
+            "ruling", "halt", "spawn_error", "needs_context", "audit",
+            "merge", "resume"}
+        checked = 0
+        for name, obj in self.skeletons():
+            if obj["kind"] not in kinds:
+                continue
+            schema = S.schema_for(obj["kind"])
+            with self.subTest(file=name, kind=obj["kind"]):
+                S.validate(_fill(obj, schema), schema)
+            checked += 1
+        self.assertGreater(checked, 10)
 
 
 if __name__ == "__main__":

@@ -54,12 +54,14 @@ rejects pipe tables and fences in strings, and the engine renders the
 output joins.
 
 **Only `sections[]` is validated and merged.** A lane payload also
-carries wrapper keys — `lane`, `session`, `question`, `concepts`,
-`round`, `supersedes`, and a `return` block for its status line. Those
-are the controller's bookkeeping, not artifact fields: the engine would
-reject them as `additionalProperties` if they reached `ingest` as an
-artifact payload. The controller reads them, drops them, and merges only
-the sections.
+carries wrapper keys — `kind: "brainstorm-lane"` (deliberately not an
+artifact kind, so it can never be mistaken for a payload the engine
+ingests), `lane`, `session`, `question`, `concepts`, `round`,
+`supersedes`, and a `return` block for its status line. Those are the
+controller's bookkeeping, not artifact fields: the engine would reject
+them as `additionalProperties` if they reached `ingest` as an artifact
+payload. The controller reads them, drops them, and merges only the
+sections.
 
 Outside an initiative there is no engine yet: run the session as a
 plain design document under `docs/executor/`, and when intake creates

@@ -235,7 +235,7 @@ An example of what a well-formed payload looks like:
 
 ```json
 {"kind": "evidence", "v": "v1", "dispatch_id": "D00112",
- "criterion": "INIT-0004-VRFY-01-#3",
+ "criterion": "V03",
  "command": "bun run start && curl -XPOST localhost:3000/place",
  "observed": "listening on :3000; POST /place → 200 {placed: cell-2}",
  "verdict": "proven",
@@ -282,22 +282,25 @@ finding that returns to `executor-execution`. Verification does not fix it.
 independence that made your evidence worth having, and silently rebases
 every other criterion onto a commit you did not test. Hand it back.
 
-A finding is a `needs_context` report from the `evidence` worker, or a
-recorded `ruling` — it carries exactly this:
+A finding arrives as the `evidence` payload for that criterion with
+`verdict: "failed"` — its `observed` field is the output that
+contradicted the criterion, and the `path:line` the fault appears to live
+in goes in it too:
 
-```markdown
-Finding — INIT-0004-VRFY-01-#2
-
-Requirement: <verbatim>
-Observed: <the output line that contradicted it>
-State: a91e502
-Severity: [blocking | non-blocking]
-Where it appears to live: `src/router/place.ts` — capacity check after insert
-Re-verification: re-run `bun test test/router.int.ts` and the #3 smoke path
+```json
+{"kind": "evidence", "v": "v1", "dispatch_id": "D00047",
+ "criterion": "V02", "command": "curl -s -o /tmp/b -w '%{http_code}' localhost:8080/place -d '{\"tenant\":\"t1\",\"cell\":\"cell-9999\"}'",
+ "observed": "200, not 422; and psql then returned 1 for tenant=t1, so the placement was written. Fault appears to live in src/router/place.ts:88 — the capacity check runs after the insert",
+ "verdict": "failed",
+ "state_commit": "a91e502",
+ "artifacts": ["src/router/place.ts"]}
 ```
 
-Then: `executor next` routes the fix through `executor-execution` — a
-fix dispatch on the owning task if one exists, or a new task in a new
+If the fix needs a decision the worker cannot make, follow it with a
+`needs_context` payload — `task` plus `question` — and the fold carries
+that to a ruling. Then `executor next` routes the fix through
+`executor-execution` — a fix dispatch on the owning task if one exists,
+or a new task in a new
 plan if the gap is genuinely new work (`executor-planning` owns that).
 When the fix lands, the affected criteria open again and a fresh
 evidence dispatch covers them.

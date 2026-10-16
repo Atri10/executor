@@ -21,7 +21,6 @@ one with content.
  "title": "Placement service internals",
  "summary": "…",
  "cites": ["INIT-0004-ARCH-01", "INIT-0004-IFCE-01"],
- "component": "placement-service",
  "sections": [
    {"id": "responsibility", "title": "Responsibility",
     "prose": "Chooses the cell a tenant belongs to and records the binding."},

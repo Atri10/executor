@@ -252,7 +252,7 @@ Subagent (general-purpose):
 
     ```json
     {
-      "kind": "brainstorm",
+      "kind": "brainstorm-lane",
       "lane": "critique",
       "session": "[SESSION_ID]",
       "round": 1,

@@ -1,156 +1,72 @@
 # Risk Template (Pre-Mortem)
 
-Path: `<initiative>/risks/INIT-NNNN-RISK-nn-<topic-slug>.md`
+The `risk` artifact: `kind: "risk"`, id `INIT-NNNN-RISK-NN`, answered by
+an `author` dispatch to its `respond_to`. The narrative comes first and
+every row traces to it; a risk list written without the narrative is a
+checklist from another project.
 
-The narrative comes first and everything else traces to it. A risk list
-written without the narrative is a checklist from another project.
+A section is data, not markdown: `prose`, `bullets`, `tables`
+(`columns` plus `rows`), and `code`. The engine renders the `.md` — a pipe
+table or a fence inside a string is a `notMatch` rejection, and a row whose
+cell count differs from its columns is `row_width`.
 
-## Skeleton
+## Payload skeleton
 
-````markdown
----
-id: INIT-0004-RISK-01
-initiative: INIT-0004
-kind: risk
-title: Cell placement pre-mortem
-status: draft
-created_at: <UTC from an executed command>
-updated_at: <same>
-supersedes: null
-superseded_by: null
-method: pre-mortem
-risks_identified: 4
-mitigations_planned: 2
-accepted_without_mitigation: 2
----
+```json
+{"kind": "risk", "v": "v1", "dispatch_id": "D00031",
+ "id": "INIT-0004-RISK-01",
+ "title": "Cell placement pre-mortem",
+ "summary": "Four risks, two mitigated, two accepted: placement latency at 8k tenants and a split-cell outage with no runbook entry.",
+ "cites": ["INIT-0004-SPEC-01", "INIT-0004-ARCH-01"],
+ "risks": [
+   {"id": "R1", "risk": "The available-cell scan is linear, so placement latency triples above 2k tenants",
+    "likelihood": "high", "impact": "high",
+    "mitigation": "Index candidates by region in the store port; V05 measures p99 at 10k"},
+   {"id": "R2", "risk": "Two tenants land on the same cell despite the isolation rule",
+    "likelihood": "medium", "impact": "high",
+    "mitigation": "Unique constraint on (tenant, cell) enforced by the adapter"},
+   {"id": "R3", "risk": "A cell loses its disk and the runbook has no entry for a split cell",
+    "likelihood": "low", "impact": "high",
+    "mitigation": null},
+   {"id": "R4", "risk": "The migration path back is untested",
+    "likelihood": "medium", "impact": "medium",
+    "mitigation": null}
+ ],
+ "sections": [
+   {"id": "failure-history", "title": "The failure history",
+    "prose": "Past tense. Fix a date far enough out that the failure has consequences. Three to eight sentences. Name what users and operators saw, not what the code did.",
+    "code": [{"lang": "text", "source": "It is 2027-01. Cell placement shipped in September. By November, placement latency at 8k tenants had tripled, because the available-cell scan was linear and nobody measured it above 2k. Two tenants landed on the same cell despite the isolation rule, and when that cell lost its disk both were down for eleven hours — the runbook had no entry for a split cell. We rolled back in December and discovered the migration path back to single-cell routing had never been exercised."}]},
+   {"id": "register", "title": "Risk register",
+    "tables": [{"columns": ["Id", "Risk", "Likelihood", "Impact", "Mitigation", "Accepted as"],
+                "rows": [["R1", "linear scan above 2k tenants", "high", "high", "region index", "not accepted"], ["R3", "split cell, no runbook entry", "low", "high", "none", "accepted — operator training tracked separately"]]}]},
+   {"id": "signals", "title": "Signals that a risk is materializing",
+    "tables": [{"columns": ["Risk", "Signal", "Threshold", "Who notices"],
+                "rows": [["R1", "placement p99 latency", "above 120 ms for an hour", "the existing placement dashboard"]]}]},
+   {"id": "rejected", "title": "Options that failed and why",
+    "tables": [{"columns": ["Mitigation", "Why it failed"],
+                "rows": [["shard by tenant hash", "does not bound a single tenant's impact, which is requirement R09"]]}]}
+ ]}
+```
 
-# Cell placement — pre-mortem
+`risks[]` is the typed register the fold reads: `id`, `risk`,
+`likelihood`, `impact`, and `mitigation` (null when accepted without
+one). The prose sections carry the reasoning — the narrative and the
+signals — and every row in the register cites the narrative it came
+from.
 
-## The failure history
+## Rules that keep this artifact useful
 
-<Past tense. Fix a date far enough out that the failure has consequences.
-Three to eight sentences. Name what users and operators saw, not what the
-code did.>
-
-It is 2027-01. Cell placement shipped in September. By November, placement
-latency at 8k tenants had tripled, because the available-cell scan was
-linear and nobody measured it above 2k. Two tenants landed on the same
-cell despite the isolation rule, and when that cell lost its disk both
-were down for eleven hours — the runbook had no entry for a split cell.
-We rolled back in December and discovered the migration path back to
-shared storage had never been built.
-
-## Causes
-
-Every cause traces to a sentence above. Every sentence above produces at
-least one cause.
-
-| ID | Cause | Traces to | Probability | Blast radius | Disposition |
-|---|---|---|---|---|---|
-| K01 | Available-cell scan is linear; never measured above 2k tenants | "latency had tripled" | high — no load test exists today | initiative | mitigated → R11, V05 |
-| K02 | Isolation rule enforced in the caller, not the placement service | "two tenants landed on the same cell" | medium — one caller today, more later | product | mitigated → R09, INIT-0004-ADR-02 revisit |
-| K03 | No runbook entry for a split cell | "runbook had no entry" | high — no runbook work is planned | contained | accepted → A01 |
-| K04 | No migration path back to shared storage | "had never been built" | low — rollback is rare | irreversible | accepted → A02 |
-
-**Probability** is high / medium / low with the reason in one clause — not
-a percentage you cannot defend. **Blast radius** is contained (one
-component) / initiative (this initiative's value) / product / irreversible
-(unrecoverable: leaked credentials, lost data, a one-way migration).
-
-Sort by blast radius first, probability second: a low-probability
-irreversible risk outranks a likely contained one, because contained
-things can be fixed twice.
-
-## Mitigations
-
-Every mitigation names its landing site by ID. A mitigation with no
-landing site is a wish.
-
-| Cause | Mitigation | Lands in |
-|---|---|---|
-| K01 | Placement service emits a `placement_latency_ms` histogram; a load check at 10k tenants is part of acceptance | R11 (this spec) + V05 (VRFY) |
-| K02 | Isolation is enforced inside the placement service, not the caller | R09 (this spec); INIT-0004-ADR-02 gains the consequence |
-
-Landing sites, in order of preference:
-
-| Site | Form | Note |
-|---|---|---|
-| This spec | A new or tightened `R<nn>` / `C<nn>` | Strongest — it becomes a requirement a review can cite |
-| Verification | A VRFY row that would catch the failure | Use when the behaviour exists and only the check is missing |
-| Planning | A named task-shaped deliverable the plan must contain | Weaker — the plan is not written yet; say it here so planning cannot miss it |
-| Architecture | An ADR to revisit, by ID | Use when the mitigation changes a decision, not a requirement |
-
-`mitigations_planned` counts landed mitigations only.
-
-## Accepted without mitigation
-
-Each accepted risk names why, and what would change the judgment. Without
-the second, "accepted" means "ignored, in writing".
-
-### A01 — No runbook entry for a split cell (K03)
-
-**Accepted because:** runbook authorship is owned by operations and sits
-outside this charter's scope; the failure costs recovery time, not data.
-
-**What would change this:** a second team taking on-call for these cells,
-or a split cell occurring once in staging.
-
-### A02 — No migration path back to shared storage (K04)
-
-**Accepted because:** building and testing a reverse migration costs more
-than the expected loss while cell count is under ten and every tenant can
-be re-placed from source data.
-
-**What would change this:** cell count passing ten, or any tenant data
-originating in a cell rather than being copied into it.
-
-## Requirements changed by this pre-mortem
-
-Recorded so a reader sees the pre-mortem did work rather than decorating
-the folder.
-
-| Requirement | Change | Cause |
-|---|---|---|
-| R09 | Added — isolation enforced in the placement service | K02 |
-| R11 | Added — latency histogram plus a 10k-tenant acceptance check | K01 |
-````
-
-## Procedure
-
-1. **Narrative first.** Past tense, dated, consequences named. "Latency
-   might degrade" is a worry you can wave away; "latency had tripled by
-   November" forces you to say how, and the how is the risk.
-2. **Extract causes** from the narrative. Every cause traces to a
-   sentence; every sentence yields a cause.
-3. **Invert as a second pass.** Ask how you would *guarantee* this fails —
-   skip the review, ignore the limit, deploy before the holiday. Merge
-   into the cause table, dedupe, and drop anything untethered to the
-   narrative; an unnarrated risk usually belongs to another initiative.
-4. **Rate** by probability and blast radius, with reasons.
-5. **Assign mitigations** with landing sites, or accept explicitly.
-6. **Feed requirement-affecting mitigations back into the spec** while it
-   is still `draft`. Doing this after a plan exists costs a supersession.
-7. **Reconcile the counts** with the body before writing the file.
-
-## Count reconciliation
-
-| Frontmatter field | Must equal |
-|---|---|
-| `risks_identified` | Rows in the Causes table |
-| `mitigations_planned` | Rows in the Mitigations table |
-| `accepted_without_mitigation` | `###` blocks under "Accepted without mitigation" |
-
-A count that disagrees with the body is how a risk register becomes
-decorative: the human reads the frontmatter, the body says something else,
-and nobody notices which is lying.
-
-## Anti-patterns
-
-| Anti-pattern | Fix |
-|---|---|
-| A generic risk list ("scope creep, key person leaves, tech debt") | Every risk traces to a narrative sentence, or it is cut |
-| Probability as a percentage | High / medium / low with a reason clause |
-| "Mitigation: monitor closely" | Name the landing site: which requirement, which VRFY row |
-| Every risk mitigated | Suspicious. Some risks are worth accepting; say so and name the falsifier |
-| An accepted risk with no falsifier | Add the observation that reopens it, or mitigate it |
-| A pre-mortem written after the spec was approved | It exists to change the spec. Write it before the gate |
+- **Every risk is a sentence about the world, not the code.** "The scan
+  is linear" is a defect; "placement latency triples above 2k tenants
+  because the scan is linear" is a risk with a threshold.
+- **A mitigation is a checkable action or null.** "Be careful" is not a
+  mitigation; an index plus the row that measures it is.
+- **Accepted without mitigation is a valid disposition** — write the
+  acceptance in the register's `Accepted as` cell so the human can
+  overrule it at the gate.
+- **Signals carry a number and a noticer.** A risk nobody can observe is
+  a wish.
+- `likelihood`/`impact` are one of `low`, `medium`, `high`; a number
+  without a basis is noise.
+- No credentials or real incident identifiers — name the dashboard,
+  never a tenant.

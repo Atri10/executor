@@ -225,7 +225,7 @@ Subagent (general-purpose):
 
     ```json
     {
-      "kind": "brainstorm",
+      "kind": "brainstorm-lane",
       "lane": "prior-art",
       "session": "[SESSION_ID]",
       "question": "[QUESTION]",
