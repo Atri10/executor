@@ -10,10 +10,12 @@ clean today.
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 from _scripts import REPO, load
@@ -208,6 +210,47 @@ class RefusalContractGuardTests(unittest.TestCase):
         fail: list[str] = []
         vs.check_refusal_contract(REPO / "skills", fail)
         self.assertEqual(fail, [])
+
+
+class DiagnosticsArePortable(unittest.TestCase):
+    """Every path the validator prints or compares is POSIX. Windows is the
+    only platform where `str(Path)` says `a\\SKILL.md`, and a diagnostic
+    whose separator depends on the host is a diagnostic a reader cannot
+    grep and a registry comparison that fails on one OS and passes on
+    another. The Windows CI run found this: 47 failures, all of them the
+    validator disagreeing with itself about a separator."""
+
+    def the_tree(self, name: str = "skills") -> list[str]:
+        root = REPO / name
+        out: list[str] = []
+        proc = subprocess.run(
+            [sys.executable, str(REPO / "scripts" / "validate_skills.py"),
+             str(root)], capture_output=True, text=True, cwd=REPO)
+        out += proc.stdout.splitlines() + proc.stderr.splitlines()
+        return out
+
+    def test_the_validator_reports_no_backslash_paths(self):
+        for line in self.the_tree():
+            self.assertNotIn("\\", line,
+                             f"a path separator leaked into a diagnostic: "
+                             f"{line}")
+
+    def test_the_registry_agrees_with_the_paths_it_sees(self):
+        """The registry rows are POSIX text, so the on-disk set must be
+        built the same way or every prompt looks unregistered on Windows."""
+        root = REPO / "skills"
+        fail: list[str] = []
+        vs.check_registry(root, fail)
+        self.assertEqual(fail, [])
+
+    def test_a_diagnostic_path_is_posix_even_when_the_host_is_not(self):
+        """`PurePath.as_posix()` is platform-independent, and it is the only
+        conversion the validator may use. A regression to `str(path)` is
+        invisible on macOS and breaks Windows, so it is asserted here."""
+        self.assertEqual(PureWindowsPath("a", "SKILL.md").as_posix(),
+                         "a/SKILL.md")
+        self.assertEqual(str(PureWindowsPath("a", "SKILL.md")),
+                         "a\\SKILL.md")
 
 
 class RepositoryIsCleanTests(unittest.TestCase):

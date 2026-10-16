@@ -116,7 +116,7 @@ def check_registry(dir_: Path, fail: list[str]) -> None:
                 fail.append(f"FAIL {rel}: prompt lacks dispatch contract "
                             f"token `{token}`")
     # every *-prompt.md on disk must be registered
-    on_disk = {str(p.relative_to(dir_))
+    on_disk = {p.relative_to(dir_).as_posix()
                for p in dir_.rglob("*-prompt.md")}
     for p in sorted(on_disk - registered):
         fail.append(f"FAIL {p}: prompt on disk not in Dispatch registry")
@@ -167,7 +167,7 @@ def check_payload_contract(root: Path, fail: list[str]) -> None:
     to a .md path. Each of those makes an agent a renderer, and a payload
     that carries formatting cannot be validated."""
     for f in sorted(root.rglob("*.md")):
-        rel = str(f)
+        rel = f.as_posix()
         text = f.read_text(encoding="utf-8")
         for i, line in enumerate(text.splitlines(), 1):
             if BODY_FIELD.search(line):
@@ -190,13 +190,13 @@ def check_no_visual_material(root: Path, fail: list[str]) -> None:
         if not f.is_file():
             continue
         if f.suffix.lower() in VISUAL_ASSET_SUFFIXES:
-            fail.append(f"FAIL {f}: visual-companion asset ({f.suffix}); "
+            fail.append(f"FAIL {f.as_posix()}: visual-companion asset ({f.suffix}); "
                         f"no HTML or visuals ship with the skills")
         elif f.suffix == ".md":
             lines = f.read_text(encoding="utf-8").splitlines()
             for i, line in enumerate(lines, 1):
                 if VISUAL_MARKERS.search(line):
-                    fail.append(f"FAIL {f}:{i}: visual-companion reference")
+                    fail.append(f"FAIL {f.as_posix()}:{i}: visual-companion reference")
 
 
 def main() -> int:
@@ -205,7 +205,7 @@ def main() -> int:
 
     skills = sorted(root.glob("*/SKILL.md"))
     for sk in skills:
-        rel = str(sk)
+        rel = sk.as_posix()
         check_frontmatter(sk, rel, fail)
         check_sections(sk, rel, fail)
 
@@ -214,13 +214,13 @@ def main() -> int:
         m = re.search(r"^name:\s*(\S+)", sk.read_text(encoding="utf-8"),
                       re.M)
         if m:
-            names.setdefault(m.group(1), []).append(str(sk))
+            names.setdefault(m.group(1), []).append(sk.as_posix())
     for name, paths in names.items():
         if len(paths) > 1:
             fail.append(f"FAIL: duplicate skill name '{name}': {paths}")
 
     for f in root.rglob("*.md"):
-        rel = str(f)
+        rel = f.as_posix()
         check_fences(f, rel, fail)
         check_html_comments(f, rel, fail)
         check_box_drawing(f, rel, fail)
