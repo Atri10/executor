@@ -32,6 +32,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install the one dev tool (coverage)
+        # The engine has zero runtime dependencies; coverage is the only
+        # tool run_tests.py needs, and it refuses to report a branch floor
+        # it cannot measure rather than silently skipping it.
+        run: python -m pip install -r requirements-dev.txt
       - name: Entry point (python -m executor)
         # Proves the package runs as a module on this platform, not just
         # when its test runner imports it.
