@@ -1,0 +1,19 @@
+# Test and coverage configuration.
+#
+# The engine has zero third-party dependencies. `coverage` is the one
+# development tool (requirements-dev.txt); run everything through
+# `python scripts/run_tests.py`, which works unchanged on macOS, Linux and
+# Windows.
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["engine/executor", "scripts"]
+# The runner is test infrastructure, not shipped code.
+omit = ["scripts/run_tests.py"]
+
+[tool.coverage.report]
+fail_under = 100
+precision = 2
+show_missing = true
+skip_empty = true

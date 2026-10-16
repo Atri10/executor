@@ -10,3 +10,12 @@ docs/
 
 # macOS
 .DS_Store
+
+__pycache__/
+*.pyc
+.idea/
+
+# Coverage data
+.coverage
+.coverage.*
+htmlcov/

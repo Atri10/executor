@@ -5,7 +5,195 @@ All notable changes to The Executor are documented here. The format follows
 project is tagged; between releases, entries are dated and `main` moves.
 
 
+## [2.0.0] — 2026-10-16 — "New Dawn"
+
+The executor v2 engine becomes the product. A payload is data and the
+engine renders every document; the shell scripts are gone; the skills
+speak the v2 protocol; a payload that means nonsense is refused before it
+lands.
+
+Highlights, newest first:
+
+- **Payloads are data.** Sections carry `prose`, `bullets`, `tables`, and
+  `code`; the engine renders every `.md`, so the store has exactly one
+  renderer and a document can never drift from what the engine would have
+  written. Markdown in a string is `notMatch`; a row wider than its
+  columns is `row_width`; a blank value is `nonBlank`; a section with no
+  shape is `empty_section`.
+- **The contracts are enforced, not hoped for.** `schemas.py` is a closed
+  mini-validator with anchored patterns, pinned numeric bounds, named
+  object invariants, and 37 documented refusal codes that
+  `test_docs_agreement.py` keeps in step with the code in both directions.
+- **The store has one writer.** The journal is the state, hash-chained
+  and recomputed by `check`; views are projections; a dispatch is
+  answered exactly once; a human-only kind cannot be claimed by a worker.
+- **The controller carries no weight.** It dispatches, it never authors,
+  judges, or passes a gate. `executor decide` exists so `gate_decision`,
+  `ruling`, and `resume` carry `actor: human`.
+- **Autonomy is fail-closed.** Every phase defaults to `deny`; the
+  pick-class phases and handoff never clear automatically; an auto-cleared
+  gate is journaled as `by: "auto"`.
+- **Plans are audited as a set** between planning and execution — coverage,
+  seams, ordering, constraint propagation, file ownership — and execution
+  cannot start until every plan is clean or a human waives by ruling.
+- **Tests are the contract.** 717 tests, 100% branch coverage, mutation
+  testing with an explained allow list, and a suite that walks the skills
+  tree so a document cannot teach something the engine rejects.
+
+Everything above is measured, not claimed: the numbers in each entry were
+produced by running the suite.
+
 ## [Unreleased]
+
+### Changed — the skills tree can no longer teach what the engine rejects
+
+### Changed — the skills tree can no longer teach what the engine rejects
+
+An audit pass over the structured-payload contract, enforced where a
+regression would otherwise need someone to remember.
+
+- **New `engine/tests/test_docs_agreement.py`** — three invariants that
+  walk the tree and the engine and fail on either direction of drift:
+  every rejection code the engine raises is documented in
+  `skills/executor/references/rejections.md` and every documented code is
+  actually raised (37 of them); every ID example uses a segment
+  `ARTIFACT_SEGMENTS` declares; and every JSON payload skeleton the skills
+  show validates against its schema, with placeholder tokens replaced by
+  the smallest accepted value.
+- **`spec/references/risk-template.md` and `verification-template.md`
+  converted to the payload contract.** Both still taught the v1
+  frontmatter protocol, a file path `paths.py` no longer defines, and
+  markdown tables a worker would paste into a payload. The `vrfy`
+  template's coverage and status guidance moved into typed sections.
+- **`arch`, `design`, and `ifce` templates fixed to their real schemas**:
+  `arch`/`design` carry `adrs[]` and `ifces[]` as objects (id, title,
+  decision, why, cost_if_wrong, alternatives), not ID strings, and neither
+  carries `components` or `component`; the interface's provides/consumes
+  and stability lifecycle moved into the scope section.
+- **The brainstorm lane wrapper is now `"kind": "brainstorm-lane"`** —
+  deliberately not an artifact kind, so a reader can never mistake it for
+  a payload the engine ingests. The skill states that only `sections[]` is
+  validated and merged.
+
+### Fixed
+
+- **`validate()` crashed on a nullable `None`**: the string constraints
+  after the type check called `len(None)`. A nullable field now skips
+  value constraints entirely.
+- **The risk register could not express "accepted without mitigation"** —
+  the schema required a non-empty string, so a payload had to write
+  "none". `mitigation` is nullable prose.
+- A pre-existing example in the verification skill used a criterion ID the
+  schema rejects (`INIT-0004-VRFY-01-#3` instead of `V03`); a worker
+  copying it would have been refused.
+- `executor status` printed no evidence counts although the verification
+  skill promised them, and the card now also omits quiet sections entirely
+  rather than printing zeros.
+
+### Changed — payloads carry data; the engine renders markdown
+
+A payload is machine-readable data and nothing else. Sections are four
+typed shapes — `prose`, `bullets`, `tables` (`columns` + `rows`), and
+`code` — and no string anywhere in a payload may carry markdown syntax.
+`_render_doc` builds every table, list, and fence from those fields, so
+the store has exactly one renderer and a reader can tell which file is
+authoritative.
+
+- **A markdown string is now a schema rejection.** `prose`, `summary`,
+  `goal`, `requirement`, `observable`, `constraint`, `criterion`,
+  `procedure`, `claim`, and `evidence` reject pipe tables, code fences,
+  and headings (`notMatch`). Table cells reject `|` and newlines; a
+  row's width must equal its column count (`row_width`); a cell or
+  bullet that is only whitespace is rejected (`nonBlank`).
+- **Validator features that make this enforceable.** `validate()` gains
+  `notMatch` for strings and `shape` for named object invariants through
+  a `SHAPES` registry (`table`, `section`), and `_obj()` accepts the
+  shape name.
+- **New `skills/executor/references/rejections.md`** — the authoritative
+  list of all 37 refusal codes, each with its field and the action that
+  clears it. `engine/tests/test_docs_agreement.py` walks the engine's
+  raise sites and the reference's tables and fails on either direction
+  of drift.
+- **Validator guards so this cannot regress.** Every skill file is
+  checked for a `sections[].body` example, every payload-writing prompt
+  for a markdown output template and for the refusal contract, and every
+  ID example for a segment the engine does not declare.
+- **Every skill, template and prompt converted.** Author, brainstorm,
+  critique, plan-regression, review and verification prompts; the ADR,
+  ARCH, IFCE and DSGN templates; frontmatter and intake references.
+
+### Fixed
+
+- A payload could cite its own ID; that is now `dangling_ref` with a
+  hint, because a self-citation is an artifact arguing from itself.
+- `_silent_for` raised `KeyError` on a dispatch carrying no stamp,
+  contradicting its own contract that an unreadable stamp counts as no
+  silence. A missing or empty stamp now returns 0.0.
+- `python -m executor` had no entry point;
+  `engine/executor/__main__.py` provides one, covered by tests that
+  also pin import inertness.
+
+### Added — executor v2 engine (preview, alongside the v1 shell suite)
+
+A new Python engine under `engine/executor/` implements the executor
+protocol as an event-sourced, typed-payload state machine. The v1 shell
+skills remain the production path; v2 is the hardened controller being
+built out alongside them (its design record has since been consolidated
+into the README, the project's single document).
+
+- **Canonical layout, single path authority.** `paths.py` holds ~40
+  `*_file`/`*_dir` functions; nothing else builds a path. Runtime store:
+  `.executor/INIT-NNNN/{meta,journal,dispatches,artifacts,plans,fixes,
+  reviews,views}` with every dispatch in its own
+  `dispatches/d-NNNNN-<entity>-<role>/{slot,payload,prompt}` dir and
+  uniform `<ID>.<role>.<ext>` filenames. Committed store:
+  `docs/executor/INIT-NNNN/{meta,artifacts,plans}` with each artifact in
+  its own `<AID>/{artifact.json,artifact.md}` dir.
+- **`emit_next` carries a resume manifest** (`initiative`, `phase`,
+  `phase_state`, `last_event`, `last_seq`, `open_concerns`, `tasks_done`,
+  `tasks_total`) so a context-less pump resumes cold; the livelock
+  detector keys emits on a state digest — identical action over unchanged
+  state streaks to ESCALATE, real progress resets.
+- **MERGE is now a slot-minted action**: `emit_next` returns
+  `{action:"MERGE", run:"git merge --no-ff task/<pid>", respond_to,
+  dispatch_id}`; the pump performs the merge and ingests a
+  `{kind:"merge",plan,merge_sha,branch}` payload. `merge_sha` must
+  resolve and `plan` must exist.
+- **Slot consumption works without `dispatch_id` echo.** `_after` matches
+  the consumed slot by `dispatch_id` when present, else by entity+schema —
+  agents don't reliably echo ids, and the first e2e leaked 24 open slots
+  before this fell back.
+- **`check` no longer lies about the chain.** `chain:"broken"` is reported
+  only for hash-chain problems; a stale `state.json` is listed under
+  `problems` and repaired in place, not reported as chain damage.
+- **Validation is schema-first, hand-rolled** (no `jsonschema` dep):
+  `required`, `minLength`, `minItems`, `enum`, `pattern`, `additionalProperties`,
+  plus semantic checks over live state and git — unknown task/criterion,
+  unresolvable commits, dangling cites/edges, round-must-be-minted,
+  empty-diff rejection.
+- **Payload kinds**: `charter/options/brainstorm/adr/ifce/design/vrfy/
+  spec/plan` (artifacts), `report`, `verdict`, `audit`, `repair`,
+  `evidence`, `gate_decision`, `ruling`, `heartbeat`, `merge`, `halt`,
+  `needs_context`, `spawn_error`.
+- **Actions**: `PHASE-ENTER`, `DISPATCH`, `MERGE`, `GATE`, `ASK`, `WAIT`,
+  `DONE`, `ESCALATE`, `HALT`.
+- **CLI**: `new`, `next`, `ingest`, `dispatch`, `resume`, `check`,
+  `autonomy`, `status` — all exercised against a scratch repo in e2e.
+- **Test suite** `engine/tests/test_engine.py`: 18 contract tests covering
+  store integrity, schemas, loop behavior, semantic gates, and `check` —
+  all green.
+
+Verified end-to-end on a scratch repo: `new` → 11 phases → merge →
+`DONE`, 136 events, `chain:ok`, `open_slots:0`, `dangling:[]`.
+
+### Removed
+
+- **The visual companion.** The browser-based mockup server, its HTML frame
+  and helper, and every instruction to offer or start it are gone; Executor
+  ships no HTML and no visuals. `scripts/validate_skills.py` fails if
+  companion assets or references return. Historical entries below describe
+  it as it shipped.
+
 
 ## [0.7.1] — 2026-10-05
 

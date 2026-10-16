@@ -10,6 +10,14 @@ with four names.
 brief, so the human chooses between real alternatives instead of variants
 of the first idea anyone had.
 
+**A brainstorm lane is a session dispatch, not an engine role.** The
+session is the context of the `brainstorm` artifact the phase authors;
+the deliverable is the session file `concepts/<LETTER>-<lens>.md`, which lands in the
+artifact's `sections` when the phase commits it. The `kind` the payload
+carries is `brainstorm`. Session dispatches are recorded in a
+`Dispatch log` section the controller keeps — logged the same way the
+engine logs `D<NNNNN>` — not an engine slot.
+
 **Before dispatching:**
 
 1. The session's `## Brief` (problem, actors, outcome, measurable success
@@ -20,9 +28,9 @@ of the first idea anyone had.
 2. `prior-art.md` exists (the scout ran).
 3. Pick 3–4 lenses from the catalog below that pull in genuinely different
    directions for THIS brief, and give each a letter: A, B, C, D.
-4. Each explorer's output is `<session dir>/concepts/<LETTER>-<lens>.md`.
+4. Each explorer's output is a session file, `concepts/<LETTER>-<lens>.md`.
 5. Dispatch them together, in one batch, so none can see another's output.
-6. Append one dispatch row per explorer to `<session dir>/dispatches.md`.
+6. Record one row per explorer in the session's `Dispatch log` section.
 
 **Lens catalog:**
 
@@ -38,7 +46,7 @@ of the first idea anyone had.
 ```
 Subagent (general-purpose):
   description: "Concept [CONCEPT_LETTER] ([LENS]) for [SESSION_TOPIC]"
-  agent_identity: "[EXPLORE-BRN<nn>-<letter> — or EXPLORE-<topic slug>-<letter> for a pre-initiative session. Must match the session dispatches.md Agent cell.]"
+  agent_identity: "[EXPLORE-BRN<nn>-<letter> — or EXPLORE-<topic slug>-<letter> for a pre-initiative session. Must match the session Dispatch log row.]"
   model: [MODEL — REQUIRED: top tier; concept quality decides what the
          human can choose from. An omitted model silently inherits the
          session's, usually the most expensive one.]
@@ -53,6 +61,11 @@ Subagent (general-purpose):
     ## Identity
 
     **Session:** [SESSION_ID] — [SESSION_DIR]
+    **`dispatch_id`:** [the row the controller added to the session's
+    `Dispatch log`; your return echoes it]
+    **`respond_to`:** [OUTPUT_FILE — the payload path under
+    merges into the artifact's `sections` on commit]
+    **`kind`:** `brainstorm` (the artifact this section feeds)
     **Question:** [QUESTION]
     **Brief and map:** [SESSION_FILE], sections `## Brief` and `## Map`
     **Prior art:** [PRIOR_ART_FILE]
@@ -72,7 +85,8 @@ Subagent (general-purpose):
       not a brief. If it is missing or truncated, return `BLOCKED` naming
       it — an invented brief produces a concept that looks responsive and
       is not.
-    - **[OUTPUT_FILE] is yours alone.** It carries your letter in its name.
+    - **[OUTPUT_FILE] is yours alone.** It carries your `concept` letter in
+      its payload.
       If it already exists, another explorer wrote it: return `BLOCKED`.
       Writing over a sibling's concept destroys the comparison this session
       exists to produce, and the loss is silent.
@@ -168,41 +182,70 @@ Subagent (general-purpose):
 
     ## Verification
 
-    1. Re-read [OUTPUT_FILE] from disk; every section below is present.
+    1. Re-read your payload from disk and parse it as JSON — a file that
+       does not parse is not a concept. Every `sections[]` id is present
+       and no body is empty.
     2. Count the decision-point rows and use-case walks against the map;
        the counts match or each difference is explained.
     3. Confirm every weighted criterion from the brief has a self-score
        row.
-    4. Confirm [OUTPUT_FILE] is your only change (`git status --short`).
+    4. Confirm `git status --short` shows nothing but your payload file.
 
     ## The Output File
 
-    ```markdown
-    ---
-    kind: concept
-    session: [SESSION_ID]
-    concept: [CONCEPT_LETTER]
-    lens: [LENS]
-    title: Concept [CONCEPT_LETTER] — <name>
-    created_at: <UTC from an executed command>
-    updated_at: <same>
-    ---
+    You write **one JSON file** to `respond_to` — never markdown. The
+    engine renders every `.md` a reader sees; a hand-written one is a
+    second source of truth that cannot be validated. Your `sections[]`
+    carry typed content — `prose`, `bullets`, `tables`, `code` — and the
+    controller merges them verbatim into the `brainstorm` artifact's own
+    `sections[]`. A table is `columns` plus `rows`, never pipes in a
+    string; a sample is `code`, never backticks; the schema rejects both.
 
-    **Explorer model:** <the model you are running as>
-
-    ## Shape
-    ## Decision points
-    ## Use-case walks
-    ## Primary flow
-    ## Domain and data
-    ## Integration
-    ## Ancestor
-    ## What it gives up
-    ## Slices
-    ## Costs and scale
-    ## Assumptions
-    ## Self-score
+    ```json
+    {
+      "kind": "brainstorm-lane",
+      "lane": "concept",
+      "session": "[SESSION_ID]",
+      "concept": "[CONCEPT_LETTER]",
+      "lens": "[LENS]",
+      "supersedes": null,
+      "sections": [
+        {"id": "shape", "title": "Shape",
+         "prose": "The concept in three sentences: what it is, what it refuses, and the one property that decides the tradeoff."},
+        {"id": "decision-points", "title": "Decision points",
+         "tables": [{"columns": ["Question", "This concept", "Why it is one-way"],
+                     "rows": [["who owns the clock", "the store", "callers cannot unbake it"]]}]},
+        {"id": "use-case-walks", "title": "Use-case walks",
+         "tables": [{"columns": ["Use case", "Walk"],
+                     "rows": [["primary", "edge -> admission -> place -> bind"]]}]},
+        {"id": "primary-flow", "title": "Primary flow",
+         "bullets": ["step one", "step two"]},
+        {"id": "domain-data", "title": "Domain and data",
+         "tables": [{"columns": ["Entity", "Fields", "Lives in"],
+                     "rows": [["Placement", "tenant, cell, boundAt", "cell store"]]}]},
+        {"id": "integration", "title": "Integration",
+         "prose": "What the concept touches and what it leaves alone."},
+        {"id": "ancestor", "title": "Ancestor",
+         "prose": "The prior art this concept descends from, and what it drops."},
+        {"id": "gives-up", "title": "What it gives up",
+         "bullets": ["cross-cell queries"]},
+        {"id": "slices", "title": "Slices",
+         "tables": [{"columns": ["Slice", "Lands when"],
+                     "rows": [["read path", "week one"]]}]},
+        {"id": "costs-scale", "title": "Costs and scale",
+         "prose": "Where the concept breaks first, and at what number."},
+        {"id": "assumptions", "title": "Assumptions",
+         "bullets": ["the brief's tenant count holds"]},
+        {"id": "self-score", "title": "Self-score",
+         "tables": [{"columns": ["Criterion", "Weight", "Score"],
+                     "rows": [["reuse", "3", "4"]]}]}
+      ]
+    }
     ```
+
+    `created_at`/`updated_at` are not yours to write: the journal records
+    when the payload landed, and an invented timestamp is a timestamp a
+    reader cannot check.
 
     ## What You Return
 
@@ -218,21 +261,31 @@ Subagent (general-purpose):
     ```
 ```
 
+## If Your Payload Is Refused
+
+`executor ingest` writes nothing when it refuses a payload, and the
+dispatch stays open. The refusal names a `code` and a `field` path; fix
+that one thing, write the corrected payload to the same `respond_to`,
+and report it. `skills/executor/references/rejections.md` lists every
+code and the action that clears it. Never re-dispatch, never edit the
+journal, and never answer a different slot — a refusal is the protocol
+saying the attempt was not what it claimed to be.
+
 **Placeholders — every one is required:**
 
 | Placeholder | Value |
 |---|---|
 | `[MODEL]` | top tier |
 | `[SESSION_ID]` | `INIT-0004-BRN-01`, or the topic slug for a pre-initiative session |
-| `[SESSION_TOPIC]` | the session directory's topic |
-| `[SESSION_DIR]` | the session directory path |
+| `[SESSION_TOPIC]` | the session's topic |
+| `[SESSION_DIR]` | the session's working directory (scratch; its files merge into the artifact) |
 | `[QUESTION]` | the session's `question:` value |
 | `[SESSION_FILE]` | the session's `session.md` |
-| `[PRIOR_ART_FILE]` | `<session dir>/prior-art.md` |
+| `[PRIOR_ART_FILE]` | the scout's payload — the controller passes the rendered `prior-art` view the engine writes from it |
 | `[LENS]` | one lens name from the catalog |
 | `[LENS_BRIEF]` | that lens's row from the catalog, plus anything specific to this brief |
 | `[CONCEPT_LETTER]` | `A`, `B`, `C`, or `D` |
-| `[OUTPUT_FILE]` | `<session dir>/concepts/<LETTER>-<lens>.md` |
+| `[OUTPUT_FILE]` | the `respond_to` payload path the engine minted — JSON only |
 
 **Never** tell an explorer what the others are doing, which concept you
 expect to win, or which lens is "the real one". **Never** give two

@@ -1,0 +1,56 @@
+[
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "elif isinstance(ap, dict):",
+    "mutation": "if-test -> True",
+    "why": "validate() returns at once for a non-dict schema, so for additionalProperties=True both paths accept every extra key; the isinstance check is redundant."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "continue",
+    "mutation": "continue -> pass",
+    "why": "continue is the last statement of the oneOf loop body, so falling through to the next iteration is exactly what it does."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "\"kind\": {\"type\": \"string\", \"minLength\": 1},",
+    "mutation": "1 -> 2",
+    "why": "BASE['kind'] is replaced by the pinned enum in _base() for every schema; the entry only documents the envelope and is never used to validate."
+  },
+  {
+    "file": "engine/executor/store.py",
+    "code": "return f.read(1) == b\"\\n\"",
+    "mutation": "1 -> 2",
+    "why": "after seek(-1, SEEK_END) exactly one byte remains, so read(1) and read(2) return the same byte."
+  },
+  {
+    "file": "engine/executor/store.py",
+    "code": "if not d.exists():",
+    "mutation": "if-test -> False",
+    "why": "Path.glob on a missing directory yields nothing, so the early return only skips a no-op."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "f\"no match for {rule}\", obj[:60])",
+    "mutation": "60 -> 61",
+    "why": "The number only truncates the value echoed in the rejection's `got` field; no consumer parses it, and pinning the exact cut would make the test brittle against a cosmetic change."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "repr(obj[:20]))",
+    "mutation": "20 -> 21",
+    "why": "Same as the notMatch echo: the slice length is diagnostic detail in `got`, not a contract any caller reads."
+  },
+  {
+    "file": "engine/executor/schemas.py",
+    "code": "if shape:",
+    "mutation": "if-test -> True",
+    "why": "_obj() stores a None shape only when the caller passed none, and validate() tests the stored value for truth before dispatching, so the extra dict entry is inert."
+  },
+  {
+    "file": "engine/executor/engine.py",
+    "code": "if not stamp:",
+    "mutation": "if-test -> False",
+    "why": "Every falsy stamp (None, empty string, 0, False) raises ExecError from _iso2epoch, which the same function catches and answers 0.0 \u2014 so skipping the guard and falling through produces the identical value. The guard is defensive, not behavioural."
+  }
+]

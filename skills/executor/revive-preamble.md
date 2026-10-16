@@ -1,14 +1,13 @@
 # Revive Preamble
 
 This is a **preamble fragment**, not a dispatch template. The controller
-prepends it to a worker's existing prompt when `exec-step` emits `REVIVE` or
-`REDISPATCH` — that is, when a dispatched worker stopped signalling and the
-engine decided to run its lane again.
+prepends it to a worker's existing prompt when `executor next` emits a
+`DISPATCH` re-using an abandoned lane — that is, when a dispatched worker
+stopped signalling and the engine re-minted the slot.
 
 Do not dispatch this. Do not register it as a role. It has no identity of
-its own: the reviving worker keeps the identity it already has
-(`IMPL-P01-T03` on a revive, a fresh `IMPL-P01-T03-R02` on a redispatch), and
-the dispatch log records which rung of the ladder it came from.
+its own: the reviving worker keeps the task it already has, and the new
+dispatch's `D<NNNNN>` records which rung of the ladder it came from.
 
 ## Why the wording is what it is
 
@@ -33,8 +32,8 @@ of what happened, your memory of it is not.
 
 Before you write anything:
 
-1. **Read what is already there.** The report at [REPORT_FILE], the task
-   branch, and any partial diff. Determine which of these are true:
+1. **Read what is already there.** The prior `impl/*.report.json` payloads,
+   the task branch, and any partial diff. Determine which of these are true:
    - work is complete or nearly so, and the failure was only in reporting;
    - work is partially done and coherent — continue from where it stops;
    - work is partially done and incoherent — say so explicitly and repair
@@ -61,7 +60,7 @@ on it; do not discard it unilaterally.
 
 | Placeholder | Fill with |
 |---|---|
-| `[REPORT_FILE]` | Absolute path of the task's report, if one exists |
+| *(none)* | The prior `impl/*.report.json` is named in the re-dispatch context |
 
 ## Rung differences
 
@@ -71,8 +70,8 @@ happens around it, not what the worker is told:
 
 | Rung | Emitted when | Controller action |
 |---|---|---|
-| `REVIVE` | The worker died once and still holds its own context | Resume the same agent; its `Agent` cell is unchanged |
-| `REDISPATCH` | The worker was resumed and went silent again | Fresh agent, full brief, fresh identity round; the previous report is included in its context so it does not start blind |
+| revive | The worker died once and still holds its own context | Resume the same agent with the same identity and the new `respond_to` |
+| redispatch | The worker was resumed and went silent again | Fresh agent on a new dispatch id; the prior report is in `context` so it does not start blind |
 
 ## Boundary
 

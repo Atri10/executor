@@ -1,25 +1,55 @@
 # The Executor
 
-An initiative-scoped workflow system for coding agents: it takes a major
-idea from intake through architecture, spec, plan, plan regression,
-execution, review, and verification — with a strict per-initiative ID
-namespace, separated thinking and execution stores, a script-enforced
-contract at every state transition, and evidence-backed completion.
+An initiative-scoped workflow system for coding agents. You describe a
+major idea; the engine takes it through intake, discovery, architecture,
+design, specification, planning, plan regression, execution, review, and
+verification — with a strict per-initiative ID namespace, separated
+thinking and execution stores, and schema-enforced contracts at every
+state transition.
 
 **Nothing floats.** Every document, task, review, verdict, and ruling
-carries an ID that names the initiative it belongs to. A body of work gets
-one **Initiative**; the initiative owns a folder, an ID namespace, and every
-document produced about it.
+carries an ID that names the initiative it belongs to. One initiative
+owns one folder, one namespace, and every payload produced about it.
 
 **Nothing is enforced by hope.** Where a workflow could silently drift — a
-run row lying about the ledger, a task completed without review, a plan
-naming paths only scripts may resolve — a script checks it and exits
-non-zero. Contracts enforced by prose are hopes; contracts enforced by
-scripts are contracts.
+verdict about a different diff than the one under review, a task completed
+without review, a gate cleared by a controller that decided to be helpful —
+the engine refuses it, in code, before it lands. Contracts enforced by
+prose are hopes; contracts enforced by schemas and a fold are contracts.
 
-Works with any agent that can read skill files from a directory —
-Claude Code, Codex, [omp](https://github.com/Atri10/.omp), or anything
-similar. The skills are markdown; the scripts are POSIX bash.
+Works with any agent that can read skill files from a directory — Claude
+Code, Codex, [omp](https://github.com/Atri10/omp), or anything similar. The
+skills are markdown; the engine is Python 3.11+, dependency-free, and runs
+on macOS, Linux, and Windows.
+
+## In sixty seconds
+
+```text
+$ npx skills add Atri10/executor                 # skills into your harness
+$ export PYTHONPATH=/path/to/executor/engine     # the engine on the path
+
+$ python3 -m executor new "Tenant isolation cells"
+{
+  "created": "INIT-0001",
+  "title": "Tenant isolation cells",
+  "store": ".../.executor/INIT-0001",
+  "docs": ".../docs/executor/INIT-0001"
+}
+
+$ python3 -m executor next
+{"action":"PHASE-ENTER","initiative":"INIT-0001","phase":"intake", ...}
+
+$ python3 -m executor status
+INITIATIVE INIT-0001 - Tenant isolation cells
+phase: intake (in_progress)
+events: 3 | artifacts: 0 | tasks: 0
+```
+
+The loop is always the same: **`next` gives you one typed action, you do
+that one thing, and the engine decides again.** `next` also returns a
+`resume` block — phase, phase state, last event, open slots, task counts —
+so every action is self-describing for whoever or whatever picks it up,
+and nothing depends on remembering where the run was.
 
 ## Install
 
@@ -31,47 +61,52 @@ discovers every skill in the repo and wires them into your harness:
 npx skills add Atri10/executor
 ```
 
-Or clone and copy `skills/` into whatever directory your agent loads from:
+Or clone and copy `skills/` into whatever directory your agent loads from,
+and put `engine/` on your `PYTHONPATH`:
 
 ```bash
 git clone git@github.com:Atri10/executor.git
 cp -R executor/skills/* <your-agents-skills-dir>/
+export PYTHONPATH=<clone>/engine
 ```
 
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v0.7.1 git@github.com:Atri10/executor.git
+git clone --branch v2.0.0 git@github.com:Atri10/executor.git
 ```
+
+There are no dependencies to install: the engine is the standard library,
+and its own test suite needs nothing but Python (plus `coverage` if you
+want the branch report — `pip install -r requirements-dev.txt`).
 
 ### One-paste install for any LLM agent
 
 Paste this into your agent — Claude Code, Cursor, Aider, Codex, omp, or any
-other harness. It discovers the right skills directory itself and verifies
-the install:
+other harness. It discovers the right directories itself and verifies the
+install:
 
 ```text
-Install The Executor skill library for me:
+Install The Executor skill library and engine for me:
 
 1. Clone https://github.com/Atri10/executor.git into a temp directory
-   (use --branch v0.7.1 for the latest release, or default branch for main).
 2. Find my agent's skills directory. Candidates, in order — use the first
    that exists, or ask me if none do:
    - ~/.omp/agent/skills/            (omp)
    - ~/.claude/skills/               (Claude Code)
    - ~/.cursor/skills/               (Cursor)
    - .claude/skills/                 (repo-local Claude Code)
-   - ~/.aider/skills/ or as my harness documents
+   - as my harness documents
 3. Copy every directory from the clone's skills/ folder into that skills
    directory (each is one skill: skills/executor, skills/executor-spec, ...).
-4. Verify: run bash <skills-dir>/executor/scripts/exec with no arguments
-   inside the clone — it must print the resume digest (or a clean "nothing
-   in flight"), proving the script tree resolves. Then run
-   bash <skills-dir>/executor/scripts/exec-graph check inside the clone —
-   it must report 0 failed, proving the whole script tree is intact. Also
-   confirm every copied skills/<name>/ directory contains a SKILL.md (count
-   the directories, not a remembered number — the skill set grows, and a
-   stale count here fails an install that is actually fine).
+   Tell me the PYTHONPATH line that points at the clone's engine/ directory,
+   and add it to my shell profile if I confirm.
+4. Verify: run PYTHONPATH=<clone>/engine python3 -m executor --version
+   (prints 2.0.0), then PYTHONPATH=<clone>/engine python3 -m executor
+   --help (lists the command surface). Also confirm every copied
+   skills/<name>/ directory contains a SKILL.md — count the directories,
+   not a remembered number: the skill set grows, and a stale count fails
+   an install that is actually fine.
 5. Tell me which directory you installed into, and how to invoke the
    router in my harness (usually /skill:executor or just asking for
    "the executor").
@@ -86,58 +121,47 @@ Then invoke the root router:
 /skill:executor
 ```
 
-or just say *"start an initiative"* — normal requests route by each skill's
-frontmatter description.
+or say *"start an initiative"* — normal requests route by each skill's
+description.
 
-## The phase pipeline
+## How a run is driven
 
-| Skill | Phase | Output |
-|---|---|---|
-| `executor` | Router + contract | Loads the right phase skill, defines the ID namespace |
-| `executor-initiative` | Intake | Initiative folder, charter, registry entry, initiative branch |
-| `executor-discovery` | Discovery | Research notes, options comparison |
-| `executor-architecture` | Architecture, Design | Architecture, ADRs, interfaces, component designs |
-| `executor-spec` | Specification | Spec, risks, verification strategy (one row per requirement) |
-| `executor-planning` | Planning | Plans with tasks, linted before the gate |
-| `executor-plan-regression` | Plan regression | Plan-set audit, repairs, clearance summary — gates execution |
-| `executor-execution` | Execution | Task dispatch, ledger, reports, run registry |
-| `executor-review` | Review | Per-task and whole-branch verdicts, findings, fix loops |
-| `executor-verification` | Verification | Evidence-backed proof each requirement holds |
-| `executor-handoff` | Handoff | Human decision menu: merge, PR, or keep the branch |
-| `executor-brainstorm` | Cross-phase | Recorded divergent ideation sessions; visual companion optional |
-| `executor-critique` | Every phase (gate) | Per-component audit, repair, re-audit; gates the phase that produced the artifacts |
-
-**Phases compress, they never vanish.** A small initiative can produce a
-charter and a spec in one exchange and skip discovery — but skipping is a
-stated decision recorded in the charter, not an omission.
-
-### The shape of a run
-
-The controller runs one loop and holds no judgment: it runs `exec`, reads
-the single action word it prints, does that, and goes back. Every arrow
-below is either a script decision or a dispatched subagent. There is no
-step where the controller does the work.
+One loop, and the controller holds no judgment: run `executor next`, read
+the single typed action it emits, do that, go back. Every arrow below is
+either an engine decision or a dispatched subagent.
 
 ```mermaid
 flowchart TD
-    start(["exec"]) --> enter{"PHASE-ENTER phase"}
-    enter --> author["exec-dispatch --role author"]
-    author --> artifact["artifact on disk"]
-    artifact --> check["exec-critique check"]
-    check -->|"not clear"| loop["AUDIT then REPAIR then re-AUDIT"]
-    loop --> check
-    check -->|"clean or waived"| gate{"PHASE-GATE phase"}
-    gate -->|"human gates it"| next["next phase"]
-    gate -->|"exec-present gate card"| next
-    gate -->|"autonomous declared"| auto["exec-gate --auto"]
-    auto -->|"refused"| gate
-    auto -->|"auto-passed"| next
+    start(["executor next"]) --> enter{"PHASE-ENTER phase"}
+    enter --> author["DISPATCH author"]
+    author --> artifact["payload written to respond_to"]
+    artifact --> ingest["executor ingest"]
+    ingest --> audit["DISPATCH audit"]
+    audit -->|"findings open"| repair["DISPATCH repair"]
+    repair --> audit
+    audit -->|"clean"| gate{"GATE phase"}
+    gate -->|"human decides"| decide["executor decide — gate_decision"]
+    gate -->|"autonomy allows"| auto["gate clears by: auto"]
+    auto --> next["next phase"]
+    decide --> next
     next --> start
     start -->|"every phase resolved"| done(["DONE"])
 ```
 
-The phase order, and which of them carry a critique gate. Every authoring
-phase does; the two critique phases audit the others.
+### What each action asks of you
+
+| Action | The engine is asking | You must not |
+|---|---|---|
+| `PHASE-ENTER` | route to the named phase skill | start work before the gate that follows it |
+| `DISPATCH` | run the named subagent on the prompt it rendered | shorten, pre-judge, or answer the payload yourself |
+| `GATE` | collect a human decision | pass it because the work "looks done" |
+| `ASK` | answer a blocked worker's question with a `ruling` | answer it with your own guess |
+| `ESCALATE` | adjudicate what the cap says cannot continue | push another round to avoid the ruling |
+| `MERGE` | perform the plan merge it describes | reorder or edit the named heads |
+| `DONE` | report to the human | claim "complete" while a criterion is unanswered |
+| `HALT` | stop | continue quietly |
+
+### The phase order
 
 ```mermaid
 flowchart LR
@@ -158,489 +182,414 @@ flowchart LR
     class PR,R critic
 ```
 
+Every authoring phase carries a critique gate after it; the two critique
+phases (plan regression and review) audit the others. Phases compress —
+a small initiative may author a charter and a spec in one exchange — but
+skipping one is a stated human `ruling`, never an omission.
+
 ### The task loop inside execution
 
-Each plan's tasks run as a loop, and a task result reaches run state only
-through a gate. A worker that stops is escalated through a fixed ladder
-before anyone is replaced.
+A task's result reaches the fold only through a review round. A worker
+that stops is escalated through a fixed ladder before anyone is replaced.
 
 ```mermaid
 flowchart TD
-    step(["exec step PLAN_FILE"]) --> act{"action"}
-    act -->|"RUN-START"| start["exec-run PLAN start"]
-    act -->|"DISPATCH"| disp["exec-dispatch PLAN --role impl"]
-    disp --> impl["spawn IMPL on the printed PROMPT"]
-    impl --> worker[("worker runs on its own branch")]
-    worker -->|"report lands"| rep{"verdict?"}
-    rep -->|"none, no reviewer"| rev["REVIEW: exec-dispatch --role review"]
-    rev --> reviewer[("reviewer writes verdict")]
-    reviewer --> rep
-    rep -->|"none, reviewer in flight"| waitrev[("WAIT — no livelock")]
-    rep -->|"unclean"| fix["FIX: exec-dispatch --role fix"]
-    fix --> worker
-    rep -->|"clean"| commit["REPORT: exec-report gates and commits"]
-    commit --> next{"more tasks?"}
-    next -->|"yes"| step
-    next -->|"no"| gate["GATE-STAGE: exec-run complete"]
-    act -->|"REVIVE / REDISPATCH"| ladder["exec-ladder rewrites the rung"]
-    ladder --> worker
-    act -->|"ADJUDICATE"| adj["exec-adjudicate builds the evidence pack"]
-    adj --> sup["spawn SUPERVISOR on the printed PROMPT"]
-    sup --> step
-    act -->|"WAIT"| idle[("idle one turn — the emit names the wake")]
+    step(["executor next"]) --> act{"action"}
+    act -->|"DISPATCH impl"| disp["spawn impl on the rendered prompt"]
+    disp --> worker[("worker writes its report payload")]
+    worker -->|"needs_context"| ask["ASK — a human ruling answers"]
+    worker -->|"spawn_error"| pending["task reverts to pending, re-dispatch"]
+    worker -->|"BLOCKED"| esc["ESCALATE — adjudicate"]
+    ask --> step
+    pending --> step
+    esc --> step
+    worker -->|"reported"| rev["DISPATCH review — engine mints R<NN> package"]
+    rev --> rep{"verdict open critical/important?"}
+    rep -->|"clean"| merge["task complete — MERGE when the plan is ready"]
+    rep -->|"open under cap"| fix["DISPATCH fix — fix-package minted"]
+    fix --> rev2["DISPATCH review — new round, prior findings in context"]
+    rev2 --> rep
+    rep -->|"open at cap"| brk["ESCALATE — adjudicate every open finding"]
+    act -->|"MERGE"| mg["ingest the merge payload — merge_sha verified"]
+    mg --> step
     act -->|"DONE"| fin(["plan complete"])
 ```
 
-A worker's status reaches run state through two gates, never through the
-controller's memory: the report's `result:` frontmatter (`blocked` routes to
-ADJUDICATE, `needs-context` to ASK) and `exec-report`'s verdict gate. A
-report with no verdict yet emits `REVIEW` — and `WAIT` while that reviewer
-runs, which is what stops a healthy run from reading as a stalled one.
+### The task state machine
+
+The fold owns task state; a worker cannot write it. These are the only
+transitions, and each is triggered by a payload the engine accepts.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: the plan payload lands
+    pending --> dispatched: DISPATCH impl
+    dispatched --> reported: a report payload, result DONE/PARTIAL
+    dispatched --> blocked: a report payload, result BLOCKED
+    dispatched --> prior_state: a spawn_error event, or the next poll abandons it
+    prior_state --> dispatched: the task is re-dispatched
+    blocked --> prior_state: a human ruling answers the question
+    reported --> complete: a verdict with no open critical/important
+    reported --> fix_needed: a verdict with findings inside the cap
+    fix_needed --> dispatched: DISPATCH fix, a new round
+    fix_needed --> complete: a later verdict is clean
+    fix_needed --> escalate: the round cap is reached
+    escalate --> [*]: every open finding is adjudicated by ruling
+    complete --> [*]
+```
+
+Two details the fold pins and a worker cannot alter: a lost dispatch
+(spawn error, or silence past the deadline) returns the task to
+**`prior_state`** — the state it was in when it was dispatched, so a fix
+round resumes as a fix round, not as new work; and a ruling does the same,
+so a question raised during review resumes review rather than
+implementation. `needs_context` is that waiting state, and it is entered
+only by a question payload.
+
+## The skills, and when each one loads
+
+| Skill | Loads when | It owns |
+|---|---|---|
+| `executor` | always — the router and contract | the pump, the ID namespace, the two stores, secret hygiene |
+| `executor-initiative` | `PHASE-ENTER intake`, or a request to classify work | classify / spike / initiative / attach, the charter |
+| `executor-discovery` | the discovery phase | options comparison, brainstorm sessions |
+| `executor-architecture` | architecture and design | `arch`, `adr`, `ifce`, `design` artifacts |
+| `executor-spec` | the specification phase | `spec`, `risk`, `vrfy` artifacts |
+| `executor-planning` | `GATE specification` passed | the `plan` payload: tasks, sections, dependencies |
+| `executor-plan-regression` | `PHASE-ENTER planning` is done | the plan-set audit, repair, re-audit — gates execution |
+| `executor-execution` | `PHASE-ENTER plan-regression` passed | task dispatches, reports, fix rounds, the merge |
+| `executor-review` | a task reports, or the plan is ready to merge | `verdict` payloads, findings, the whole-branch audit |
+| `executor-verification` | execution and review are finished | `evidence` payloads per `vrfy` criterion |
+| `executor-handoff` | `PHASE-ENTER verification` passed | the rulings report, docs export, the human's decision |
+| `executor-critique` | any critique gate | per-component audit, repair, re-audit |
+| `executor-brainstorm` | a brainstorm artifact is needed | recorded divergent ideation |
 
 ## Feature highlights
 
-### Every task gets a brief, a context file, and a fresh reviewer
+### The journal is the state, and the fold is its only reader
 
-- `exec-brief` extracts one task's text into a self-contained brief — the
-  implementer reads requirements in one call, and task text never passes
-  through the controller's context.
-- `exec-context` assembles everything the brief cannot know: the exact
-  signatures earlier tasks provide, the current surface of the files being
-  modified, the binding global constraints, and the rulings that touch the
-  task's files. Implementers start working without exploring.
-- **Two-verdict reviews** (spec compliance + code quality) from a reviewer
-  who never trusted the implementer's report, writing a verdict *file* —
-  not a chat message that vanishes on the next summarization.
-- **Non-code tasks still get reviewed**: a docs-only or evidence-capture
-  task is judged on its report vs its brief, with the same mandatory
-  verdict file.
+Every accepted payload is one JSON line in
+`.executor/INIT-NNNN/journal/events.v1.jsonl`, hash-chained (`prev_sha`,
+`line_sha`) — `executor check` recomputes the chain and refuses a store
+that was edited by hand. Views (`views/progress.md`, `views/dispatches.md`,
+`views/summary.md`, `views/graph.json`, the rendered `.md` beside each
+committed payload) are derived projections; `state.json` is a cache the
+engine detects and refolds when stale. A dispatch is single-use and
+answered exactly once: `slot.json` records the minting event, `prompt.md`
+is the worker's brief, and `payload.json` is the `respond_to` path
+`executor ingest` validates against the `kind`'s schema.
 
-### A fix loop with a breaker
+### Every payload is a closed, typed document
 
-Findings are severity-graded with worked calibration examples, fixed in
-rounds (1–3 resume the original implementer; 4–5 escalate to a fresh,
-more-capable model), re-reviewed scoped to the fix diff, and at the cap
-adjudicated by recorded ruling — never silently dropped. Re-reviews check
-the fix addressed the *root cause*, and whether any test was weakened.
+`engine/executor/schemas.py` defines each `kind` as a closed object with
+anchored patterns: exact ID shapes, back-references tying a task ID to its
+plan, numeric bounds pinned by a literal table, and rejections that name
+the field, the expected type, and the observed value. A plan cannot cite a
+task that does not exist; a verdict cannot name a round the engine did not
+mint; a verdict about another diff is `round_mismatch`, not a numbering
+slip.
 
-### Evidence is capability-aware, not ceremony
+### A payload is data; the engine writes every document
 
-The implementer contract asks for the **strongest feasible evidence**
-for every behavior change: a watched failing test where a test harness
-exists, a named alternative instrument where it does not (CLI fixture
-run, parse/render check, exercised UI), and an explicit NOT-RUN/UNAVAILABLE
-record where nothing feasible exists. Reviewers verify evidence, and a
-reviewer who cannot name the failure a demanded test would catch does
-not get to demand it.
+Sections carry four typed shapes — `prose`, `bullets`, `tables`
+(`columns` plus `rows`), and `code` — and no string in a payload may carry
+markdown syntax. A pipe table, a code fence, or a heading inside a string
+is rejected as `notMatch`; a table row whose cell count differs from its
+columns is `row_width`; a whitespace-only value is `nonBlank`;
+`sections[].id` must be unique, because a reviewer cites it.
+`engine._render_doc` is the only writer of document markdown.
+
+```json
+{"kind": "spec", "v": "v1", "dispatch_id": "D00112",
+ "id": "INIT-0004-SPEC-01", "title": "Cell placement",
+ "summary": "A tenant is placed in exactly one cell, deterministically.",
+ "sections": [
+   {"id": "determinism", "title": "Determinism",
+    "prose": "The same inputs name the same cell, on every node.",
+    "tables": [{"caption": "What the invariant forbids",
+                "columns": ["Input", "Permitted", "Forbidden"],
+                "rows": [["region, sizeClass", "any known pair", "an unknown region"]]}]}],
+ "requirements": [
+   {"id": "R01", "requirement": "placement is deterministic",
+    "observable": "two calls with identical inputs return the same cell",
+    "cites": ["INIT-0004-ARCH-01"]}],
+ "constraints": [], "risks": [], "cites": ["INIT-0004-ARCH-01"]}
+```
+
+Every refusal the engine can emit — 37 of them — is listed in
+`skills/executor/references/rejections.md` with its field and the action
+that clears it, and `engine/tests/test_docs_agreement.py` walks the
+engine's raise sites against that list so a new rejection cannot ship
+undocumented.
 
 ### Plans are audited as a set, not one at a time
 
-Per-plan review reads one file. The defects that actually ship live
-*between* files: an `Assumes` section promising a signature the
-predecessor plan never produces, a spec requirement no plan's `Covers:`
-claims, two plans provisioning the same queue with different shapes.
+Per-plan review reads one payload; the defects that actually ship live
+*between* payloads. `executor-plan-regression` reads the whole set against
+the spec, the interface artifacts, and each other — coverage, seam closure,
+ordering, constraint propagation, file ownership. Execution cannot start
+until every plan is clean or the human has waived a finding by `ruling`.
 
-`executor-plan-regression` runs between planning and execution and reads
-the whole set against the spec, the interface contracts, and each other —
-coverage, Assumes/Produces closure, ordering, constraint propagation,
-file-map collisions, vocabulary. Findings are repaired in the plan files
-themselves, then re-audited; the clearance summary lives at
-`.executor/<INIT>/plan-regression/summary.md`. Execution cannot start
-until every plan is `clean` or the human has explicitly `waived` a
-finding — enforced by the phase-order machine, by `exec-run start`, and
-by `exec-store-check`.
+### Reviewers see the package, not a paraphrase
 
-### Dispatched agents are briefed from a template, not memory
+When a task reports, the engine mints `reviews/R<NN>.package.json`:
+`commit_base`, `commit_head`, the diff, and every prior finding. The
+reviewer's `verdict` payload echoes `round`, `commit_base`, `commit_head`,
+and `reviewed_package_sha`; a mismatch is rejected. Two verdicts are
+mandatory — `spec_verdict` (PASS/FAIL against the contract) and
+`quality_verdict` (APPROVED/NEEDS_FIXES/APPROVED_WITH_ROUTED_RESIDUALS) —
+and findings carry `severity`, `claim`, and `evidence` quoting `path:line`.
 
-Every role that dispatches a subagent — implementer, task reviewer,
-re-reviewer, final reviewer, plan auditor, plan repairer, plan
-re-auditor, evidence runner, prior-art scout, concept explorer, design
-critic — has a registered prompt template with its identity grammar, a
-required `model:` line, and a filled `[PLACEHOLDER]` contract. An agent
-briefed from the dispatcher's memory is a dispatch defect:
-`validate-skills.sh` fails on a dispatch role with no registered template,
-a template missing its `## Self-Critique Before You Return` /
-`## Verification` / `## What You Return` sections, or a prompt file nobody
-registered. The dispatch registry lives in
-[references/layout.md](skills/executor/references/layout.md).
+### A fix loop with a breaker
 
-### Every artifact critiques and verifies itself before its gate
+Findings are severity-graded: `critical`/`important` enter the fix loop,
+`minor` stays `open` for the final audit, `info` is recorded. Each round
+is a `fix` dispatch plus a scoped re-review; near the cap the dispatch goes
+to a fresh implementer one tier up (the cap is the `max_fix_rounds`
+tunable, default 5, bounds 1–50). At the cap, `ESCALATE` requires
+adjudicating every open finding — parked with a journaled `ruling`, never
+silently dropped.
 
-Each phase skill carries a `## Self-Critique` section — an adversarial
-pass over the artifact it just wrote — and a `## Verification` section —
-the commands that prove it, run in-session with output cited at the gate.
-A gate claimed before both ran is not claimed. The same two sections are
-required inside every dispatch template, so a subagent checks its own
-output before returning a status line the controller will trust.
+### Evidence is capability-aware, not ceremony
 
-### Every authoring phase passes an independent critique gate
-
-The pipeline has eleven phases. Before this, only **two** of them could
-reject a bad deliverable — `plan-regression` and `review`. `design` and
-`verification` had no artifact gate at all, and architecture and spec ran
-adversarial *self*-critiques whose own skills refused the word critic,
-correctly: one agent grading its own work is not review.
-
-`executor-critique` generalises the plan-regression contract to all nine
-authoring components. Each phase's artifacts are audited as a **set** — the
-defects worth finding live between documents — and the phase cannot be marked
-`passed` until that audit is clean or the human has waived it in writing.
-
-The gate is a script, and it is harder than the stage it generalises from:
-
-- **`verdict: PASS` beside a non-zero `high`/`medium` is refused**, not
-  believed. PASS means zero HIGH and zero MEDIUM, and the check recomputes
-  that from the auditor's own counts.
-- **The three-round cap is enforced by the script.** `audit 04` exits 2
-  with a message. A cap nobody counts is a suggestion, and a suggestion is
-  how a fourth round appears with nobody able to say when the loop started.
-- **A waiver needs both a note in the row and an initiative ruling naming
-  the artifact.** A bare `waived` cell is indistinguishable from a controller
-  self-granting one.
-- **An empty clearance is not a cleared one** — for document components and
-  run-axis components alike.
-
-The controller never clears its own work. `exec-initiative` runs the check on
-the controller's behalf and refuses the phase, and the refusal names what to
-do about it rather than leaving a way around it.
+The implementer contract asks for the **strongest feasible evidence** for
+every behavior change: a watched failing test where a harness exists, a
+named alternative instrument where it does not, and an explicit
+NOT-RUN/UNAVAILABLE record where nothing feasible exists. The verification
+phase turns the `vrfy` criteria into `evidence` payloads with observed
+output, and `executor status` counts every criterion as proven, failed,
+unavailable, or unanswered — a criterion nobody ran is unproven however
+obviously it "must" work.
 
 ### Upstream drift has a seat
 
-No reviewer prompt in the system ever opened the architecture store. Its
-inputs were the spec, the plan, the ledger, reports, verdicts and the diff —
-so an implementation satisfying every `R-nn` and every `C-nn` while violating
-the ARCH passed **every gate in the system**. Adapters importing each other, an
-ORM row crossing into policy, a seam renamed from its IFCE: there was no point
-at which anything could see it.
-
-Two seats now catch it. The `code` component's check catalog makes the
-architecture, IFCE and design stores *required inputs* of the implementation
-critique, and the final reviewer's prompt takes them as required inputs with an
-architecture-conformance check — where the spec and the architecture disagree,
-that is a finding, and the diff alone cannot say which side is wrong.
+No reviewer ever gets only the diff. The critique catalogs make the
+`arch`, `ifce`, and `design` artifacts required inputs of the
+implementation critique, and the final reviewer takes them as required
+inputs with an architecture-conformance check: where the spec and the
+architecture disagree, that is a finding, and the diff alone cannot say
+which side is wrong.
 
 ### Unattended runs, fail-closed
 
-An initiative can declare which phase gates a human agreed to let go
-unattended:
+An initiative declares which phase gates a human agreed to let go
+unattended — `executor autonomy`, one JSON map of phase to mode:
 
-```markdown
-| Phase | Mode | Why |
-|---|---|---|
-| intake | deny | the charter is the human's to approve |
-| execution | allow | every stage is gated; workers are dispatched, not self-approved |
+```text
+executor autonomy                        # the policy in force, every phase
+executor autonomy execution allow        # a structural gate may clear itself
 ```
 
-`exec-gate INIT PHASE --auto` clears a gate only when the policy permits it,
-and **every ambiguity resolves to deny**: no policy file, `enabled: false`, an
-unlisted phase, or a mode spelled wrong. A typo in a table cell must not become
-an unattended phase gate. A pick-class phase (`design`, `specification`) in
-`allow` mode still requires a scored verdict already on disk — a script can
-count files, it cannot choose between designs, so it declines rather than
-guesses.
-
-An auto-pass is recorded as `**auto-passed** <date>`, visibly distinct from a
-human `passed`, and it must clear the same artifact gate a human pass does. A
-human who disagrees overturns it with one command, which reopens the phase:
-
-```bash
-exec-initiative phase INIT-0004 superseded specification "the design was wrong"
-```
-
-### Decisions: rule, ask, or stop
-
-Inside a phase the workflow does not wait on a human — but it does not
-silently decide everything either. Mechanical or reversible calls are
-ruled and logged (`exec-ruling`, mirrored into `.local/decisions/`).
-Decision-class calls — contract conflicts, scope cuts, irreversible
-choices, product judgment — are asked on the spot through the harness's
-question affordance, blocking only the affected lane, with the question
-recorded beside the ruling (`--answered`). Only four things stop a run:
-an irreversible operation, a security-sensitive action, a side effect
-outside the worktree, or a defect where every path forward is a guess.
-
-### Script-enforced state, everywhere
-
-| Script | Owns |
-|---|---|
-| `exec` | **The single entry point**: bare `exec` prints the resume digest, `exec <name>` dispatches to `exec-<name>`, `exec verbs` prints the decision table, `exec roles` the dispatch registry. The controller never needs the scripts directory path |
-| `exec-initiative` | Allocate initiative IDs, scaffold folders, phase log, initiative branch (`branch INIT-0004`); `phase … check` validates a gate without writing it |
-| `exec-id` | Next free ID of any type — allocation never guesses |
-| `exec-plan-lint` | **Planning gate**: rejects literal store paths in plans, task headings without IDs, missing or empty `spec`/`interfaces`/`tasks`/`execution_mode`, task-count mismatch, and over-specified task bodies (impl-language fences >40 lines or >60% of a body) |
-| `exec-workspace` | Resolve and seed a plan's execution workspace: ledger, rulings, preflight scan, dispatch log; seeds the registry row `ready` |
-| `exec-brief` / `exec-context` | Task brief and context files, generated, never hand-built — briefs carry contract verbatim and mark embedded code as advisory |
-| `exec-dispatch` | **The dispatch act, one locked step**: mints the agent ID per the registry grammar, builds the role's input file (brief+context, review package, fix package, or evidence), marks the ledger with the annotation, appends the dispatches.md row (`running`), and renders the role prompt bracket-clean. Nothing dispatches by hand |
-| `exec-ladder` | The revive ladder's write path: `revive`/`redispatch` rewrites the open row's `revived-rvN` cell, refreshes Last-Seen, enforces `EXEC_MAX_REVIVE` itself, and prints the filled preamble + prompt paths |
-| `exec-seen` / `exec-heartbeat` | The two liveness witnesses: refresh an open row's `Last-Seen`, and stamp the worker heartbeat file `exec-supervise` reads |
-| `exec-prompt` | Renders any registered role template with `KEY=VAL` slots; refuses to emit while any `[UPPER_SNAKE]` bracket is unfilled — an unfilled bracket is a defect, not a style gap |
-| `exec-review-package` | Review diffs with commit list + stat + `-U10` diff in one file, per round |
-| `exec-fix-package` | Fix-round dispatch package: verdict findings + implementer report + brief + context verbatim, so fix agents see the contract, not a paraphrase |
-| `exec-run` | Run lifecycle in the registry: `start`/`task`/`complete`/`pause`/`blocked`/`check` |
-| `exec-step` | **The pump kernel**: folds a plan run (or an initiative's phase log, or every in-flight run) and emits exactly one typed action — `REPAIR-STATE`/`RUN-START`/`DISPATCH`/`REVIEW`/`FIX`/`REVIVE`/`REDISPATCH`/`ADJUDICATE`/`REPORT`/`GATE-STAGE`/`PHASE-ENTER`/`PHASE-GATE`/`CRITIQUE`/`ASK`/`WAIT`/`DONE`. Read-only and non-improvising: "what is legal next" is a script question, not a controller judgment. Every emit carries a `(wake on …)` condition; repeated emits with no state change escalate to `ADJUDICATE` instead of looping |
-| `exec-supervise` | **Worker liveness and the revive ladder**: output presence > worker heartbeat > row age, then `REVIVE` → `REDISPATCH` → `ADJUDICATE`, counted from the dispatch log rather than a counter file a worker could delete. Product paths are role-aware (a review row's product is its verdict, not the implementer's report) |
-| `exec-adjudicate` | **The evidence pack**: assembles the adjudication set mechanically — report, latest verdict, diff, open rows, ledger and rulings tails — then dispatches SUPERVISOR. The adjudicated party does not choose the adjudicator's evidence |
-| `exec-present` | **The gate card**: emits a fixed-shape summary for PHASE-GATE — entered, gate state, critique clearance, artifact paths, gate-check result. Artifact bytes never enter the controller's context |
-| `exec-status` | **The resume surface**: one digest of every in-flight run and initiative with its next verb, open rows, and store drift. `--write` stamps `.executor/RESUME.md` so a cold agent reorients in one read |
-| `exec-graph` | **The graph's integrity check**: every `exec-step` verb has exactly one actuator row, every ledger file traces to a script writer, every role template resolves, every ID grammar carries placeholders, and ledger↔plan↔dispatch↔registry references resolve. A dangling reference is a FAIL, not a NOTE |
-| `exec-report` | **Gate-on-commit**: the only path a worker's result takes into run state. Refuses (writing nothing) unless the task's latest-round verdict is clean; on success appends the canonical ledger line, writes the Task status row, closes the dispatch rows, and refreshes the registry's task count — one locked act |
-| `exec-gate` | **Autonomy policy**: decides whether a phase gate may clear without a human. Fail-closed — a missing, disabled, or unlisted policy reads as `deny`. `--auto` records `**auto-passed**` in the phase log (visibly distinct from a human `passed`); a pick-class phase additionally requires a scored verdict on disk, because a script can count files but cannot choose between designs |
-| `exec-plan-regression` | **Plan-set gate**: resolves the initiative-level `plan-regression/` dir, seeds the clearance summary, and `check` refuses a run while any plan is unaudited or unrepaired |
-| `exec-critique` | **The gate every authoring phase passes through**: audits one component's document set against itself and its upstream contracts, then decides whether that phase may be marked `passed`. One script, every component — the mapping from phase to component to check catalog is a registry row, so adding a component is data, not a fork. Hardened where `plan-regression` was soft: `verdict: PASS` beside a non-zero `high`/`medium` is refused rather than believed, the three-round cap is enforced by the script, and a waiver needs both a note and an initiative ruling behind it |
-| `exec-run check` | **Drift + semantic audit**: registry row vs ledger, verdict CONTENT (a FAIL verdict blocks), exact task set with latest-state reduction, final verdict lineage (a failing final re-review supersedes an earlier clean one), completed tasks present in the Task status table, branch topology (branch/task agreement, recorded merges present on the plan branch, unmerged task branches under a clean final verdict, orphan worktrees) — exit 1 names the failure |
-| `exec-branch` | **Branch lifecycle**: `start`/`merge`/`abandon` for the plan branch (merge refused unless the review audit passes), `task start\|merge\|abandon` for task branches (merge refused unless the task's own verdict is clean; `--worktree` for parallel waves), `side`/`spike` for work that is neither, and `status` for the branch stack + orphan worktrees |
-| `exec-evidence` | Per-criterion evidence files in the initiative's tracked `verification/evidence/PNN/`, immutable per round (`-attempt2` on same-round reruns), atomic publish, per-round state stamp (branch, commit, dirtiness) |
-| `exec-store-check` | **Thinking-store integrity gate**: registry ↔ folders ↔ Documents table ↔ frontmatter statuses ↔ cross-links ↔ evidence citations ↔ phase-log chronology, plus per-kind document contracts (architecture must carry a Mermaid diagram, specs need requirement headings + a resolving verification link, active options need a decision, `criteria_count` must match `V<nn>` rows), the doc-code boundary, the brainstorm record, branch provenance, and plan-regression clearance (execution entered without a passed/skipped plan-regression phase fails) |
-| `exec-ruling` | Record a decision taken on the human's behalf — to the rulings log *and* the local decisions store. `--answered` marks it as a reply to a question you asked; `--unsolicited "<verbatim>"` records input the human offered unasked, and `--stop` halts the run mechanically instead of leaving the controller to decide whether to comply |
-| `exec-scan-secrets` | Credential-shaped content scan across both stores; reports file:line, never the value |
-
-### A branch model with review-gated merges
-
-One branch per artifact level, named after the artifact's ID
-([full spec](skills/executor/references/branches.md)): `initiative/INIT-NNNN` forks from
-wherever the human currently is (fork point recorded), `plan/INIT-NNNN-Pnn`
-forks from the initiative branch, and `task/INIT-NNNN-Pnn-Tnn` forks from
-the **plan branch tip at dispatch** — so task N+1 already contains task N's
-merged work.
-
-Each level merges only through the gate its level requires: a task merges
-when its own review verdict is clean, a plan merges when its final verdict
-exists and the audit passes, and merging the initiative onward is always
-the human's explicit decision at handoff. The plan branch's history is
-therefore only reviewed merges — clean to bisect, one `git revert -m 1`
-from undoing a single task.
-
-Parallel tasks get a worktree each (`task start --worktree`), because two
-agents cannot share one working tree. A plan that is a single chain may
-declare `sequential: true` to commit direct to the plan branch — the lint
-requires the dependency chain to justify it. Work that is neither plan nor
-task goes on `side/` (merged on a recorded ruling) or `spike/` (never
-merged); an urgent out-of-scope fix goes on `hotfix/` from the base branch.
-
-```mermaid
-flowchart LR
-    BASE["base branch"] --> INIT["initiative/INIT-0004"]
-    INIT --> P1["plan/INIT-0004-P01"]
-    INIT --> SIDE["side/INIT-0004-slug"]
-    P1 --> T1["task/INIT-0004-P01-T01"]
-    P1 --> T2["task/INIT-0004-P01-T02"]
-    T1 -->|"review-gated"| P1
-    T2 -->|"review-gated"| P1
-    SIDE -->|"human"| INIT
-    P1 -->|"final verdict + audit"| INIT
-    INIT -->|"human at handoff"| BASE
-    BASE --> HOT["hotfix/slug"]
-    HOT -->|"human"| BASE
-```
-
-### Reviews that survive the session
-
-Every review is a **round** with an ID (`INIT-0004-P01-T03-R02`), a diff
-file, and a verdict file carrying YAML frontmatter. Findings are labelled
-(`C1`, `I2`, `M1`), cited to the spec requirement they violate
-(`INIT-0004-SPEC-01-R07`), and live in files a fixer reads directly — the
-controller transcribes nothing. The final whole-branch review walks every
-declared cross-task seam and triages every deferred or parked finding.
-
-**Re-reviews do two jobs:** impact review of the fix (following what it
-actually affects — including unchanged callers) before finding closure,
-so a regression the fix introduced in untouched code is still caught,
-and a fix-only lens never hides it.
-
-### Every generated artifact carries frontmatter
-
-Briefs, contexts, ledger, rulings, preflight scan, dispatch log, reports,
-verdicts, evidence files — all carry the same YAML identity block
-(`kind`, `id`, `initiative`, `plan`, `created_at`, …), defined in the
-[frontmatter contract](skills/executor/references/frontmatter.md). An agent
-reading any file cold knows exactly what it is holding.
-
-### Verification converts claims into evidence
-
-The spec's verification strategy names one criterion per requirement with
-its exact command. The verification phase runs each row fresh against the
-current commit and reports four honest statuses: `PROVEN`, `FAILED`,
-`NOT-RUN`, `UNAVAILABLE`. A single `NOT-RUN` blocks the word "complete" —
-and nothing upgrades it by inference. Raw observed output lands in
-per-criterion evidence files the outcomes table cites.
-
-### Context-resilient by design
-
-After a context loss or model switch, the controller reads the ledger —
-not its recollection. Completed tasks are not re-dispatched; the ledger's
-identity block refuses a ledger that belongs to another plan; live subagent
-identities are recorded so a fix round can *resume* rather than replace.
-Nothing in either store is ever deleted by a skill — pruning is a human
-decision.
-
-## How the engine is put together
-
-### Two axes, one loop
-
-The engine runs two axes over the same machinery, and confusing them is the
-main thing to get right when reading a transcript.
-
-**The phase axis** is the initiative's own lifecycle: intake → discovery →
-architecture → design → specification → planning → plan-regression →
-execution → review → verification → handoff. Its atomic step is
-`exec step INIT-NNNN`, which prints `PHASE-ENTER` or `PHASE-GATE`. Between
-those two, `exec-dispatch --role author` mints and logs the phase's `AUTHOR`,
-which writes the artifact; the phase's critique audits it.
-
-**The plan axis** is what happens inside execution: `exec step PLAN_FILE`
-prints `RUN-START`, `DISPATCH`, `REVIEW`, `FIX`, `REPORT`, `GATE-STAGE`,
-`REVIVE`, `REDISPATCH`, `ADJUDICATE`, `WAIT` or `DONE`. Workers run on their
-own branches; a worker's result reaches run state only through `exec-report`,
-which refuses unless the latest verdict is clean.
-
-The canonical phase order lives in exactly one place — `exec_phases()` in
-`_exec-lib.sh` — and both the validator and the pump fold against it. Two
-hand-maintained copies would let a run advance and refuse in the same turn.
+`deny` is the default for every phase, and every ambiguity resolves to it:
+a missing or malformed file, an unlisted phase, a mode spelled wrong. The
+pick-class phases (`design`, `specification`), where a human chooses
+between options, and handoff never clear automatically whatever the file
+says. An auto-cleared gate is journaled as `by: "auto"`, visibly distinct
+from a human `passed`.
 
 ### The controller carries no weight
 
-The controller runs one loop: run `exec`, read the single action word it
-prints, do that, go back. It never authors, never judges, never passes a gate.
-The reason is not stylistic — the controller is the least reliable worker in
-the system. It dies, compacts, drifts, and is under pressure at exactly the
-moment a judgment call matters, so the design assumes it will get clever and
-takes away the opportunity.
+The controller is the least reliable worker in the system — it dies,
+compacts, drifts, and is under pressure at exactly the moment a judgment
+call matters — so the design assumes it will get clever and takes away the
+opportunity. It never authors (every artifact is a dispatch), never judges
+(every verdict is a payload), never passes a gate (only `executor decide`
+writes `gate_decision`, stamped `actor: human`, so a worker cannot approve
+its own work), and never improvises a transition (an action with no row in
+the decision table is an engine gap to record, not to approximate).
 
-That includes the write side. Nothing the controller used to do by hand
-survives as a hand-step: `exec-dispatch` performs the whole dispatch act
-(mint the agent ID, build the role's input, mark the ledger, append the row,
-render the prompt), `exec-ladder` rewrites the revive rungs and enforces the
-bound, `exec-seen` and `exec-heartbeat` move the liveness witnesses,
-`exec-adjudicate` assembles the adjudicator's evidence set, and `exec-report`
-is the only path a result takes into run state. `exec-graph check` fails the
-build when any of that wiring drifts — a ledger file with no script writer, a
-verb with no actuator, a reference that no longer resolves.
+## How the engine is put together
 
-Every step is therefore one of two things, and the distinction is load-bearing:
+### The CLI is the whole surface
 
-- A **dispatch** is intellectual work — authoring, auditing, implementing,
-  reviewing, adjudicating. It goes to a named role with a registered prompt
-  template, and its output is an artifact someone else will read.
-- A **script call** is a transition — `exec-initiative phase … entered`,
-  `exec-workspace`, `exec-branch merge`. It writes state, and no judgment
-  exists anywhere in the path.
-
-The test: *would a subagent reading only its prompt know more than you do right
-now?* If yes, dispatch. If the prompt would be a transcript of the command
-you are about to type, run the command.
-
-### Every dispatch is a registered role with a prompt
-
-There is no ad-hoc dispatch. `references/layout.md` carries a registry of
-roles, and every row names the prompt template that implements it — the
-auditor, the repairer, the re-auditor, the implementer, the reviewers, the
-supervisor, the scouts. The suite checks that every action `exec-step` can
-emit has a decision-table row, and that every registered role's prompt exists
-on disk. Adding an action or a role without wiring it fails the build rather
-than a run.
-
-The prompts themselves carry the dispatch contract: an identity block, a
-self-critique pass, a verification section, and a machine-readable return
-block. They also carry the states a naive agent invents behaviour for — a
-missing upstream artifact, two inputs that contradict, an output file left
-behind by an aborted prior run, a test that fails for a reason outside the
-task's remit. A prompt is the only definition of what a subagent does, so an
-undefined state is an unreviewed behaviour, not a style gap.
-
-### Adding a component is a row, not a fork
-
-The critique engine is the extension point worth knowing about. Which
-artifacts a component owns, where its clearance record lives, and which check
-catalog applies are **one row of data** in `exec_critique_components()`:
-
-```
-component | phase | set_spec | summary_dir | catalog
+```text
+executor new "<title>"                     scaffold INIT-NNNN
+executor next [INIT]                       one typed action + its prompt
+executor ingest <path.json|-> [INIT]        a worker payload: validate → fold → render
+executor decide <path.json|-> [INIT]        a human decision: gate_decision, ruling, resume
+executor status [INIT]                     the gate card
+executor check [INIT] [--secrets]           chain, dangling edges, liveness, layout; or scan
+executor doctor [INIT]                     check + open dispatches + policy in force
+executor graph [INIT] [--format json|mermaid]
+executor migrate [INIT] [--dry-run]        reports the store version verdict; never edits
+executor autonomy [INIT] [<phase> <allow|gate|deny>]
 ```
 
-Adding a twelfth component means adding a row and a catalog section in
-`executor-critique/SKILL.md`. It does not mean writing a script, forking
-`exec-plan-regression`, or teaching the pump a new case. `plans` is the proof:
-it resolves to the pre-existing `plan-regression/` home and reads the same
-`summary.md` the shipped skill writes — one gate with two front doors, not two
-gates that can disagree.
+Exit codes: `0` ok · `1` a check found problems · `2` usage or engine
+error. Every write goes through `create_initiative`, `ingest`, or
+`emit_next`; there is no command that edits the journal directly.
 
-The registry is positional data, so its shape is enforced where it is read:
-`exec-critique` counts each row's fields and refuses a miscount. A row with one
-field too many reads as plausible-but-wrong, and that class of bug once put two
-components' clearance records in a directory literally named `-`.
+### Module map
+
+```mermaid
+flowchart LR
+    CLI["cli.py — the command surface"] --> ENGINE["engine.py — emit_next, ingest, check"]
+    CLI --> VIEWS["views.py — status card, render"]
+    ENGINE --> SCHEMAS["schemas.py — closed, typed payload contracts"]
+    ENGINE --> PATHS["paths.py — the single path authority"]
+    ENGINE --> STORE["store.py — journal, chain, lock, initiative lookup"]
+    ENGINE --> POLICY["policy.py — autonomy, tunables, project config"]
+    STORE --> FS[("filesystem")]
+```
+
+`paths.py` is the one path authority: ~40 named `*_file`/`*_dir`
+functions, and `classify(rel, store)` parses any path back into
+`(store, kind, ids)` — so `executor check` can audit every file in both
+stores against the naming grammar and flag drift rather than assume it.
+
+### Versioned, and honest about skew
+
+Each store records the engine version that wrote it in `meta.json`. When a
+newer engine opens an older store, commands report the mismatch and say
+what `executor migrate` would report — `migrate` never edits the store
+itself. A reader of an old journal gets the old fold, not a guess.
+
+### The merge contract
+
+`emit_next` mints `MERGE` as a real slot: the action names the plan, its
+branch head, and the `respond_to` path for a `merge` payload. Ingest
+verifies the named `merge_sha` exists in the repository, descends from the
+plan's head, and binds to the dispatch that answered it. A merge claim
+about a commit that does not exist is a rejection, not a plausible-sounding
+summary.
 
 ## The Two Stores
 
 ```mermaid
 flowchart LR
     subgraph THINK["docs/executor/ - tracked"]
-        C["Charter"] --> R["Research, Options"]
-        R --> A["Architecture, ADRs, Interfaces"]
-        A --> D["Design"]
-        D --> S["Spec"]
-        S --> P["Plans"]
+        C["charter, options, brainstorm payloads"] --> A["arch, adr, ifce, design"]
+        A --> S["spec, risk, vrfy"]
+        S --> P["plan payloads + rendered .md"]
     end
     subgraph EXEC[".executor/ - git-ignored by default"]
-        L["Ledger, Rulings"]
-        B["Briefs, Contexts"]
-        RP["Reports"]
-        V["Diffs, Verdicts"]
-        EV["Evidence files"]
-        PR["Plan-regression audits, fixes, gate summary"]
+        J["journal/events.v1.jsonl — the truth"]
+        D["dispatches/D<NNNNN>/ — slot, prompt, payload"]
+        R["reviews/, fixes/"]
+        V["views/ — derived projections"]
+        PR["plan-regression audits and repairs"]
     end
-    P -->|"plan-set audit"| PR
-    PR -->|"clearance"| B
-    P -->|"each task dispatch"| B
-    B --> RP
-    RP --> V
-    V --> L
+    P -->|"each task dispatch"| D
+    D --> J
+    J --> V
 ```
 
-- **`docs/executor/`** — the thinking record. Git-tracked: charter, research,
-  architecture, decisions, interfaces, design, spec, risks, plans, and the
-  verification strategy + outcomes ledger. A reader who clones the repo gets
-  the complete reasoning.
-- **`.executor/`** — the execution record. Git-ignored by default, safe to
-  commit if you choose: task briefs and contexts, implementer reports,
-  review diffs and verdicts, evidence files, the progress ledger, rulings.
-  Never deleted — the reasoning is the point.
+- **`docs/executor/`** — the thinking record, committed by
+  `executor handoff`: the payloads and their rendered markdown, per
+  initiative, per artifact, plus the exported journal snapshot. A reader
+  who clones the repo gets the complete reasoning.
+- **`.executor/`** — the execution record: the journal, the dispatch
+  slots, the review packages, the fix packages, and the run views.
+  Git-ignored by default, safe to commit if you choose; never deleted —
+  the reasoning is the point.
 
-The split is durability-of-audience, not durability-of-value. `.executor/`
-resolves from the main repository root, so **removing a worktree cannot
-destroy the execution record.**
+The split is durability-of-audience, not durability-of-value.
+`.executor/` resolves from the main repository root, so **removing a
+worktree cannot destroy the execution record.**
 
 ## The ID Namespace
 
 ```text
 INIT-0004                      the initiative
 INIT-0004-CHTR-01              its charter
-INIT-0004-RSCH-02              a research note
+INIT-0004-OPTS-01              an options comparison
+INIT-0004-BRN-01               a brainstorm session
+INIT-0004-ARCH-01              an architecture document
+INIT-0004-ADR-03               a decision record
+INIT-0004-IFCE-01              an interface/contract document
+INIT-0004-DSGN-02              a component design
+INIT-0004-SPEC-01              a specification
 INIT-0004-SPEC-01-R07          requirement 7 inside that spec
+INIT-0004-SPEC-01-C03          global constraint 3 inside that spec
+INIT-0004-RISK-01              a risk register / pre-mortem
+INIT-0004-VRFY-01              a verification strategy
 INIT-0004-P01                  a plan
 INIT-0004-P01-T03              task 3 of that plan
-INIT-0001-P01-T03-R02          review round 2 of that task
+D00112                         the dispatch minted at journal seq 112
+R2                             review round 2 (an integer, paired with its task)
 ```
 
-Addressable requirements are what let a review finding name the exact
-contract it violates, and what lets a plan task declare precisely which
-requirements it discharges.
+**Grammar:** `INIT-<4-digit>` then `-<KIND>-<2-digit>`, plans as
+`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<5-digit>`
+(seq-derived), review rounds as an integer `round` field paired with the
+task ID. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
+`IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
+`ARTIFACT_SEGMENTS` in `engine/executor/paths.py` defines them, and an ID
+carrying any other segment is a `pattern` rejection. Sequence within a
+kind is per-initiative and starts at `01`.
+
+**A payload must not cite another initiative's ID.** Cross-initiative
+relationships exist in exactly one place: the charter's `cites`. Everything
+else states the requirement in its own words, so an initiative stays
+archivable — open the folder and every pointer resolves inside it.
+
+## Where things live
+
+```mermaid
+flowchart TD
+    R["repository root"] --> E["engine/ — the engine, stdlib only"]
+    R --> S["skills/ — one directory per skill"]
+    R --> SC["scripts/ — run_tests.py, mutate.py, validators"]
+    R --> CI[".github/workflows/ — the gates"]
+    R --> DOC["docs/executor/ — the committed record of each initiative"]
+    E --> ET["engine/tests/ — the suite"]
+```
+
+| Path | What it is |
+|---|---|
+| `engine/executor/` | the engine: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
+| `engine/tests/` | the suite (717 tests), plus the tree-walking contract tests |
+| `skills/executor/` | the router skill, its prompt templates, and the references |
+| `skills/executor-*/` | one directory per phase skill |
+| `scripts/run_tests.py` | the test runner; enforces the branch-coverage floor |
+| `scripts/mutate.py` | mutation testing; the allow list records equivalent survivors |
+| `scripts/validate_skills.py` | the skill contract: registry, references, payload shapes |
+| `scripts/lint-prompt-injection.py` | blocks override directives and concealment in skill text |
+| `docs/executor/` | the committed thinking record, exported by handoff |
+| `.executor/` | the run store — journal, dispatches, views (git-ignored) |
+
+## Testing and CI
+
+The engine's suite is Python and runs anywhere Python runs:
+
+```bash
+python3 scripts/run_tests.py              # full suite, 100% branch coverage gate
+python3 scripts/run_tests.py --no-cover   # no coverage accounting
+python3 scripts/run_tests.py -k dispatch  # by name fragment
+```
+
+Coverage is branch coverage with `fail_under = 100` in `pyproject.toml`: a
+line the tests touch but do not branch is not covered. Adequacy is audited
+by mutation testing — `scripts/mutate.py` mutates the AST of the engine
+modules and fails if a mutant survives without a recorded reason in
+`scripts/mutation-allow.json`.
+
+CI (`.github/workflows/ci.yml`) runs Python-only gates: the suite under a
+pinned coverage floor, the skill contract validator, the prompt-injection
+lint, and a secret scan.
 
 ## Safety
 
 `.executor/` may be committed, so everything in both stores is written as
 though it will be public. Credentials, tokens, and personal data never go
-into any Executor artifact — a redacted existence statement and a safe path
-instead. `skills/executor/references/safety.md` defines the required scan
-before any handoff, and reviewers treat credential-shaped content in any
-diff as a Critical, stop-and-tell-the-human finding.
+into any payload — a redacted existence statement and a safe shape
+instead. `executor check --secrets` scans both stores and reports
+file:line and the rule, never the value; reviewers treat credential-shaped
+content in any diff as a `critical` finding, and a secret that reached a
+diff is rotation, not a file edit. `skills/executor/references/safety.md`
+carries the policy.
 
 ## Project docs
 
 | Doc | Purpose |
 |---|---|
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to change skills, references, and scripts |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to change skills, references, and the engine |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Participation standards and enforcement |
 | [SECURITY.md](SECURITY.md) | Reporting vulnerabilities and how artifact secret-hygiene works |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes, newest first |
+
+This README is the project's single design document: the protocol, the
+reasoning behind each invariant, and the flows that drive it all live here.
 
 ## License
 
