@@ -200,9 +200,12 @@ One row per pair of tasks sharing a file or an interface — the input to
 | Close with "no pair outside this table" | it turns an omission into a falsifiable claim |
 
 If the map shows a cycle — T04 needs T06 and T06 needs T04 — the task
-boundary is wrong. Merge them or move the shared symbol into an
-earlier task. The engine also walks `depends_on`: a cycle is a
-`dangling_ref`/unreachable task the fold never dispatches.
+boundary is wrong. Merge them or move the shared symbol into an earlier
+task. The engine does not detect a cycle when the payload lands: it
+walks `depends_on` when choosing work, so a cycle means no task inside it
+is ever dispatchable, and the pump answers `ESCALATE` with "no
+dispatchable work". That failure is diagnosable, but the fix belongs
+here, before execution — the plan-auditor grades a cycle as `critical`.
 
 ### The `tasks[]` contract
 
