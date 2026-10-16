@@ -151,7 +151,8 @@ def main():
                 marker = "BLOCK" if sev in ("high", "medium") else "note"
                 if marker == "BLOCK":
                     blocking += 1
-                print(f"{marker} {f}:{lineno} [{name}]({sev}){note}\n    {excerpt}")
+                print(f"{marker} {f.as_posix()}:{lineno} [{name}]"
+                      f"({sev}){note}\n    {excerpt}")
     if blocking:
         print(f"\n{blocking} finding(s) require human review in the PR diff", file=sys.stderr)
         return 1
