@@ -759,6 +759,19 @@ class StructuredSections(SchemaCase):
         self.kind_rejects(self.charter([{"id": "s", "title": "t"}]),
                           "empty_section", "$.sections[0]")
 
+    def test_section_ids_are_unique_within_one_payload(self):
+        """A reviewer cites `§<section id>`; two sections sharing an id make
+        that citation ambiguous, and a redraft that duplicated one would
+        pass every other check."""
+        self.kind_rejects(self.charter([
+            {"id": "a", "title": "A", "prose": "p"},
+            {"id": "a", "title": "B", "prose": "q"}]),
+            "duplicate", "$.sections[1].id")
+        self.accepts(self.charter([
+            {"id": "a", "title": "A", "prose": "p"},
+            {"id": "b", "title": "B", "prose": "q"}]),
+            schema_for("charter"))
+
     def test_a_nullable_field_accepts_none_and_nothing_else(self):
         """`mitigation: null` is a real disposition — accepted without
         mitigation — and the constraints that describe a string must be
