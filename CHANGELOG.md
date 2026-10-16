@@ -7,6 +7,14 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-10-16
+
+Patch release: the documents say what the engine enforces. The README's
+merge contract describes the slot-free payload ingest actually checks, the
+CLI's exit-code contract matches the code, the branch reference stops
+claiming a descent check that does not exist, and the counts catch up:
+48 documented refusal codes, 722 tests.
+
 ### Changed — the documents say what the engine enforces
 
 An accuracy pass over the documents that describe enforcement, so a reader

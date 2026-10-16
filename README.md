@@ -73,7 +73,7 @@ export PYTHONPATH=<clone>/engine
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v2.0.0 git@github.com:Atri10/executor.git
+git clone --branch v2.0.1 git@github.com:Atri10/executor.git
 ```
 
 There are no dependencies to install: the engine is the standard library,
@@ -102,7 +102,7 @@ Install The Executor skill library and engine for me:
    Tell me the PYTHONPATH line that points at the clone's engine/ directory,
    and add it to my shell profile if I confirm.
 4. Verify: run PYTHONPATH=<clone>/engine python3 -m executor --version
-   (prints 2.0.0), then PYTHONPATH=<clone>/engine python3 -m executor
+   (prints 2.0.1), then PYTHONPATH=<clone>/engine python3 -m executor
    --help (lists the command surface). Also confirm every copied
    skills/<name>/ directory contains a SKILL.md — count the directories,
    not a remembered number: the skill set grows, and a stale count fails
