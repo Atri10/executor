@@ -398,12 +398,16 @@ class StoreLockTests(TmpCase):
 
     def free_within(self, seconds: float = 10.0) -> bool:
         """Whether another acquirer gets the lock promptly. It runs in a thread
-        whose descriptor is closed before the event is set, and is joined in
-        cleanup: on Windows an open handle blocks removing the store, so a
-        probe that outlives its test turns a passing test into a teardown
-        PermissionError."""
+        whose descriptor is closed before the event is set, and every probe is
+        joined in tearDown: on Windows an open handle blocks removing the
+        store, so a probe that outlives its test turns a passing test into a
+        teardown PermissionError."""
         got = threading.Event()
-        self._probes: list[threading.Thread] = []
+        # Appended, never reset: the first probe is the one still polling
+        # when the assertion returns False, and dropping it from the list is
+        # exactly the descriptor teardown later trips over.
+        probes: list[threading.Thread] = self.__dict__.setdefault(
+            "_probes", [])
 
         def grab():
             try:
@@ -414,12 +418,12 @@ class StoreLockTests(TmpCase):
                 pass
 
         t = threading.Thread(target=grab, daemon=True)
-        self._probes.append(t)
+        probes.append(t)
         t.start()
         return got.wait(seconds)
 
     def tearDown(self) -> None:
-        for t in getattr(self, "_probes", []):
+        for t in self.__dict__.get("_probes", []):
             t.join(30)
         super().tearDown()
 

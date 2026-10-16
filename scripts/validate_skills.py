@@ -136,8 +136,8 @@ def check_refusal_contract(dir_: Path, fail: list[str]) -> None:
             continue
         body = p.read_text(encoding="utf-8")
         if "## If Your Payload Is Refused" not in body:
-            fail.append(f"FAIL {p}: prompt lacks the refusal contract "
-                        f"('## If Your Payload Is Refused')")
+            fail.append(f"FAIL {p.as_posix()}: prompt lacks the refusal "
+                        f"contract ('## If Your Payload Is Refused')")
 
 
 def check_box_drawing(f: Path, rel: str, fail: list[str]) -> None:
