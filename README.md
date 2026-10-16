@@ -316,7 +316,7 @@ columns is `row_width`; a whitespace-only value is `nonBlank`;
  "constraints": [], "risks": [], "cites": ["INIT-0004-ARCH-01"]}
 ```
 
-Every refusal the engine can emit — 37 of them — is listed in
+Every refusal the engine can emit — 48 of them — is listed in
 `skills/executor/references/rejections.md` with its field and the action
 that clears it, and `engine/tests/test_docs_agreement.py` walks the
 engine's raise sites against that list so a new rejection cannot ship
@@ -415,9 +415,10 @@ executor migrate [INIT] [--dry-run]        reports the store version verdict; ne
 executor autonomy [INIT] [<phase> <allow|gate|deny>]
 ```
 
-Exit codes: `0` ok · `1` a check found problems · `2` usage or engine
-error. Every write goes through `create_initiative`, `ingest`, or
-`emit_next`; there is no command that edits the journal directly.
+Exit codes: `0` ok · `1` a check found problems · `2` usage, a payload
+refusal, or an engine error. Every write goes through `create_initiative`,
+`ingest`, or `emit_next`; there is no command that edits the journal
+directly.
 
 ### Module map
 
@@ -446,12 +447,12 @@ itself. A reader of an old journal gets the old fold, not a guess.
 
 ### The merge contract
 
-`emit_next` mints `MERGE` as a real slot: the action names the plan, its
-branch head, and the `respond_to` path for a `merge` payload. Ingest
-verifies the named `merge_sha` exists in the repository, descends from the
-plan's head, and binds to the dispatch that answered it. A merge claim
-about a commit that does not exist is a rejection, not a plausible-sounding
-summary.
+`emit_next` emits `MERGE` once every task in the plan is complete: the
+action names the plan and each task's head commit. The `merge` payload is
+slot-free — it answers no dispatch — so ingest checks it directly against
+the fold and the repository: the plan is known and unmerged, every task is
+complete, and the named `merge_sha` resolves. A merge claim about a commit
+that does not exist is a rejection, not a plausible-sounding summary.
 
 ## The Two Stores
 
@@ -538,14 +539,14 @@ flowchart TD
 | Path | What it is |
 |---|---|
 | `engine/executor/` | the engine: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
-| `engine/tests/` | the suite (717 tests), plus the tree-walking contract tests |
+| `engine/tests/` | the suite (722 tests), including the tree-walking contract tests |
 | `skills/executor/` | the router skill, its prompt templates, and the references |
 | `skills/executor-*/` | one directory per phase skill |
 | `scripts/run_tests.py` | the test runner; enforces the branch-coverage floor |
 | `scripts/mutate.py` | mutation testing; the allow list records equivalent survivors |
 | `scripts/validate_skills.py` | the skill contract: registry, references, payload shapes |
 | `scripts/lint-prompt-injection.py` | blocks override directives and concealment in skill text |
-| `docs/executor/` | the committed thinking record, exported by handoff |
+| `docs/executor/` | the committed thinking record, exported by handoff (this repo is the tool, not a consumer: `docs/` is ignored here) |
 | `.executor/` | the run store — journal, dispatches, views (git-ignored) |
 
 ## Testing and CI
@@ -564,9 +565,10 @@ by mutation testing — `scripts/mutate.py` mutates the AST of the engine
 modules and fails if a mutant survives without a recorded reason in
 `scripts/mutation-allow.json`.
 
-CI (`.github/workflows/ci.yml`) runs Python-only gates: the suite under a
-pinned coverage floor, the skill contract validator, the prompt-injection
-lint, and a secret scan.
+CI (`.github/workflows/ci.yml`) runs the suite on ubuntu, macOS and
+Windows under the pinned 100% branch floor, the skill contract validator,
+the prompt-injection lint, and the secret scan — the engine's own
+`executor check --secrets` smoke plus gitleaks over the full history.
 
 ## Safety
 

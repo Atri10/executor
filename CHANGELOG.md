@@ -5,6 +5,31 @@ All notable changes to The Executor are documented here. The format follows
 project is tagged; between releases, entries are dated and `main` moves.
 
 
+## [Unreleased]
+
+### Changed — the documents say what the engine enforces
+
+An accuracy pass over the documents that describe enforcement, so a reader
+is told what the engine checks — and no more.
+
+- **The README's merge contract is the slot-free payload ingest actually
+  verifies.** `MERGE` is emitted once every task in the plan is complete;
+  the action names the plan and each task's head commit; ingest checks the
+  plan is known and unmerged, every task complete, and the `merge_sha`
+  resolves. The old text claimed a minted slot, a `respond_to` path, a
+  dispatch binding, and a descent check the engine does not perform.
+- **The exit-code contract now names refusals.** A payload refusal exits
+  2, like usage and engine errors; 1 is a check that found problems.
+  `cli.py`'s own docstring said otherwise and is corrected to match
+  `_err`.
+- **`references/branches.md` stops claiming a descent check.** The merge
+  bullet lists what ingest verifies; the "descends from the plan's head"
+  requirement moves to the procedural list, where it is the skill's job.
+- **Counts and headings.** 48 documented refusal codes (was 37) and 722
+  tests (was 717), in the README and the 2.0.0 entry; the duplicated
+  `### Changed` heading is gone; the README's CI and store-map rows
+  describe the three-OS matrix and this repo's ignored `docs/`.
+
 ## [2.0.0] — 2026-10-16 — "New Dawn"
 
 The executor v2 engine becomes the product. A payload is data and the
@@ -22,7 +47,7 @@ Highlights, newest first:
   shape is `empty_section`.
 - **The contracts are enforced, not hoped for.** `schemas.py` is a closed
   mini-validator with anchored patterns, pinned numeric bounds, named
-  object invariants, and 37 documented refusal codes that
+  object invariants, and 48 documented refusal codes that
   `test_docs_agreement.py` keeps in step with the code in both directions.
 - **The store has one writer.** The journal is the state, hash-chained
   and recomputed by `check`; views are projections; a dispatch is
@@ -36,16 +61,12 @@ Highlights, newest first:
 - **Plans are audited as a set** between planning and execution — coverage,
   seams, ordering, constraint propagation, file ownership — and execution
   cannot start until every plan is clean or a human waives by ruling.
-- **Tests are the contract.** 717 tests, 100% branch coverage, mutation
+- **Tests are the contract.** 722 tests, 100% branch coverage, mutation
   testing with an explained allow list, and a suite that walks the skills
   tree so a document cannot teach something the engine rejects.
 
 Everything above is measured, not claimed: the numbers in each entry were
 produced by running the suite.
-
-## [Unreleased]
-
-### Changed — the skills tree can no longer teach what the engine rejects
 
 ### Changed — the skills tree can no longer teach what the engine rejects
 
@@ -56,7 +77,7 @@ regression would otherwise need someone to remember.
   walk the tree and the engine and fail on either direction of drift:
   every rejection code the engine raises is documented in
   `skills/executor/references/rejections.md` and every documented code is
-  actually raised (37 of them); every ID example uses a segment
+  actually raised (48 of them); every ID example uses a segment
   `ARTIFACT_SEGMENTS` declares; and every JSON payload skeleton the skills
   show validates against its schema, with placeholder tokens replaced by
   the smallest accepted value.
@@ -110,7 +131,7 @@ authoritative.
   a `SHAPES` registry (`table`, `section`), and `_obj()` accepts the
   shape name.
 - **New `skills/executor/references/rejections.md`** — the authoritative
-  list of all 37 refusal codes, each with its field and the action that
+  list of all 48 refusal codes, each with its field and the action that
   clears it. `engine/tests/test_docs_agreement.py` walks the engine's
   raise sites and the reference's tables and fails on either direction
   of drift.

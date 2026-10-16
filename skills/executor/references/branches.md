@@ -2,10 +2,10 @@
 
 One branch per artifact level, named after the artifact's ID, merged on
 the gate its level requires. `git branch --list` is the registry. The
-engine enforces the *outcome* — a `merge` payload carries `plan`, `branch`,
-and `merge_sha`, and `executor ingest` verifies the named merge commit
-exists and descends from the plan's head — while the *mechanics* (which
-fork, which order, which gates) are this document.
+engine enforces the *outcome* — a `merge` payload names `plan` and
+`merge_sha`, and `executor ingest` verifies the plan is known and unmerged
+with every task complete and the named merge commit exists — while the
+*mechanics* (which fork, which order, which gates) are this document.
 
 ## The hierarchy
 
@@ -41,8 +41,8 @@ The engine today:
 
 - emits `MERGE` only when a plan's fold says every task is merged-ready —
   no `MERGE` for a plan with an open review round;
-- verifies the `merge` payload's `merge_sha` exists in the repository and
-  binds to the dispatch that answered it;
+- verifies the `merge` payload against the fold and git — the plan is
+  known and unmerged, every task complete, and the `merge_sha` resolves;
 - journaled `abandon`/`spawn_error`/`needs_context` transitions make a
   branch's recorded intent recoverable — the fold knows a task was
   redispatched, so its branch is accounted for even while work is in
@@ -53,6 +53,8 @@ What stays procedural — the skill's job, not the engine's:
 - the fork mechanics (`initiative/<INIT>` from the base, `plan/<PLAN>` from
   the initiative, `task/<TASK>` from the plan tip) — the engine records
   `commit_base`/`commit_head` on verdicts, the skill creates the branches;
+- the merge itself, so the recorded `merge_sha` descends from the plan's
+  head — the engine checks the commit exists, not where it sits;
 - worktree selection for a task that needs isolation;
 - the per-task branch lifecycle — forking and abandoning task branches is
   a plan-level policy the execution skill declares per plan, not an engine

@@ -14,7 +14,7 @@
     executor migrate [INIT] [--dry-run]        reports the store version verdict; never edits
     executor autonomy [INIT] [<phase> <allow|gate|deny>]   per-phase autonomy; deny by default
 
-Exit codes: 0 ok · 1 check found problems or a refusal · 2 usage or engine error.
+Exit codes: 0 ok · 1 check found problems · 2 usage, a refusal, or an engine error.
 Every write goes through engine.ingest, engine.emit_next or engine.create_initiative.
 Human decisions are only accepted through `decide`; a worker payload cannot name
 itself human, so it cannot approve its own gate or rule on its own concern.
