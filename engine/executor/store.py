@@ -133,6 +133,33 @@ def read_json(path: Path, default=None):
 
 _WINDOWS = os.name == "nt"
 
+# How long a writer waits for the store lock before reporting `store_locked`.
+LOCK_WAIT_S = 10.0
+
+
+def _lock_retry(fd: int, unlock: bool = False) -> None:
+    """Take (or release) the Windows byte-range lock. `LK_NBLCK` fails at once
+    instead of blocking inside the C runtime for its own timeout, so a writer
+    that cannot get the lock reports `store_locked` after LOCK_WAIT_S rather
+    than hanging the process. A poll interval of 5ms keeps a contended acquire
+    under a millisecond of added latency while leaving no descriptor held for
+    the OS's own retry window."""
+    import msvcrt
+    import time
+    os.lseek(fd, 0, os.SEEK_SET)
+    if unlock:
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    deadline = time.monotonic() + LOCK_WAIT_S
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.005)
+
 
 class StoreLock:
     """Single-writer advisory lock on the initiative dir. Context manager.
@@ -151,9 +178,7 @@ class StoreLock:
         self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR)
         try:
             if _WINDOWS:
-                import msvcrt
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
+                _lock_retry(self.fd)
             else:
                 import fcntl
                 fcntl.flock(self.fd, fcntl.LOCK_EX)
@@ -169,9 +194,7 @@ class StoreLock:
             return
         try:
             if _WINDOWS:
-                import msvcrt
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                _lock_retry(self.fd, unlock=True)
             else:
                 import fcntl
                 fcntl.flock(self.fd, fcntl.LOCK_UN)

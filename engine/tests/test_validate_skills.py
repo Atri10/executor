@@ -60,7 +60,7 @@ class VisualGuardTests(unittest.TestCase):
     def test_prose_reference_is_flagged_with_file_and_line(self):
         p = self.put("a/SKILL.md", "ok\nOffer the visual companion now.\n")
         (finding,) = self.findings()
-        self.assertIn(f"{p}:2", finding)
+        self.assertIn(f"{p.as_posix()}:2", finding)
 
     def test_fenced_launcher_is_flagged(self):
         self.put("a/x.md", "```bash\n./start-server.sh --open\n```\n")
@@ -77,7 +77,7 @@ class VisualGuardTests(unittest.TestCase):
         for name in ASSETS:
             with self.subTest(asset=name):
                 p = self.put(name, "")
-                self.assertTrue(any(str(p) in f and "asset" in f
+                self.assertTrue(any(p.as_posix() in f and "asset" in f
                                     for f in self.findings()))
 
     def test_files_that_are_neither_markdown_nor_assets_are_ignored(self):
@@ -131,7 +131,7 @@ class PayloadContractGuardTests(unittest.TestCase):
         p = self.put("demo/notes.md", 'ok\n"sections": [{"id": "s", '
                                       '"title": "t", "body": "b"}]\n')
         (finding,) = self.findings()
-        self.assertIn(f"{p}:2", finding)
+        self.assertIn(f"{p.as_posix()}:2", finding)
         self.assertIn("sections[].body example", finding)
 
     def test_the_structured_field_names_pass(self):
@@ -193,7 +193,7 @@ class RefusalContractGuardTests(unittest.TestCase):
     def test_a_prompt_without_the_refusal_contract_is_flagged(self):
         p = self.put("demo/scout-prompt.md", "# Scout\n\n| respond_to | x |\n")
         (finding,) = self.findings()
-        self.assertIn(str(p), finding)
+        self.assertIn(p.as_posix(), finding)
         self.assertIn("refusal contract", finding)
 
     def test_a_prompt_carrying_the_contract_passes(self):

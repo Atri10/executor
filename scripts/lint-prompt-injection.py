@@ -111,7 +111,13 @@ FORBID_CONTEXT = re.compile(
 
 
 def lint_file(path: Path):
-    text = path.read_text(encoding="utf-8", errors="replace")
+    # newline="" keeps \r\n as written: in text mode Python translates it to
+    # \n, and while splitlines() agrees either way, the *translated* text is
+    # then scanned for patterns that end at a line boundary. On Windows a file
+    # written with CRLF would otherwise be linted as if its lines were LF,
+    # and line numbers in the findings could drift.
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        text = f.read()
     ranges, unbalanced = fence_ranges(text)
     findings = []
     lines = text.splitlines()
