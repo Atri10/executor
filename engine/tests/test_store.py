@@ -243,7 +243,8 @@ def fake_msvcrt(calls, fail=None):
         calls.append(("locking", mode, nbytes))
         if fail:
             raise OSError(fail)
-    return types.SimpleNamespace(LK_LOCK=201, LK_UNLCK=202, locking=locking)
+    return types.SimpleNamespace(LK_LOCK=201, LK_NBLCK=200, LK_UNLCK=202,
+                                 locking=locking)
 
 
 class StoreLockTests(TmpCase):
@@ -329,8 +330,50 @@ class StoreLockTests(TmpCase):
             with store.StoreLock(self.idir):
                 pass
         rewind = ("lseek", 0, os.SEEK_SET)
-        self.assertEqual(calls, [rewind, ("locking", 201, 1),
-                                 rewind, ("locking", 202, 1)])
+        nb = ("locking", 200, 1)
+        self.assertEqual(calls, [rewind, nb, rewind, ("locking", 202, 1)])
+
+    def test_a_contended_windows_lock_retries_then_reports_locked(self):
+        """`LK_NBLCK` fails at once, so a contended acquire is a bounded poll
+        inside LOCK_WAIT_S — never the C runtime's own blocking retry, which
+        holds a descriptor open for its whole window and makes a Windows
+        teardown fail with PermissionError."""
+        calls: list = []
+        attempts = {"n": 0}
+
+        def locking(_fd, mode, nbytes):
+            calls.append((mode, nbytes))
+            if mode == 200:
+                attempts["n"] += 1
+                if attempts["n"] < 3:
+                    raise OSError("busy")
+
+        msvcrt = types.SimpleNamespace(LK_LOCK=201, LK_NBLCK=200,
+                                       LK_UNLCK=202, locking=locking)
+        with mock.patch.object(store, "_WINDOWS", True), \
+                mock.patch.dict(sys.modules, {"msvcrt": msvcrt}), \
+                mock.patch.object(store, "LOCK_WAIT_S", 5.0):
+            with store.StoreLock(self.idir):
+                pass
+        self.assertEqual(calls[-1], (202, 1))
+        self.assertEqual(attempts["n"], 3)
+        self.assertLess(len(calls), 20, "the poll must wait, not spin")
+
+    def test_a_windows_lock_that_never_clears_reports_store_locked(self):
+        def locking(_fd, mode, _n):
+            if mode == 200:
+                raise OSError("busy")
+
+        msvcrt = types.SimpleNamespace(LK_LOCK=201, LK_NBLCK=200,
+                                       LK_UNLCK=202, locking=locking)
+        lock = store.StoreLock(self.idir)
+        with mock.patch.object(store, "_WINDOWS", True), \
+                mock.patch.dict(sys.modules, {"msvcrt": msvcrt}), \
+                mock.patch.object(store, "LOCK_WAIT_S", 0.05):
+            with self.assertRaises(ExecError) as err:
+                lock.__enter__()
+        self.assertEqual(err.exception.code, "store_locked")
+        self.assertEqual(lock.fd, -1)
 
     def test_a_posix_lock_failure_is_typed_and_closes_the_descriptor(self):
         lock = store.StoreLock(self.idir)
@@ -354,20 +397,31 @@ class StoreLockTests(TmpCase):
         self.assertEqual(lock.fd, -1)
 
     def free_within(self, seconds: float = 10.0) -> bool:
-        """Whether another acquirer gets the lock promptly. It runs in a daemon
-        thread so a lock that was never released fails the test instead of
-        hanging the whole suite."""
+        """Whether another acquirer gets the lock promptly. It runs in a thread
+        whose descriptor is closed before the event is set, and is joined in
+        cleanup: on Windows an open handle blocks removing the store, so a
+        probe that outlives its test turns a passing test into a teardown
+        PermissionError."""
         got = threading.Event()
+        self._probes: list[threading.Thread] = []
 
         def grab():
             try:
                 with store.StoreLock(self.idir):
-                    got.set()
+                    pass
+                got.set()
             except ExecError:
                 pass
 
-        threading.Thread(target=grab, daemon=True).start()
+        t = threading.Thread(target=grab, daemon=True)
+        self._probes.append(t)
+        t.start()
         return got.wait(seconds)
+
+    def tearDown(self) -> None:
+        for t in getattr(self, "_probes", []):
+            t.join(30)
+        super().tearDown()
 
     def test_the_lock_is_held_while_inside_and_free_after(self):
         with store.StoreLock(self.idir):

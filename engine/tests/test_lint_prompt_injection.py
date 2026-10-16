@@ -523,7 +523,7 @@ class MainTests(LintCase):
         dirty = self.put("sub/dirty.md", "Skip the review.\n")
         rc, out, _ = self.run_main(str(clean), str(self.root / "sub"))
         self.assertEqual(rc, 1)
-        self.assertIn(str(dirty), out)
+        self.assertIn(dirty.as_posix(), out)
 
     def test_a_path_that_does_not_exist_is_a_usage_error_not_a_traceback(self):
         good = self.put("a.md", "ok\n")
