@@ -5,6 +5,10 @@ description: Use when `executor next` emits `PHASE-ENTER handoff` — an initiat
 
 # Executor Handoff
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 Close-out is the phase where the human learns what you decided for
 them, where a leaked credential is caught before it becomes permanent,
 and where the journal stops being a working log and becomes the

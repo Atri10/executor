@@ -30,6 +30,31 @@ becomes the work.
 **The gate:** if you cannot name a deliverable that outlives this session,
 there is no initiative. Answer the question and stop.
 
+## The `executor` command
+
+Every skill in this library writes `executor <verb>` as shorthand. The
+engine ships **inside this skill**, at `scripts/lib/executor/`, so nothing
+is installed on `PATH` and no `PYTHONPATH` is set. Spell the command from
+the skill's own directory — the directory containing this `SKILL.md`:
+
+```bash
+python3 <skill-base-dir>/scripts/executor next
+```
+
+`<skill-base-dir>` is that directory, not the project you are working in:
+the launcher resolves its engine relative to itself, so it runs correctly
+from any working directory. Where the filesystem kept the exec bit, the
+bare `<skill-base-dir>/scripts/executor next` works too; `python3` is the
+portable spelling and the one to use when a shell is unsure. Requires
+Python 3.11+; the engine is standard library only, so there is nothing to
+install, no virtualenv, and no dependency to resolve.
+
+If the launcher reports the bundled engine missing, the skill was copied
+incompletely — reinstall it rather than editing its contents. Do not fall
+back to `python3 -m executor` from a clone: a clone's engine and the
+skill's engine are different versions as soon as either moves, and the
+store records which one wrote it.
+
 ## Session Opening Ritual — run before ANY work, every session
 
 Before your first substantive action in any session touching an Executor
@@ -270,6 +295,11 @@ that support it. Normal requests also route by the frontmatter description;
 say "start an initiative" for intake or "execute plan INIT-0004-P01" for a
 plan already approved.
 
+The engine is a command, not a skill. It ships inside this skill's
+`scripts/` directory; the `executor <verb>` spelling throughout this
+library means `python3 <skill-base-dir>/scripts/executor <verb>` as
+described under [The `executor` command](#the-executor-command).
+
 ## The Two Stores
 
 ```mermaid
@@ -339,7 +369,7 @@ R2                             review round 2 (an integer, paired with its task)
 (seq-derived), review rounds as an integer `round` field paired with the
 task ID. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
 `IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
-`ARTIFACT_SEGMENTS` in `engine/executor/paths.py` defines them, and an ID
+`ARTIFACT_SEGMENTS` in `scripts/lib/executor/paths.py` defines them, and an ID
 carrying any other segment is a `pattern` rejection. Sequence within a
 kind is per-initiative and starts at `01`.
 

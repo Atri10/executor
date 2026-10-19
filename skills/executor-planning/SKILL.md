@@ -5,6 +5,10 @@ description: Use when `executor next` enters `planning` — a spec has passed it
 
 # Planning
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 Turn the `spec` artifact into `plan` payloads: each carries `plan_id`,
 `objective`, `tasks[]` with exact file paths, verbatim test
 expectations, and `depends_on` edges, and `gates[]` naming what must

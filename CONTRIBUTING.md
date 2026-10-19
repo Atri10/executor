@@ -1,14 +1,14 @@
 # Contributing to The Executor
 
 Thanks for your interest in improving The Executor. This repository is a
-library of agent-readable skill documents plus the shell scripts they call —
-no build step, no test framework, no runtime. The contributions that matter
-most are:
+library of agent-readable skill documents plus the Python engine those
+skills drive — no build step, no runtime dependency beyond Python 3.11+. The
+contributions that matter most are:
 
 1. **Skill edits** — clearer routing, better gates, sharper prompts.
-2. **Script fixes** — the `skills/executor/scripts/` helpers must keep
-   resolving paths from `skills/executor/references/layout.md`, never
-   inventing locations.
+2. **Engine fixes** — the engine in `engine/executor/` is the enforcer of
+   every contract the skills describe; a rule stated in prose and not
+   enforced in code is a rule that will drift.
 3. **Documentation** — anything a reader of this README would find confusing
    or missing.
 
@@ -16,27 +16,52 @@ most are:
 
 | Path | What lives there |
 |---|---|
+| `engine/executor/` | The engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
+| `engine/tests/` | The suite, including the tree-walking contract tests |
 | `skills/executor/` | Router skill: contract, ID grammar, phase gates |
 | `skills/executor/references/` | The normative documents: layout, branches, frontmatter, indexes, safety, test-quality |
-| `skills/executor/scripts/` | Executable helpers (`exec-id`, `exec-workspace`, `exec-scan-secrets`, …) |
+| `skills/executor/scripts/executor` | The launcher users run; resolves the engine relative to itself |
+| `skills/executor/scripts/lib/executor/` | The shipped engine — a generated mirror of `engine/executor/` |
 | `skills/executor-*/` | One skill per lifecycle phase, each with its own `SKILL.md` |
-
-There is no `docs/` directory: normative content lives in
-`skills/executor/references/`, which is what the skills cite.
+| `scripts/` | `run_tests.py`, `sync_engine.py`, `mutate.py`, the validators |
 
 `skills/executor/references/layout.md` is normative: paths, document types,
 and directory names resolve from it. If you move or add a document type,
 update it first.
+
+### The bundled engine
+
+The engine ships **inside** the router skill because an installed skill is a
+copied directory: `npx skills add` copies `skills/executor/` and nothing
+outside it, so an engine kept only at `engine/` would never reach a user.
+`skills/executor/scripts/lib/executor/` is that shipped copy.
+
+**Never edit the bundle by hand.** `engine/executor/` is the source; the
+bundle is generated from it. After changing the engine:
+
+```bash
+python3 scripts/sync_engine.py          # rewrite the bundle
+python3 scripts/sync_engine.py --check  # what CI runs
+```
+
+A change that edits only one side fails `test_engine_ships_with_skill.py`
+and the `--check` CI step, by design — two copies of one package that are
+allowed to differ means the repository tests one engine and ships another.
 
 ## Getting started
 
 ```bash
 git clone git@github.com:Atri10/executor.git
 cd executor
+pip install -r requirements-dev.txt     # coverage, the one dev tool
 ```
 
-That's the whole setup — the skills are plain Markdown and the scripts are
-POSIX-ish bash with no dependencies beyond `git` and `find`.
+The engine itself has zero third-party dependencies. From a clone it also
+runs as a package:
+
+```bash
+PYTHONPATH=engine python3 -m executor --version
+```
 
 ## How changes are reviewed
 
@@ -54,55 +79,57 @@ POSIX-ish bash with no dependencies beyond `git` and `find`.
   `references/branches.md`, `references/frontmatter.md`, or
   `references/indexes.md` in the same change, and call out the behavioral
   delta in the PR description.
+- **A behavior change needs a test that would fail without it.** The suite
+  holds a 100% branch-coverage floor, so an uncovered branch fails CI rather
+  than being merged untested.
 
 ## Submitting changes
 
 1. Branch from `main`: `git checkout -b feature/<what>` (or `fix/<what>`,
    `docs/<what>`).
 2. Make the change in a focused commit. Conventional Commits style:
-   `feat(skills): ...`, `fix(scripts): ...`, `docs: ...`.
-3. Before committing, check the diff for accidental secrets — this repo
+   `feat(engine): ...`, `fix(skills): ...`, `docs: ...`.
+3. Before committing, check the diff for accidental secrets — the engine
    includes a scanner you can borrow for the check:
-   `skills/executor/scripts/exec-scan-secrets <paths>`.
+   `python3 skills/executor/scripts/executor check --secrets`.
 4. Open a pull request describing **what behavior changes for an agent** and
    **why**. Link any issue it resolves.
 
 ## Reporting issues
 
-- **Bug in a skill or script** — open a regular issue with the exact skill
-  text or script invocation, what the agent did, and what it should have
-  done.
+- **Bug in a skill or the engine** — open a regular issue with the exact
+  skill text or command invocation, what the agent did, and what it should
+  have done.
 - **Docs unclear or wrong** — same channel; wrong docs are bugs.
 - **Security-sensitive disclosure** — do not open a public issue. See
   [SECURITY.md](SECURITY.md).
 
 ## CI
 
-Every PR runs five checks; all must pass before merge:
+Every PR runs these checks; all must pass before merge:
 
 | Check | What it enforces |
 |---|---|
-| **ShellCheck** (`--severity=warning`) | Every `exec-*` script parses and is warning-clean — these run inside users' agents with git and filesystem access |
-| **Prompt-injection lint** | Skill markdown is *executed as instruction by agents*; the linter blocks override directives, concealment, exfiltration endpoints, fetch-and-execute, and credential literals |
+| **Engine suite** (macOS, Linux, Windows) | The full suite at a 100% branch-coverage floor, plus `python -m executor --version` on each OS |
+| **Bundled-engine sync** | `scripts/sync_engine.py --check`: the shipped copy is byte-identical to `engine/executor/` |
+| **Installed-skill smoke** | The skill is copied out of the repo, `PYTHONPATH` is dropped, and the launcher runs — the install path users actually take |
 | **Skill validation** | Frontmatter + `Use when` trigger, balanced fences, no duplicate names; every `SKILL.md` carries `## Self-Critique` and `## Verification`; every dispatch role in `references/layout.md` has a registered prompt template carrying the required markers; no `*-prompt.md` exists unregistered; no ASCII-art diagrams |
-| **Secret scan** | The Executor's own `exec-scan-secrets` over the repo, plus gitleaks over full history |
-| **Script smoke** | Usage paths work; the plan-lint and run-audit gates actually fire on known violations |
+| **Prompt-injection lint** | Skill markdown is *executed as instruction by agents*; the linter blocks override directives, concealment, exfiltration endpoints, fetch-and-execute, and credential literals |
+| **Secret scan** | The engine's own `executor check --secrets` against a fresh initiative, plus gitleaks over full history |
 
-Run all of them locally before pushing:
+Run them locally before pushing:
 
 ```bash
-find skills/executor/scripts scripts -type f \( -name 'exec-*' -o -name '*.sh' \) -print0 \
-  | xargs -0 shellcheck --severity=warning
+python3 scripts/run_tests.py            # suite + coverage floor
+python3 scripts/sync_engine.py --check  # bundle drift
+python3 scripts/validate_skills.py      # skill contract
 python3 scripts/lint-prompt-injection.py skills/
-bash scripts/validate-skills.sh skills
-bash skills/executor/scripts/exec-scan-secrets .
-bash scripts/test-executor.sh
 ```
 
-`test-executor.sh` is the regression suite: thirty-seven fixture cases
-that rebuild disposable repositories and assert each enforced contract. Add
-a case whenever a fix teaches a script to refuse something it used to
-accept.
+Mutation testing is available for a module whose tests you changed:
+`python3 scripts/mutate.py engine/executor/<module>.py`. A surviving mutant
+is either a missing assertion or a genuinely equivalent change, and the
+latter belongs in `scripts/mutation-allow.json` with its reason.
 
 The injection linter is heuristic and errs toward false positives — a
 flagged line is a human-review prompt in the PR diff, not an accusation.

@@ -5,6 +5,10 @@ description: Use when `executor next` emits `PHASE-ENTER discovery` — a charte
 
 # Executor — Discovery
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 Discovery answers exactly two questions: **what is actually being asked
 for**, and **which approach wins**. Its outputs are the `options`
 artifact (the approaches and the pick) and the `brainstorm` artifact

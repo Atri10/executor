@@ -5,6 +5,10 @@ description: Use when a plan has passed its planning gate and the engine's `exec
 
 # Executor — Execution
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 Execute one plan by following `executor next`: the engine mints a dispatch
 (`impl`, `review`, `fix`), you spawn the worker and ingest its payload.
 You are the **controller**: you pump, you dispatch, you never implement.

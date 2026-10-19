@@ -7,6 +7,56 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-10-19
+
+Patch release: the engine ships with the skill. Installing the skills used
+to leave `executor` undefined — the skills call a bare command that only
+existed for someone who had cloned the repository and exported
+`PYTHONPATH`. Now the engine travels inside the router skill and a
+launcher beside it resolves the copy relative to itself, so an install
+needs no path setup at all.
+
+### Fixed — an install is now a complete install
+
+- **The engine ships inside `skills/executor/`.** `npx skills add` copies a
+  skill directory and nothing outside it, so `engine/executor/` — a sibling
+  of `skills/` — never reached a user. The package now also lives at
+  `skills/executor/scripts/lib/executor/`, which the installer copies, and
+  `skills/executor/scripts/executor` is the launcher the skills name.
+- **No `PYTHONPATH`, no `pip`, no `PATH` edit.** The launcher resolves
+  `scripts/lib/` from `__file__`, so it works from any project directory.
+  Python 3.11+ is the only requirement; the engine remains standard
+  library only.
+- **`scripts/sync_engine.py` is the one writer of the shipped copy**, and
+  `--check` is a CI gate. `engine/executor/` stays the source the suite
+  tests; the bundle is generated, so a hand edit to either side fails
+  `test_engine_ships_with_skill.py` rather than shipping an engine the
+  repository never tested.
+- **A real install is exercised in CI**, not just the repository layout:
+  the skill is copied out of the tree, `PYTHONPATH` is dropped, and the
+  launcher runs from an unrelated directory.
+
+### Changed — the documents name the command a reader can run
+
+- **Every skill states the spelling.** `executor <verb>` is defined once in
+  the router and restated at the top of each phase skill, so loading
+  `executor-execution` directly no longer leaves an agent to guess at an
+  executable that is not on `PATH`.
+- **Engine source citations point inside the skill.** The references cited
+  `engine/executor/paths.py` and `schemas.py` — paths an installed user
+  does not have. They now cite `scripts/lib/executor/`, which exists
+  wherever the skill was copied. A test walks the skills tree to keep it
+  that way.
+- **The README install section is the install path.** The `PYTHONPATH`
+  step, the one-paste prompt's profile edit, and the `python3 -m executor`
+  examples are replaced by the launcher; working from a clone is documented
+  separately, where `PYTHONPATH` is still the honest spelling.
+- **`CONTRIBUTING.md` describes this repository.** It documented
+  `exec-scan-secrets`, `validate-skills.sh`, `test-executor.sh`, and a
+  ShellCheck gate — all deleted in the v2 shell-to-Python cutover. The
+  file now names the Python entry points, the 100% branch floor, the
+  bundle rule, and the CI jobs that actually exist.
+
 ## [2.0.1] — 2026-10-16
 
 Patch release: the documents say what the engine enforces. The README's

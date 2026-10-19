@@ -5,6 +5,10 @@ description: Audit an initiative's authored artifacts against each other, repair
 
 # Critique — the gate every authoring phase passes through
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 ## Why this exists
 
 Before this discipline existed, two of eleven phases could reject a bad
