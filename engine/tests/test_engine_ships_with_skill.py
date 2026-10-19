@@ -199,6 +199,9 @@ class InstalledSkillRuns(unittest.TestCase):
         self.assertEqual(status.returncode, 0, status.stderr)
         self.assertIn("INIT-0001", status.stdout)
 
+    @unittest.skipIf(os.name == "nt",
+                     "Windows has no exec bit; the python3 spelling is the "
+                     "portable one")
     def test_the_exec_bit_runs_it_directly(self):
         """Where the exec bit survived the copy, the bare form works."""
         proc = subprocess.run(

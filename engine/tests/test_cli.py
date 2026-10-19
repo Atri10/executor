@@ -99,6 +99,26 @@ class Usage(CliCase):
         self.assertTrue(hasattr(module, "main"))
 
 
+class Stdio(unittest.TestCase):
+    """Windows pipes use the locale code page, which cannot encode the help
+    arrow or a non-Latin title; the streams are reconfigured to UTF-8 where
+    they support it."""
+
+    def test_a_stream_that_can_reconfigure_is_switched_to_utf8(self):
+        fake = mock.Mock()
+        with mock.patch.object(cli.sys, "stdout", fake), \
+             mock.patch.object(cli.sys, "stderr", io.StringIO()):
+            cli._utf8_stdio()
+        fake.reconfigure.assert_called_once_with(encoding="utf-8")
+
+    def test_a_stream_without_reconfigure_is_left_alone(self):
+        out = io.StringIO()
+        with mock.patch.object(cli.sys, "stdout", out), \
+             mock.patch.object(cli.sys, "stderr", out):
+            cli._utf8_stdio()
+        self.assertEqual(out.getvalue(), "")
+
+
 class NewCommand(CliCase):
     def test_new_creates_an_initiative_through_the_engine(self):
         code, out, _ = self.cli("new", "Mobility", "exam", "portal")

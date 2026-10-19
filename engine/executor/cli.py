@@ -44,6 +44,17 @@ def _emit(obj) -> None:
     print(json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+def _utf8_stdio() -> None:
+    """The engine is UTF-8 end to end, but a Windows pipe inherits the
+    locale code page and `print` raises on the first arrow or non-Latin
+    title. Reconfigure where the stream allows it; in-process test doubles
+    do not."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def _err(e: ExecError | Rejection) -> int:
     if isinstance(e, Rejection):
         print(json.dumps({"rejected": e.to_dict()}, indent=2), file=sys.stderr)
@@ -230,6 +241,7 @@ COMMANDS = {"new": cmd_new, "next": cmd_next, "ingest": cmd_ingest,
 
 
 def main(argv: list[str]) -> int:
+    _utf8_stdio()
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
         print(__doc__)
         return 0
