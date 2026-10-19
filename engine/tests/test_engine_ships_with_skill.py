@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -87,6 +88,27 @@ class BundleMatchesSource(unittest.TestCase):
             self.assertEqual(sorted(changed), ["-orphan.py", "a.py"])
             self.assertEqual((dst / "a.py").read_text(encoding="utf-8"),
                              "A = 1\n")
+
+    def test_drift_ignores_cached_file_timestamps(self):
+        """A same-second rewrite must be seen: a metadata-keyed comparison
+        once let a fresh write read as stale."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, dst = root / "engine", root / "bundle"
+            for d in (src, dst):
+                d.mkdir()
+            (src / "a.py").write_text("A = 1\n", encoding="utf-8")
+            (dst / "a.py").write_text("A = 2\n", encoding="utf-8")
+            stamp = int(time.time())
+            os.utime(src / "a.py", (stamp, stamp))
+            os.utime(dst / "a.py", (stamp, stamp))
+            with mock.patch.object(sync_engine, "SOURCE", src), \
+                 unittest.mock.patch.object(sync_engine, "BUNDLE", dst):
+                self.assertEqual(sync_engine.drift(),
+                                 ["stale in the bundle: a.py"])
+                sync_engine.sync()
+                os.utime(dst / "a.py", (stamp, stamp))
+                self.assertEqual(sync_engine.drift(), [])
 
 
 class SyncEngineCli(unittest.TestCase):

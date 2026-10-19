@@ -10,10 +10,11 @@ project is tagged; between releases, entries are dated and `main` moves.
 ## [2.0.3] — 2026-10-19
 
 Patch release: the Windows suite goes green. The v2.0.2 install path was
-correct on POSIX, but Windows exposed two failures the matrix caught after
-the release was tagged: `--help` crashed under the cp1252 pipe encoding, and
-a test tried to execute the launcher as a native program, which Windows
-cannot do.
+correct on POSIX, but the matrix — and the main-branch run that followed —
+exposed three failures: `--help` crashed under the cp1252 pipe encoding, a
+test tried to execute the launcher as a native program, which Windows cannot
+do, and the bundle check trusted a whole-second timestamp cache instead of
+the bytes.
 
 ### Fixed
 
@@ -23,6 +24,11 @@ cannot do.
   stdout and stderr where the stream supports it, so help text, JSON with
   `ensure_ascii=False`, and error messages survive a redirect on a
   non-UTF-8 Windows console.
+- **The bundle check compares bytes, not cached metadata.** `filecmp.cmp`
+  keys its verdict on `int(st_mtime)`, so a drift check that followed a
+  same-second rewrite could report a file stale that had just been synced.
+  `scripts/sync_engine.py` now compares contents directly, and a regression
+  test pins the same-second case with a forced mtime.
 - **The bare-launcher test is POSIX-only.** Windows has no exec bit and
   `CreateProcess` cannot run a `.py` file without a registered association.
   The portable spelling — `python3 <skill-base-dir>/scripts/executor` —

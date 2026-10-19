@@ -572,7 +572,7 @@ flowchart TD
 | Path | What it is |
 |---|---|
 | `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
-| `engine/tests/` | the suite (741 tests), including the tree-walking contract tests |
+| `engine/tests/` | the suite (742 tests), including the tree-walking contract tests |
 | `skills/executor/` | the router skill, its prompt templates, the references, and the engine that ships with it |
 | `skills/executor/scripts/executor` | the launcher; resolves `scripts/lib/executor/` relative to itself |
 | `skills/executor/scripts/lib/executor/` | the installed engine — a generated mirror of `engine/executor/` |

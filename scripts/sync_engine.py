@@ -19,7 +19,6 @@ Exit 0 clean, 1 drifted (check mode), 2 when the source is missing.
 from __future__ import annotations
 
 import argparse
-import filecmp
 import sys
 from pathlib import Path
 
@@ -34,6 +33,13 @@ def modules(directory: Path) -> dict[str, Path]:
     return {p.name: p for p in sorted(directory.glob("*.py")) if p.is_file()}
 
 
+def same(a: Path, b: Path) -> bool:
+    """Content equality, by bytes. `filecmp.cmp(shallow=False)` caches its
+    verdict on whole-second mtimes, so a check that follows a same-second
+    rewrite can report the pre-rewrite answer."""
+    return a.read_bytes() == b.read_bytes()
+
+
 def drift() -> list[str]:
     """Every way the bundle disagrees with the source, as readable lines."""
     src, dst = modules(SOURCE), modules(BUNDLE)
@@ -43,7 +49,7 @@ def drift() -> list[str]:
                  for name in sorted(set(dst) - set(src))]
     problems += [f"stale in the bundle: {name}"
                  for name in sorted(set(src) & set(dst))
-                 if not filecmp.cmp(src[name], dst[name], shallow=False)]
+                 if not same(src[name], dst[name])]
     return problems
 
 
@@ -55,7 +61,7 @@ def sync() -> list[str]:
     changed = []
     for name in sorted(src):
         target = BUNDLE / name
-        if name in dst and filecmp.cmp(src[name], target, shallow=False):
+        if name in dst and same(src[name], target):
             continue
         target.write_bytes(src[name].read_bytes())
         changed.append(name)
