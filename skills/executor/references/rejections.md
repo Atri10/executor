@@ -3,7 +3,7 @@
 Every refusal `executor ingest`, `executor decide`, and
 `executor check` can emit, with the field it points at and the action
 that clears it. This is the authoritative list: the codes are raised in
-`engine/executor/` (`engine.py` for the semantic pass, `schemas.py` for
+`scripts/lib/executor/` (`engine.py` for the semantic pass, `schemas.py` for
 the structural one, `store.py` for the journal), and a code that appears
 in neither is not a code.
 

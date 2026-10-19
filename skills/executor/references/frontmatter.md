@@ -2,7 +2,7 @@
 
 Every Executor document is a typed JSON payload, not a markdown file with
 frontmatter: the payload's fields carry the ID graph, the journal carries
-the history, and `engine/executor/schemas.py` validates every field the
+the history, and `scripts/lib/executor/schemas.py` validates every field the
 moment `executor ingest` accepts it. The rendered `.md` beside it is a
 derived view — a projection of the payload, never the authority.
 

@@ -5,6 +5,10 @@ description: Use when plans are all drafted and `executor next` enters `plan_reg
 
 # Executor — Plan Regression
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 The phase between planning and execution that the plan set earns by
 surviving one adversarial read as a *set*. Every per-plan check that
 already exists — the planning self-review — reads ONE plan. This phase

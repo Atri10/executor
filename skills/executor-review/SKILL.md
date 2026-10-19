@@ -5,6 +5,10 @@ description: Use when the engine emits a `DISPATCH` with `role: "review"` — a 
 
 # Executor Review
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 A review is not a conversation. It is a **round**: the engine mints a
 `reviews/R<NN>` slot, packages the diff, and the reviewer's `verdict`
 payload — validated against the schema — is the judgment of record. The

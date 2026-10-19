@@ -5,6 +5,10 @@ description: Use when a new feature, use case, or product capability must be des
 
 # Executor — Brainstorm
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 The design skill. Every other skill converges — specs fix requirements,
 plans fix tasks, verdicts fix judgments. This one explores first: it turns
 a rough idea into a small set of genuinely different, complete designs,

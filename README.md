@@ -25,10 +25,10 @@ on macOS, Linux, and Windows.
 ## In sixty seconds
 
 ```text
-$ npx skills add Atri10/executor                 # skills into your harness
-$ export PYTHONPATH=/path/to/executor/engine     # the engine on the path
+$ npx skills add Atri10/executor                 # skills + engine into your harness
+$ EXEC=~/.agents/skills/executor/scripts/executor # the launcher, no PATH setup
 
-$ python3 -m executor new "Tenant isolation cells"
+$ python3 "$EXEC" new "Tenant isolation cells"
 {
   "created": "INIT-0001",
   "title": "Tenant isolation cells",
@@ -36,10 +36,10 @@ $ python3 -m executor new "Tenant isolation cells"
   "docs": ".../docs/executor/INIT-0001"
 }
 
-$ python3 -m executor next
+$ python3 "$EXEC" next
 {"action":"PHASE-ENTER","initiative":"INIT-0001","phase":"intake", ...}
 
-$ python3 -m executor status
+$ python3 "$EXEC" status
 INITIATIVE INIT-0001 - Tenant isolation cells
 phase: intake (in_progress)
 events: 3 | artifacts: 0 | tasks: 0
@@ -61,19 +61,33 @@ discovers every skill in the repo and wires them into your harness:
 npx skills add Atri10/executor
 ```
 
-Or clone and copy `skills/` into whatever directory your agent loads from,
-and put `engine/` on your `PYTHONPATH`:
+**The engine ships inside the `executor` skill**, at
+`skills/executor/scripts/lib/executor/`, with a launcher beside it. An
+install therefore needs no `pip`, no virtualenv, no `PYTHONPATH`, and no
+command on `PATH`: the launcher resolves its engine relative to itself, so
+it works from any project directory. Python 3.11+ is the only requirement,
+and the engine is standard library only.
+
+```bash
+python3 ~/.agents/skills/executor/scripts/executor --version
+```
+
+`~/.agents/skills/` is where `npx skills add` puts a globally installed
+skill; use `./.agents/skills/` for a project-local install, or your
+harness's own skills directory if it keeps one. Throughout this README and
+every skill, `executor <verb>` means that launcher.
+
+Or clone and copy `skills/` into whatever directory your agent loads from:
 
 ```bash
 git clone git@github.com:Atri10/executor.git
 cp -R executor/skills/* <your-agents-skills-dir>/
-export PYTHONPATH=<clone>/engine
 ```
 
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v2.0.1 git@github.com:Atri10/executor.git
+git clone --branch v2.0.2 git@github.com:Atri10/executor.git
 ```
 
 There are no dependencies to install: the engine is the standard library,
@@ -87,7 +101,7 @@ other harness. It discovers the right directories itself and verifies the
 install:
 
 ```text
-Install The Executor skill library and engine for me:
+Install The Executor skill library for me:
 
 1. Clone https://github.com/Atri10/executor.git into a temp directory
 2. Find my agent's skills directory. Candidates, in order — use the first
@@ -99,14 +113,15 @@ Install The Executor skill library and engine for me:
    - as my harness documents
 3. Copy every directory from the clone's skills/ folder into that skills
    directory (each is one skill: skills/executor, skills/executor-spec, ...).
-   Tell me the PYTHONPATH line that points at the clone's engine/ directory,
-   and add it to my shell profile if I confirm.
-4. Verify: run PYTHONPATH=<clone>/engine python3 -m executor --version
-   (prints 2.0.1), then PYTHONPATH=<clone>/engine python3 -m executor
-   --help (lists the command surface). Also confirm every copied
-   skills/<name>/ directory contains a SKILL.md — count the directories,
-   not a remembered number: the skill set grows, and a stale count fails
-   an install that is actually fine.
+   The engine ships inside skills/executor/scripts/lib/, so copy the whole
+   directory — do not copy only the .md files.
+4. Verify: run python3 <skills-dir>/executor/scripts/executor --version
+   (prints 2.0.2), then python3 <skills-dir>/executor/scripts/executor
+   --help (lists the command surface). Do not set PYTHONPATH and do not
+   install a package: the launcher carries its engine. Also confirm every
+   copied skills/<name>/ directory contains a SKILL.md — count the
+   directories, not a remembered number: the skill set grows, and a stale
+   count fails an install that is actually fine.
 5. Tell me which directory you installed into, and how to invoke the
    router in my harness (usually /skill:executor or just asking for
    "the executor").
@@ -123,6 +138,20 @@ Then invoke the root router:
 
 or say *"start an initiative"* — normal requests route by each skill's
 description.
+
+### Working in this repository
+
+From a clone, the engine is also a package under `engine/`, which is what
+the test suite imports:
+
+```bash
+export PYTHONPATH=<clone>/engine
+python3 -m executor --version
+```
+
+Both spellings run the same code. `scripts/sync_engine.py` mirrors
+`engine/executor/` into the skill bundle and `--check` fails CI when they
+differ, so the two copies cannot drift.
 
 ## How a run is driven
 
@@ -402,6 +431,9 @@ the decision table is an engine gap to record, not to approximate).
 
 ### The CLI is the whole surface
 
+`executor` below is `python3 <skill-base-dir>/scripts/executor`; the
+launcher passes its arguments straight through.
+
 ```text
 executor new "<title>"                     scaffold INIT-NNNN
 executor next [INIT]                       one typed action + its prompt
@@ -528,21 +560,25 @@ archivable — open the folder and every pointer resolves inside it.
 
 ```mermaid
 flowchart TD
-    R["repository root"] --> E["engine/ — the engine, stdlib only"]
+    R["repository root"] --> E["engine/ — the engine source, stdlib only"]
     R --> S["skills/ — one directory per skill"]
-    R --> SC["scripts/ — run_tests.py, mutate.py, validators"]
+    R --> SC["scripts/ — run_tests.py, sync_engine.py, mutate.py, validators"]
     R --> CI[".github/workflows/ — the gates"]
     R --> DOC["docs/executor/ — the committed record of each initiative"]
     E --> ET["engine/tests/ — the suite"]
+    S --> B["executor/scripts/lib/executor/ — the shipped copy"]
 ```
 
 | Path | What it is |
 |---|---|
-| `engine/executor/` | the engine: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
-| `engine/tests/` | the suite (722 tests), including the tree-walking contract tests |
-| `skills/executor/` | the router skill, its prompt templates, and the references |
+| `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
+| `engine/tests/` | the suite (739 tests), including the tree-walking contract tests |
+| `skills/executor/` | the router skill, its prompt templates, the references, and the engine that ships with it |
+| `skills/executor/scripts/executor` | the launcher; resolves `scripts/lib/executor/` relative to itself |
+| `skills/executor/scripts/lib/executor/` | the installed engine — a generated mirror of `engine/executor/` |
 | `skills/executor-*/` | one directory per phase skill |
 | `scripts/run_tests.py` | the test runner; enforces the branch-coverage floor |
+| `scripts/sync_engine.py` | mirrors the engine into the skill; `--check` is the drift gate |
 | `scripts/mutate.py` | mutation testing; the allow list records equivalent survivors |
 | `scripts/validate_skills.py` | the skill contract: registry, references, payload shapes |
 | `scripts/lint-prompt-injection.py` | blocks override directives and concealment in skill text |

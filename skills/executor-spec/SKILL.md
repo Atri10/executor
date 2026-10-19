@@ -5,6 +5,10 @@ description: Use when `executor next` enters `specification` — architecture an
 
 # Specification
 
+> **Engine.** `executor <verb>` means
+> `python3 <skills-dir>/executor/scripts/executor <verb>`; the engine ships
+> inside the router skill, so nothing is on `PATH`.
+
 This phase produces the artifacts every later phase is measured
 against.
 

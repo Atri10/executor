@@ -58,6 +58,20 @@ jobs:
         # payload-writing prompt states the refusal contract, and that no
         # ID example or JSON skeleton teaches something the engine rejects.
         run: python scripts/validate_skills.py
+      - name: The bundled engine matches the engine source
+        # Users install the skill, and the skill carries the engine. The
+        # bundle is generated, so a change to engine/executor/ that misses
+        # the bundle would ship one engine and test another.
+        run: python scripts/sync_engine.py --check
+      - name: The installed skill runs with no PYTHONPATH
+        # The claim in the README, executed: copy the skill out of the repo,
+        # drop PYTHONPATH, and run the launcher from an unrelated directory.
+        run: |
+          set -e
+          dest="$(mktemp -d)"
+          cp -R skills/executor "$dest/executor"
+          cd "$dest"
+          env -u PYTHONPATH python3 executor/scripts/executor --version
       - name: Prompt-injection lint
         # Every SKILL.md is executed as instruction by agents. This blocks
         # override directives, concealment, exfiltration endpoints,

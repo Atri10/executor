@@ -1,7 +1,7 @@
 # Directory Layout
 
 The exact structure of both Executor stores. The engine — not this document
-— enforces every path here: `engine/executor/paths.py` is the one path
+— enforces every path here: `scripts/lib/executor/paths.py` is the one path
 authority, and `executor check` classifies every file in both stores
 against its grammar. Nothing invents a location.
 
@@ -91,7 +91,7 @@ by the planning AUTHOR.
 ## Payload kinds
 
 A payload is the only unit a worker, a human, or the engine can append to
-the journal, and every kind has a schema in `engine/executor/schemas.py`:
+the journal, and every kind has a schema in `scripts/lib/executor/schemas.py`:
 
 | Kind | Actor | Closes a dispatch? |
 |---|---|---|
