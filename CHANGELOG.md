@@ -7,6 +7,27 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.0.3] — 2026-10-19
+
+Patch release: the Windows suite goes green. The v2.0.2 install path was
+correct on POSIX, but Windows exposed two failures the matrix caught after
+the release was tagged: `--help` crashed under the cp1252 pipe encoding, and
+a test tried to execute the launcher as a native program, which Windows
+cannot do.
+
+### Fixed
+
+- **CLI output is UTF-8 even when Windows redirects it.** A pipe inherits
+  the locale code page, and `print(__doc__)` raised `UnicodeEncodeError` on
+  the help arrow before it could print a line. `main` now reconfigures
+  stdout and stderr where the stream supports it, so help text, JSON with
+  `ensure_ascii=False`, and error messages survive a redirect on a
+  non-UTF-8 Windows console.
+- **The bare-launcher test is POSIX-only.** Windows has no exec bit and
+  `CreateProcess` cannot run a `.py` file without a registered association.
+  The portable spelling — `python3 <skill-base-dir>/scripts/executor` —
+  remains the tested, documented form on every platform.
+
 ## [2.0.2] — 2026-10-19
 
 Patch release: the engine ships with the skill. Installing the skills used

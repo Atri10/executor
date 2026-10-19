@@ -87,7 +87,7 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v2.0.2 git@github.com:Atri10/executor.git
+git clone --branch v2.0.3 git@github.com:Atri10/executor.git
 ```
 
 There are no dependencies to install: the engine is the standard library,
@@ -116,7 +116,7 @@ Install The Executor skill library for me:
    The engine ships inside skills/executor/scripts/lib/, so copy the whole
    directory — do not copy only the .md files.
 4. Verify: run python3 <skills-dir>/executor/scripts/executor --version
-   (prints 2.0.2), then python3 <skills-dir>/executor/scripts/executor
+   (prints 2.0.3), then python3 <skills-dir>/executor/scripts/executor
    --help (lists the command surface). Do not set PYTHONPATH and do not
    install a package: the launcher carries its engine. Also confirm every
    copied skills/<name>/ directory contains a SKILL.md — count the
@@ -572,7 +572,7 @@ flowchart TD
 | Path | What it is |
 |---|---|
 | `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
-| `engine/tests/` | the suite (739 tests), including the tree-walking contract tests |
+| `engine/tests/` | the suite (741 tests), including the tree-walking contract tests |
 | `skills/executor/` | the router skill, its prompt templates, the references, and the engine that ships with it |
 | `skills/executor/scripts/executor` | the launcher; resolves `scripts/lib/executor/` relative to itself |
 | `skills/executor/scripts/lib/executor/` | the installed engine — a generated mirror of `engine/executor/` |
