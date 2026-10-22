@@ -294,13 +294,18 @@ class Internals(LiveCase):
         self.assertEqual(engine._open_for(s, "INIT-0001-P01-T01")["dispatch_id"],
                          "D00002")
 
-    def test_check_survives_a_store_missing_its_optional_directories(self):
-        """A store that has never dispatched or exported still audits cleanly:
-        missing dispatches/ and docs dirs are not problems."""
-        docs_init_dir(self.live.root, self.init.id).rmdir()
-        dispatches_dir(self.init.idir).rmdir()
+    def test_check_names_a_store_missing_its_canonical_directories(self):
+        """`check` reports a missing canonical file by name. A store whose
+        committed index was removed is not "clean because nothing is wrong
+        with what is left" — the index is required, so its absence is a
+        problem (audit D16)."""
+        import shutil
+        shutil.rmtree(docs_init_dir(self.live.root, self.init.id))
+        shutil.rmtree(dispatches_dir(self.init.idir))
         report = check(self.init)
-        self.assertEqual((report["chain"], report["problems"]), ("ok", []))
+        self.assertEqual(report["chain"], "ok")
+        self.assertTrue(any("committed index missing" in p
+                            for p in report["problems"]), report["problems"])
 
     def test_a_stray_file_in_the_committed_store_is_named(self):
         """The committed side of the store is audited as strictly as the run

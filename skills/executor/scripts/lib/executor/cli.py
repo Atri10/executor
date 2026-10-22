@@ -7,11 +7,12 @@
     executor next [INIT]                       one typed action + its prompt
     executor ingest <path|-> [INIT]            a worker payload: validate → fold → render
     executor decide <path|-> [INIT]            a human decision: gate_decision, ruling, resume
+    executor change <path|-> [INIT]            a mid-run change request; --list reads them
     executor status [INIT]                     gate card
-    executor check [INIT] [--secrets]           chain, edges, liveness, layout; or scan for secrets
+    executor check [INIT] [--secrets]          chain, edges, liveness, layout; or scan for secrets
     executor doctor [INIT]                     check + open dispatches + policy in force
     executor graph [INIT] [--format json|mermaid]
-    executor migrate [INIT] [--dry-run]        reports the store version verdict; never edits
+    executor migrate [INIT] [--dry-run|--apply] the version verdict, or convert to this layout
     executor autonomy [INIT] [<phase> <allow|gate|deny>]   per-phase autonomy; deny by default
 
 Exit codes: 0 ok · 1 check found problems · 2 usage, a refusal, or an engine error.
@@ -29,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from executor import __version__                                   # noqa: E402
 from executor.engine import (check, create_initiative, emit_next,  # noqa: E402
                              fold, ingest, open_dispatches, scan_secrets)
+from executor.migrate import migrate_layout                        # noqa: E402
 from executor.paths import autonomy_file, docs_root                # noqa: E402
 from executor.policy import (AUTONOMY_MODES, effective_policy,      # noqa: E402
                              normalize_autonomy)
@@ -37,7 +39,7 @@ from executor.store import (PHASES, ExecError, Initiative,          # noqa: E402
                             repo_root, store_version_verdict, write_json)
 from executor.views import status_card                             # noqa: E402
 
-HUMAN_COMMANDS = frozenset({"gate_decision", "ruling", "resume"})
+HUMAN_COMMANDS = frozenset({"gate_decision", "ruling", "resume", "halt"})
 
 
 def _emit(obj) -> None:
@@ -219,22 +221,71 @@ def cmd_graph(args: list[str]) -> int:
 
 
 def cmd_migrate(args: list[str]) -> int:
-    """Reports the store's version verdict, the same one the engine enforces when
-    it opens a store. It opens the store ungated, because a skewed store is exactly
-    what it must explain. No upgrade path exists yet, so it never edits anything."""
+    """Reports the store's version verdict and, with --apply, converts the store
+    to the current layout. It opens the store ungated, because a skewed store is
+    exactly what it must explain.
+
+        executor migrate [INIT]               verdict only, never edits
+        executor migrate [INIT] --dry-run     every write and removal, no edit
+        executor migrate [INIT] --apply       write, then verify
+
+    The migration is deterministic and byte-idempotent: a second --apply
+    rewrites identical bytes and removes nothing."""
     init, rest = _target(args, gate=False)
     meta = read_json(meta_file(init.idir)) or {}
     verdict = store_version_verdict(meta.get("engine_version", "0"))
-    _emit({"initiative": init.id,
-           "store_engine_version": meta.get("engine_version"),
-           "engine": __version__, "dry_run": "--dry-run" in rest,
-           "verdict": verdict,
-           "action": "none" if verdict == "current"
-           else "refused: no migration is defined for this engine version"})
-    return 0 if verdict == "current" else 1
+    if "--apply" in rest:
+        res = migrate_layout(init, dry_run=False)
+        res.update(verdict=verdict, engine=__version__)
+        _emit(res)
+        return 0
+    res = migrate_layout(init, dry_run=True)
+    res.update(verdict=verdict, engine=__version__,
+               action="none" if res["already_current"]
+               else "run with --apply to convert this store")
+    _emit(res)
+    return 0 if res["already_current"] and verdict == "current" else 1
+
+
+def cmd_change(args: list[str]) -> int:
+    """File a mid-run change request, or list the open and closed ones.
+
+    A change is a journaled, ID-bearing object: the engine mints `CR-NNNN`,
+    computes the blast radius from the fold and drives the regression lane.
+    It is not a ruling and not a markdown edit.
+
+        executor change <payload.json|-> [INIT]   file a change request
+        executor change --list [INIT]             every change and its state
+    """
+    if "--list" in args:
+        rest = [a for a in args if a != "--list"]
+        init, _ = _target(rest)
+        s = fold(init.events)
+        _emit({"initiative": init.id,
+               "changes": [{"id": c["id"], "state": c["state"],
+                            "title": c["title"],
+                            "coarse": bool((c.get("radius") or {}).get("coarse")),
+                            "tasks": len((c.get("radius") or {}).get("tasks", [])),
+                            "criteria": len((c.get("radius") or {}).get(
+                                "criteria", []))}
+                           for c in sorted(s["changes"].values(),
+                                           key=lambda c: c["seq"])]})
+        return 0
+    if not args:
+        raise ExecError("usage: executor change <payload.json|-> [INIT]", "usage")
+    path = args[0]
+    payload = _read_payload(path)
+    init, _ = _target(args[1:])
+    ev = ingest(init, payload, actor="human")
+    s = fold(init.events)
+    c = s["changes"].get(ev["entity"]) or {}
+    _emit({"event": ev, "change": c.get("id"), "state": c.get("state"),
+           "radius": c.get("radius")})
+    return 0
 
 
 COMMANDS = {"new": cmd_new, "next": cmd_next, "ingest": cmd_ingest,
+            "change": cmd_change,
             "decide": cmd_decide, "status": cmd_status, "check": cmd_check,
             "doctor": cmd_doctor, "graph": cmd_graph, "migrate": cmd_migrate,
             "autonomy": cmd_autonomy}

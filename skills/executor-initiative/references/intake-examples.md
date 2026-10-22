@@ -98,9 +98,11 @@ pipe table or a fence in a string is a schema rejection.
 | `constraints` | The credential appears as an existence statement with a shape, never a value |
 | `stakeholders` | One named approver, not "the team" |
 
-A skipped phase is no longer a charter field: it is a `ruling` payload
-through `executor decide` at the gate where the phase would have been
-entered — "enter `design` was waived by R. Okonjo on 2026-08-31 because
-the initiative adds one new component behind one interface; its
-internals are specified in `INIT-0004-SPEC-01`." The ruling is
-journaled, so the reason survives the session that wrote it.
+A skipped phase is not a schema field: it is a `waived`
+`gate_decision` with a `note`, recorded by the human through
+`executor decide` at the gate where the phase would have been entered —
+"enter `design` was waived by R. Okonjo on 2026-08-31 because the
+initiative adds one new component behind one interface; its internals
+are specified in `INIT-0004-SPEC-01`." The decision is journaled, so the
+reason survives the session that wrote it. The charter's "Skipped
+phases" section states the intent; the `gate_decision` is the record.

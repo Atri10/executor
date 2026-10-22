@@ -70,9 +70,15 @@ rejected before it lands.
 | Token | Names |
 |---|---|
 | `INIT-0004-P01-T03` | a task |
-| `INIT-0004-P01-T03-R02` | review round 2 of that task |
-| `INIT-0004-SPEC-01-R07` | requirement 7 of that spec |
-| `INIT-0004-SPEC-01-C03` | global constraint 3 of that spec |
+| `R07` | requirement 7 of the spec the plan cites |
+| `C03` | global constraint 3 of that spec |
+| `V03` | criterion 3 of the `vrfy` |
+
+A review round is the payload's integer `round` — the engine mints it and
+the verdict echoes it. `R<NN>` is only the file-name shape under
+`reviews/`, `audits/`, `repairs/`, and `fixes/`, never a citable id, and
+a composite such as `INIT-0004-SPEC-01-R07` is not an id either: cite
+`R07` and let the spec anchor it.
 
 **Citation rule:** every ID in a finding belongs to this initiative. A
 verdict never names an ID from another initiative — describe the
@@ -120,11 +126,11 @@ further. A journaled ruling is obeyed and never re-litigated inside the
 loop.
 
 **Where the cap comes from.** `max_fix_rounds` is a policy tunable —
-default 5, bounds 1–50 — read from
-`docs/executor/config.json` then `.executor/<INIT>/meta/policy.json`, and
-the effective value is journaled with the run. The engine enforces it; a
-worker never chooses its own cap, and the number is always visible via
-`executor status`.
+default 5, bounds 1–50 — read from `docs/executor/config.json` (project)
+then `docs/executor/<INIT>/meta/policy.json` (initiative), and the
+effective value is journaled with the run. `executor status` prints the
+`policy:` line with the value and the file it came from. The engine
+enforces the cap; a worker never chooses its own.
 
 ## Secret Hygiene in Review
 
@@ -145,9 +151,11 @@ History rewriting is the human's call; the incident is recorded as a
 
 ## The Final Whole-Branch Audit
 
-When the plan's tasks all merge, the engine emits a plan-level `DISPATCH`
-with `role: "audit"` — `final-reviewer-prompt.md`, most capable model.
-Its `audit` payload's `target` is the plan ID; it judges:
+The `review` phase *is* this audit: for every merged plan the engine emits
+a plan-level `DISPATCH` with `role: "audit"` — `final-reviewer-prompt.md`,
+most capable model. It runs once per plan, before the phase gate, and the
+gate means every merged plan passed it. Its `audit` payload's `target` is
+the plan ID; it judges:
 
 - **cross-task seams** — the interfaces task reviews cannot see;
 - **spec compliance end to end** — every `R<n>` satisfied somewhere;

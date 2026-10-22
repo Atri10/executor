@@ -1,11 +1,10 @@
 # Branch Model
 
-One branch per artifact level, named after the artifact's ID, merged on
-the gate its level requires. `git branch --list` is the registry. The
-engine enforces the *outcome* — a `merge` payload names `plan` and
-`merge_sha`, and `executor ingest` verifies the plan is known and unmerged
-with every task complete and the named merge commit exists — while the
-*mechanics* (which fork, which order, which gates) are this document.
+One branch per level, named after the entity, merged on the gate its level
+requires. `git branch --list` is the registry. The engine enforces the
+*mechanically checkable* half — descent, ownership, base-branch purity, merge
+direction, the commit-subject convention — and this document owns the rest:
+which fork, which order, which gates, which worktree.
 
 ## The hierarchy
 
@@ -25,61 +24,69 @@ flowchart LR
 
 | Direction | Gate the merge requires |
 |---|---|
-| task → plan | the task's latest review round's `verdict` is clean — `spec_verdict` pass and `quality_verdict` approved |
-| plan → initiative | every task reviewed and merged **and** the plan's final verdict clean — the engine's `MERGE` action; its `merge_sha` is verified on ingest |
+| task → plan | the task's latest review round is clean — `spec_verdict` pass and `quality_verdict` approved |
+| plan → initiative | every task reviewed and merged **and** the plan's whole-plan audit clean (the `review` phase) |
 | side → initiative | a human `ruling` naming the slug — a side branch is not a task and earns no verdict |
 | spike → never | abandoned; never merged |
 
 The **initiative branch** is the only integration line: plan and task
 branches never fork from `main` and never merge to it. `hotfix/<slug>` is
-the one branch outside the hierarchy — it forks from the base and merges
-back, because an urgent fix must not wait for an initiative.
+the one branch outside the hierarchy — it forks from the base and merges back,
+because an urgent fix must not wait for an initiative.
 
-## What the engine enforces, and what stays procedural
+## What the engine enforces
 
-The engine today:
+Six rules, each with a rejection code in `references/rejections.md` and a
+clear-the-path hint in the refusal. They are checked when a payload answers a
+dispatch this engine minted (`context.rules == "v2"`); a dispatch already
+open at upgrade time is judged by the rules it was asked under, so an upgrade
+never rejects the work it inherited. `executor status` says when that
+exemption is in force.
 
-- emits `MERGE` only when a plan's fold says every task is merged-ready —
-  no `MERGE` for a plan with an open review round;
-- verifies the `merge` payload against the fold and git — the plan is
-  known and unmerged, every task complete, and the `merge_sha` resolves;
-- journaled `abandon`/`spawn_error`/`needs_context` transitions make a
-  branch's recorded intent recoverable — the fold knows a task was
-  redispatched, so its branch is accounted for even while work is in
-  flight.
+| Rule | Checked on | Code |
+|---|---|---|
+| **G1 descent** — the reported head descends from the dispatch base | `report` | `not_descendant` |
+| **G2 base-branch purity** — the head is not contained in the branch the dispatch forked from (no commit on the integration line) | `report` | `commit_on_base` |
+| **G3 ownership** — `task/<TASK-ID>` contains the head, and `report.branch` (when present) names it | `report` | `branch_mismatch` |
+| **G4 merge ancestry** — the merge contains every task head of the plan it claims | `merge` | `merge_not_descendant` |
+| **G5 merge branch** — `merge.branch` exists, is `plan/<PLAN-ID>` or `initiative/<INIT-ID>`, and contains `merge_sha` | `merge` | `merge_branch_mismatch` |
+| **G6 commit subjects** — every subject in `base..head` matches the convention below | `report` | `bad_commit_message` |
 
-What stays procedural — the skill's job, not the engine's:
+The commit-subject convention, enforced verbatim:
 
-- the fork mechanics (`initiative/<INIT>` from the base, `plan/<PLAN>` from
-  the initiative, `task/<TASK>` from the plan tip) — the engine records
-  `commit_base`/`commit_head` on verdicts, the skill creates the branches;
-- the merge itself, so the recorded `merge_sha` descends from the plan's
-  head — the engine checks the commit exists, not where it sits;
-- worktree selection for a task that needs isolation;
-- the per-task branch lifecycle — forking and abandoning task branches is
-  a plan-level policy the execution skill declares per plan, not an engine
-  rule yet.
+```
+^(feat|fix|chore|docs|refactor|test|perf|build|ci)(\([a-z0-9._/-]+\))?: \S.*$
+```
 
-## Sequential plans
+A dispatch's `prompt.md` records the rules it was minted under (`rules: v2`),
+so the worker can see what will be checked.
 
-A plan whose tasks must land in order declares it in its `sections`
-(dependency chains in each task's `files`/`accepts` text) and commits
-directly to the plan branch — the sequential mode opts out of per-task
-branches, because a single chain is the only case where they add no value.
+## What stays procedural — the skill's job
+
+| Rule | Why it is not in the engine |
+|---|---|
+| Fork mechanics (`initiative/` from base, `plan/` from initiative, `task/` from the plan tip) | the engine checks the *consequence* (G1, G3), not how the branch was created; `git branch` mutation is the skill's job |
+| Worktree choice for concurrent tasks | a local workflow decision; no journal object describes it |
+| Merge ordering across plans | the human/pump owns it; the engine judges one merge at a time |
+| One-task-per-branch isolation | a task branch that forks from the plan tip legitimately contains every earlier merged task, so ancestry cannot tell a fork from contamination. G3 is the enforceable core: the head must live on the task's own branch |
+| Abandoning a task branch | a `ruling` decision, stated as a cost; no mechanical rule is universal |
+| `side/` and `hotfix/` conventions | exceptions a human authorises; G3 says nothing about a side branch a human opened |
 
 ## Edge cases
 
 | Situation | Handling |
 |---|---|
 | Task abandoned mid-flight | the `spawn_error`/`abandon` event reverts the task to pending; a `ruling` names why the branch is parked |
-| Reviewer needs the task diff | the review package carries `commit_base` (fork point at dispatch) and `commit_head`; the diff is `base..head` |
-| Human decides mid-run | a `ruling` payload — not a branch — records it; branches carry code, rulings carry decisions |
+| Reviewer needs the task diff | the review package carries `commit_base` (the dispatch base) and `commit_head`; G1 makes that range meaningful — the diff is `base..head` and the base really is the fork point |
+| Human decides mid-run | a `ruling` payload — not a branch — records it; a change to the contract is a `change_request`, not a branch |
 | Initiative ends | the initiative branch merges to the base **by the human**, at handoff — the engine stops at the plan boundary |
 
 ## Never
 
-- Never delete a branch with unmerged commits — that is a `ruling`
-  decision, stated as a cost.
+- Never delete a branch with unmerged commits — that is a `ruling` decision,
+  stated as a cost.
 - Never merge a task branch past an unclean verdict.
-- Never hand-write a `merge` payload's `merge_sha` from memory — the
-  commit must exist and the engine checks.
+- Never hand-write a `merge` payload's `merge_sha` from memory — the commit
+  must exist, contain the task heads, and sit on the branch it names.
+- Never commit the plan's work on the integration branch: G2 refuses it, and
+  the integration line takes merges only.

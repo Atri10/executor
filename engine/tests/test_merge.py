@@ -21,7 +21,9 @@ class Merges(unittest.TestCase):
     def test_a_merge_of_a_plan_that_does_not_exist_is_an_unknown_entity(self):
         before = len(self.live.events())
         with self.assertRaises(Rejection) as r:
-            ingest(self.init, PL.merge(plan=PL.PLAN, sha=self.live.git("rev-parse", "HEAD")))
+            self.live.branch_at(f"plan/{PL.PLAN}")
+            ingest(self.init, PL.merge(plan=PL.PLAN,
+                                       sha=self.live.git("rev-parse", "HEAD")))
         self.assertEqual(r.exception.code, "unknown_entity")
         self.assertEqual(len(self.live.events()), before)
 

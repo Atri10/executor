@@ -133,7 +133,7 @@ class VerdictContract(LiveCase):
 class Halting(LiveCase):
     def test_a_halted_run_refuses_work_and_clears_only_on_resume(self):
         self.live.act()
-        ingest(self.init, PL.halt("hold for the client"))
+        ingest(self.init, PL.halt("hold for the client"), actor="human")
         self.assertRefused("halted", PL.art("charter"))
         self.assertEqual(self.live.act()["action"], "HALT")
         ingest(self.init, {"kind": "resume", "v": "v1",
@@ -158,6 +158,8 @@ class MergeContract(LiveCase):
         merge = self.live.run(lambda a: a["action"] == "MERGE")
         self.assertEqual(merge["plan"], PL.PLAN)
         head = self.live.git("rev-parse", "HEAD")
+        # merge direction: the merge lands on the plan branch (rule G5)
+        self.live.branch_at(f"plan/{PL.PLAN}")
         ingest(self.init, PL.merge(plan=PL.PLAN, sha=head))
         self.assertRefused("already_merged", PL.merge(plan=PL.PLAN, sha=head))
 

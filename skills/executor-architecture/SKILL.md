@@ -24,7 +24,7 @@ contract come from there and are binding.
 | Architecture | `arch` (`INIT-NNNN-ARCH-01`) | Every initiative reaching this phase gets exactly one. It may be a single page. |
 | Decision | `adr` (`INIT-NNNN-ADR-nn`) | One per decision that had a live alternative and that a future reader could reasonably reverse. |
 | Interface | `ifce` (`INIT-NNNN-IFCE-nn`) | One per seam crossed by more than one task or plan. |
-| Design | `design` (`INIT-NNNN-DSGN-nn`) | One per component whose internals are not obvious from ARCH plus IFCE. |
+| Design | `design` (`INIT-NNNN-DSGN-nn`, minted per kind) | One per declared component whose internals are not obvious from ARCH plus IFCE. |
 
 Each is an `author` `DISPATCH` — the worker writes the payload to
 `respond_to`, `executor ingest` validates and journals it, the
@@ -82,6 +82,18 @@ The **boundaries** section is the load-bearing one. See
 say which side of a boundary a component sits on, the boundary is
 wrong — fix it before continuing, because every later document
 inherits it.
+
+**Declare the components.** An `arch` payload may carry a `components[]`
+array — one entry per component in the inventory, each with `id`,
+`title`, and `responsibility`. The design phase reads it and mints one
+`design` artifact per component, each carrying `component: "<id>"`. An
+`arch` with no `components` yields exactly one design, which is what
+every single-component initiative wants.
+
+Artifact ids are minted per kind, never hardcoded: the first `ADR` is
+`INIT-NNNN-ADR-01`, the second `INIT-NNNN-ADR-02`, and the same holds
+for `DSGN` — a per-component design gets its own id rather than
+overwriting the first.
 
 ### 4. Harvest the decisions into ADRs
 
@@ -143,10 +155,11 @@ rewritten, not amended.
 ### 8. Design phase
 
 `PHASE-ENTER design` then `DISPATCH`es per component that needs one —
-`schema: "design"`, one `design` artifact per component. Its
-`sections` cover the component's internals; its public surface is not
-restated — it points at the `ifce`. Then the same `GATE` discipline:
-present and end your turn.
+`schema: "design"`, one `design` artifact per component the `arch`
+declares (or one when it declares none). Each design carries
+`component: "<id>"`, and its `sections` cover the component's internals;
+its public surface is not restated — it points at the `ifce`. Then the
+same `GATE` discipline: present and end your turn.
 
 If no component needs one, skip explicitly — never silently: the
 human's `gate_decision` carries `decision: "waived"` and the `note`

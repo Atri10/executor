@@ -57,20 +57,22 @@ REQUIRED = {
     "halt": {"kind", "v", "reason"},
     "spawn_error": {"kind", "v", "dispatch_id", "error_class"},
     "needs_context": {"kind", "v", "task", "question"},
-    "merge": {"kind", "v", "plan", "merge_sha"},
+    "merge": {"kind", "v", "plan", "merge_sha", "branch"},
+    "change_request": {"kind", "v", "title", "requested_by", "why",
+                       "change"},
     "resume": {"kind", "v", "reason"},
 }
 EXTRA_KEYS = {
     **{k: ART_KEYS for k in ("options", "brainstorm", "adr", "ifce")},
     "charter": ART_KEYS | {"requirements", "constraints", "risks"},
     "spec": ART_KEYS | {"requirements", "constraints", "risks"},
-    "arch": ART_KEYS | {"adrs", "ifces"},
-    "design": ART_KEYS | {"adrs", "ifces"},
+    "arch": ART_KEYS | {"adrs", "ifces", "components"},
+    "design": ART_KEYS | {"adrs", "ifces", "component"},
     "risk": ART_KEYS | {"risks"},
     "vrfy": ART_KEYS | {"criteria"},
     "plan": ART_KEYS | {"plan_id", "objective", "tasks", "gates", "more_plans"},
-    "report": BASE_KEYS | {"task", "result", "summary", "commits", "concerns",
-                           "tests", "model_actual"},
+    "report": BASE_KEYS | {"task", "result", "summary", "commits", "branch",
+                           "concerns", "tests", "model_actual"},
     "verdict": BASE_KEYS | {"task", "round", "spec_verdict",
                             "quality_verdict", "findings", "model_actual",
                             "commit_base", "commit_head",
@@ -87,10 +89,13 @@ EXTRA_KEYS = {
     "needs_context": BASE_KEYS | {"task", "question", "for_role"},
     "merge": BASE_KEYS | {"plan", "merge_sha", "branch"},
     "resume": BASE_KEYS | {"reason"},
+    "change_request": BASE_KEYS | {"title", "requested_by", "why", "change",
+                                   "note"},
 }
 RUNTIME_KINDS = ["report", "verdict", "heartbeat", "evidence",
                  "gate_decision", "ruling", "audit", "halt",
-                 "spawn_error", "needs_context", "merge", "resume"]
+                 "spawn_error", "needs_context", "merge", "resume",
+                 "change_request"]
 
 
 class SchemaCase(unittest.TestCase):
@@ -1112,6 +1117,12 @@ BOUNDS = {
     ("halt", "reason", "minLength"): 1,
     ("needs_context", "question", "minLength"): 1,
     ("merge", "merge_sha", "minLength"): 4,
+    ("artifact", "component", "minLength"): 1,
+    ("artifact", "components[].id", "minLength"): 1,
+    ("artifact", "components[].title", "minLength"): 1,
+    ("change_request", "title", "minLength"): 1,
+    ("change_request", "requested_by", "minLength"): 1,
+    ("change_request", "why", "minLength"): 1,
 }
 ALL_KINDS = RUNTIME_KINDS + S.ARTIFACT_KINDS
 CONSTRAINTS = ("minLength", "maxLength", "minItems", "minimum")
@@ -1120,9 +1131,10 @@ CONSTRAINTS = ("minLength", "maxLength", "minItems", "minimum")
 # fails test_every_pattern_in_use_has_a_sample_value.
 PATTERN_SAMPLES = {
     P.TASK_ID: TASK, P.PLAN_ID: PLAN, P.DISPATCH_ID: "D00001",
-    f"(?:{P.TASK_ID}|{P.PLAN_ID})": TASK,
+    f"(?:{P.TASK_ID}|{P.PLAN_ID}|{P.CHANGE_ID})": TASK,
     S.ARTIFACT_OR_PLAN: PLAN, S.TASK_LOCAL: "T01",
-    r"R\d+": "R1", r"C\d+": "C1", r"V\d+": "V1",
+    S.REQUIREMENT_ID: "R1", S.CONSTRAINT_ID: "C1", S.CRITERION_ID: "V1",
+    S.BRANCH_NAME: "task/INIT-0001-P01-T01",
     **{P.artifact_pattern(k): f"{INIT}-{seg}-01"
        for k, seg in P.ARTIFACT_SEGMENTS.items()},
 }

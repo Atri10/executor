@@ -70,6 +70,14 @@ class Usage(CliCase):
         self.assertEqual(code, 0)
         self.assertIn("executor new", out)
 
+    def test_the_help_lists_every_command_the_cli_dispatches(self):
+        """`--help` is the surface a user reads; a dispatched verb missing
+        from it is a verb they will not find."""
+        code, out, _ = run(["--help"], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [n for n in cli.COMMANDS if f"executor {n}" not in out], [])
+
     def test_the_module_guard_exits_with_mains_code(self):
         """`python cli.py --version` reaches the __main__ guard and exits 0."""
         with mock.patch("sys.argv", ["cli.py", "--version"]), \

@@ -148,7 +148,7 @@ Scope boundaries | Constraints | Stakeholders | Skipped phases
 | **Scope boundaries** | Which components, directories, services, and data the work may touch — and which it may not. Name paths where you can. | Tasks that wander into unrelated subsystems and reviews that cannot tell whether that was intended. |
 | **Constraints** | Hard limits that shape every later decision: compatibility guarantees, deadlines, budget, runtimes, languages, dependency policy, compliance requirements, teams whose approval is required. Redact secrets — write the shape and the source, never the value. | Architecture that is elegant and impossible. |
 | **Stakeholders** | Who approves phase gates, who must be consulted, who is affected. One named approver minimum — "the team" cannot approve a charter. | A gate nobody can pass. |
-| **Skipped phases** | One line per skipped phase, each with its reason. Written at the moment the decision is made, not retroactively. | A reader unable to distinguish "we considered alternatives and picked one" from "nobody looked." |
+| **Skipped phases** | One line per skipped phase, each with its reason — the intent. The record is the `waived` `gate_decision` with its `note`, made at the phase's own gate. | A reader unable to distinguish "we considered alternatives and picked one" from "nobody looked." |
 
 **Success criteria are the highest-leverage section.** Write them so that
 a stranger with repo access could run the observation and get a yes or
@@ -218,9 +218,9 @@ initiative — a second plan is not.
    `executor-spec` (the spec redrafts — its `cites` name the addition), a
    second plan to `executor-planning`. This skill does not write specs
    or plans.
-3. If the initiative is `halt`ed, a human `resume` payload unlatches it
-   first — a pause is a decision the human makes, not a state you
-   inherit.
+3. If the initiative is `halt`ed, a human `resume` payload (through
+   `executor decide`) unlatches it first — a pause is a decision the
+   human makes, not a state you inherit.
 
 **A second plan while the first is executing:** leave the running plan's
 lane alone. `P02` is authored in `planning` like the first; the fold
@@ -252,10 +252,10 @@ initiative genuinely is and the journal records the loop.
 | State | How it lands | How it leaves |
 |---|---|---|
 | active | `executor new` journals `created`; the initiative is unfinished | handoff `gate_decision` `approved` |
-| paused | A `halt` payload via `executor decide` (or a `gate_decision rejected`) latches `halt` | A human `resume` payload via `executor decide` — the only thing `executor ingest` accepts while halted, besides `ruling` |
+| paused | A `halt` payload via `executor decide` (human-only), or a `gate_decision rejected`, latches `halt` | A human `resume` payload via `executor decide` — while halted, `ruling` and `resume` are the only kinds that may land |
 | complete | The handoff gate's `approved` decision — the fold sets `done` | Terminal |
-| abandoned | A deliberate stop: a `ruling` recording why, then the `halt` that sticks | Never deleted; the reasoning is why anyone reads it |
-| superseded | Another initiative replaces this one wholesale — recorded on both charters (`supersedes_initiative` / `superseded_by_initiative` in `cites`-adjacent prose) plus a `ruling` on each | Terminal |
+| abandoned | A deliberate stop: a `ruling` recording why, then the `halt` that sticks, both through `executor decide` | Never deleted; the reasoning is why anyone reads it |
+| superseded | Another initiative replaces this one wholesale — a `ruling` on each initiative records it, and the successor's charter `cites` the predecessor's charter | Terminal |
 
 **Nothing is ever deleted.** Not a store, not a payload, not a journal
 line. Pruning is a deliberate human decision, never a cleanup step.
@@ -267,7 +267,9 @@ Wholesale replacement, both sides recorded:
 **New initiative** — its charter `cites` the predecessor's charter ID,
 and a `ruling` on the old initiative records the hand-off.
 
-**Old initiative** — mark it `superseded` via a `ruling` + `halt`.
+**Old initiative** — mark it `superseded` with a `ruling` recording why,
+then a `halt`; both are human payloads through `executor decide`. There is
+no supersession field on any payload.
 Documents stay readable. **Do not edit them to point at the new
 initiative** — that would be a cross-initiative citation, which the
 citation rule forbids.

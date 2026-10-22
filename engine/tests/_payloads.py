@@ -18,11 +18,11 @@ TASK = f"{PLAN}-T01"
 SEC = [{"id": "s1", "title": "Why", "prose": "Because."}]
 
 
-def art(kind: str, **extra) -> dict:
+def art(kind: str, id: str | None = None, **extra) -> dict:
     """A valid artifact payload of `kind`, carrying that kind's id segment."""
     seg = P.ARTIFACT_SEGMENTS[kind]
-    return {"kind": kind, "v": "v1", "id": f"{INIT}-{seg}-01", "title": "t",
-            "summary": "s", "sections": SEC, **extra}
+    return {"kind": kind, "v": "v1", "id": id or f"{INIT}-{seg}-01",
+            "title": "t", "summary": "s", "sections": SEC, **extra}
 
 
 def task_row(local: str = "T01", **extra) -> dict:
@@ -110,7 +110,7 @@ def needs_context(task: str = TASK, question: str = "which db?",
 
 def merge(plan: str = PLAN, sha: str = "abc1234", **extra) -> dict:
     return {"kind": "merge", "v": "v1", "plan": plan, "merge_sha": sha,
-            **extra}
+            "branch": f"plan/{plan}", **extra}
 
 
 GOOD: dict[str, dict] = {
@@ -129,5 +129,9 @@ GOOD: dict[str, dict] = {
     "spawn_error": spawn_error(),
     "needs_context": needs_context(),
     "merge": merge(),
+    "change_request": {"kind": "change_request", "v": "v1",
+                       "title": "tighten C1", "requested_by": "owner",
+                       "why": "the constraint was too loose",
+                       "change": {"constraints": ["C1"]}},
     "resume": {"kind": "resume", "v": "v1", "reason": "client confirmed"},
 }

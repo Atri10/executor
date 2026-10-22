@@ -1,9 +1,10 @@
 # Secret Hygiene
 
-`.executor/` is git-ignored by default. The user may remove that ignore and
-commit it — the execution record is valuable enough that some teams will
-want it in history. **Write every Executor artifact as though it will be
-public**, because it may become public without you being asked.
+`.executor/` is machine-local: keep it in the project's ignore file. The
+user may choose to commit it instead — the execution record is valuable
+enough that some teams will want it in history. **Write every Executor
+artifact as though it will be public**, because it may become public
+without you being asked.
 
 `docs/executor/` is tracked from the start. It is already public to anyone
 with the repo.
@@ -78,7 +79,7 @@ transcript.
 1. **Do not** print, echo, or copy the value.
 2. Tell the human immediately: which file, which line, what kind of
    credential.
-3. If it is only in `.executor/` (git-ignored, never committed): the file is
+3. If it is only in `.executor/` (machine-local, never committed): the file is
    the only copy — the human decides whether to redact in place or discard
    the artifact.
 4. If it reached git: this is credential rotation, not a file edit. The
@@ -93,8 +94,9 @@ transcript.
 If the user wants `.executor/` tracked:
 
 1. Run the scan across the whole store and resolve every finding first.
-2. Remove `.executor/.gitignore` (or narrow it to `brainstorm/*/state/`,
-   which holds transient server state with no review value).
+2. Remove `.executor/` from the project's ignore file (or narrow the
+   pattern to `brainstorm/*/state/`, which holds transient server state
+   with no review value).
 3. From then on, the scan runs before every commit that touches
    `.executor/` — the store is now public surface.
 

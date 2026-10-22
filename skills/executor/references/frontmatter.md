@@ -62,15 +62,17 @@ initiative's ID may appear.
 | `options` | `summary` names the recommended approach |
 | `spec` | `requirements`, `constraints`, `risks`; `cites` its ARCH/DSGN |
 | `vrfy` | `criteria` — `V<n>` rows; each criterion is a dispatchable unit |
-| `plan` | `tasks` — each `id`, `title`, `goal`, `files`, `accepts`, `depends_on` |
+| `plan` | `tasks` — each `id`, `title`, `goal`, `files`, `accepts`, `depends_on`, `requirements`, `constraints` |
 
 ## Task identity
 
 Tasks live inside a plan payload's `tasks` array, addressed by ID
-everywhere: `INIT-0004-P01-T03`. The ID is what `executor next` puts in
-a `DISPATCH`'s `entity`, what a `report` echoes in `task`, and what
-every verdict, fix, and ruling references. A task with no ID cannot be
-dispatched.
+everywhere: `INIT-0004-P01-T03`. The engine projects each row to
+`plans/<PLAN-ID>/tasks/<TASK-ID>/task.json` when the plan lands, and the
+plan's own `plan.json` is an index — ids, titles, `depends_on` — with no
+task bodies. The ID is what `executor next` puts in a `DISPATCH`'s
+`entity`, what a `report` echoes in `task`, and what every verdict, fix,
+and ruling references. A task with no ID cannot be dispatched.
 
 ## Validation before writing
 

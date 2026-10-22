@@ -22,6 +22,7 @@ from executor import paths as P  # noqa: E402
 ROOT = PurePosixPath("/repo")
 INIT, ART = "INIT-0007", "INIT-0007-CHTR-01"
 PLAN, TASK, DID = "INIT-0007-P03", "INIT-0007-P03-T02", "D00042"
+CR = "CR-0001"
 IDIR = P.init_dir(ROOT, INIT)
 RUN, DOCS = ROOT / ".executor", ROOT / "docs" / "executor"
 
@@ -110,9 +111,6 @@ SPEC = {
                        f"{R}/dispatches", None),
     "dispatch_dir": (lambda: P.dispatch_dir(IDIR, DID),
                      f"{R}/dispatches/{DID}", None),
-    "slot_file": (lambda: P.slot_file(IDIR, DID),
-                  f"{R}/dispatches/{DID}/slot.json",
-                  ("run", "dispatch_slot", {"init": INIT, "disp": DID})),
     "prompt_file": (lambda: P.prompt_file(IDIR, DID),
                     f"{R}/dispatches/{DID}/prompt.md",
                     ("run", "dispatch_prompt", {"init": INIT, "disp": DID})),
@@ -124,10 +122,29 @@ SPEC = {
     "view_file": (lambda: P.view_file(IDIR, "progress.md"),
                   f"{R}/views/progress.md",
                   ("run", "view", {"init": INIT, "name": "progress.md"})),
-    "verdict_view_file": (lambda: P.verdict_view_file(IDIR, TASK, 2),
-                          f"{R}/views/{TASK}-R02-verdict.md",
-                          ("run", "view_verdict",
-                           {"init": INIT, "task": TASK, "rnd": "R02"})),
+    "views_dir": (lambda: P.views_dir(IDIR), f"{R}/views", None),
+    "changes_dir": (lambda: P.changes_dir(IDIR), f"{R}/changes", None),
+    "change_dir": (lambda: P.change_dir(IDIR, CR), f"{R}/changes/{CR}", None),
+    "view_plan_file": (lambda: P.view_plan_file(IDIR, PLAN),
+                       f"{R}/views/plans/{PLAN}/plan.md",
+                       ("run", "view_plan", {"init": INIT, "plan": PLAN})),
+    "view_task_file": (lambda: P.view_task_file(IDIR, TASK),
+                       f"{R}/views/tasks/{TASK}/task.md",
+                       ("run", "view_task", {"init": INIT, "task": TASK})),
+    "task_spec_file": (lambda: P.task_spec_file(IDIR, TASK),
+                       f"{TD}/task.json",
+                       ("run", "plan_task",
+                        {"init": INIT, "plan": PLAN, "task": TASK})),
+    "change_file": (lambda: P.change_file(IDIR, CR),
+                    f"{R}/changes/{CR}/change.json",
+                    ("run", "change", {"init": INIT, "cr": CR})),
+    "docs_task_md": (lambda: P.docs_task_md(ROOT, INIT, TASK),
+                     f"{DD}/task.md",
+                     ("docs", "docs_task_md",
+                      {"init": INIT, "plan": PLAN, "task": TASK})),
+    "docs_change_md": (lambda: P.docs_change_md(ROOT, INIT, CR),
+                       f"{D}/changes/{CR}/change.md",
+                       ("docs", "docs_change_md", {"init": INIT, "cr": CR})),
     "docs_init_dir": (lambda: P.docs_init_dir(ROOT, INIT), D, None),
     "docs_index_file": (lambda: P.docs_index_file(ROOT, INIT),
                         f"{D}/meta/index.json",
@@ -177,8 +194,8 @@ SPEC = {
 }
 
 # Grammar utilities that are not path helpers.
-NOT_HELPERS = {"classify", "dispatch_id", "is_dispatch_id",
-               "artifact_pattern"}
+NOT_HELPERS = {"classify", "dispatch_id", "dispatch_key",
+               "is_dispatch_id", "artifact_pattern"}
 
 ID_CASES = {
     "INIT_ID": (P.INIT_ID, ["INIT-0001", "INIT-9999"],
@@ -323,7 +340,19 @@ class GrammarRoundTrip(unittest.TestCase):
         self.assertIsNotNone(
             P.classify(f"{INIT}/journal/events.v10.jsonl", "run"))
         self.assertIsNotNone(
-            P.classify(f"{INIT}/dispatches/D123456/slot.json", "run"))
+            P.classify(f"{INIT}/dispatches/D123456/prompt.md", "run"))
+
+    def test_dispatch_ids_sort_by_their_sequence_not_by_string(self):
+        """Past 99 999 events `D100000` sorts before `D99999` as a string, which
+        would mis-order the registry and the open-slot list (audit D02)."""
+        ids = [P.dispatch_id(n) for n in (100000, 99999, 12345)]
+        self.assertEqual(sorted(ids), ["D100000", "D12345", "D99999"])
+        self.assertEqual(sorted(ids, key=P.dispatch_key),
+                         ["D12345", "D99999", "D100000"])
+
+    def test_a_flat_per_round_view_is_no_longer_canonical(self):
+        self.assertIsNone(
+            P.classify(f"{INIT}/views/{TASK}-R03-verdict.md", "run"))
 
     def test_an_unknown_store_is_a_programming_error(self):
         with self.assertRaises(ValueError):

@@ -2,8 +2,8 @@
 
 Dispatch one repairer per plan after a failed audit round. It redrafts
 **only that plan** — a new `plan` payload — and never grades its own work.
-`contract`-class findings are amended at their source by the controller
-and passed in `context`; never adapt the plan around a broken contract.
+`contract`-class findings change at their source through a `change_request`;
+never adapt the plan around a broken contract.
 
 Round cap: at most `max_audit_rounds` audit rounds per plan. A repairer at
 the last round reports what it could not close concretely enough for a
@@ -31,8 +31,9 @@ Subagent (general-purpose):
     **Respond to:** [absolute path of dispatches/D<NNNNN>/payload.json]
     **Findings assigned to you:** the `open` `plan`/`cross-plan` findings
     in your context
-    **Contract amendments already applied (evidence, not yours):** the
-    `routed` findings in your context
+    **Contract-class findings (not yours):** the `routed` findings in your
+    context — a contract changes through a `change_request`, never your
+    redraft
 
     ## Scope
 

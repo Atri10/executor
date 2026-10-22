@@ -205,7 +205,9 @@ class ArtifactTests(unittest.TestCase):
                 a = s["artifacts"][payload["id"]]
                 self.assertEqual((a["kind"], a["status"], a["round"]),
                                  (kind, "drafted", 1))
-                self.assertEqual(a["data"], data_of(payload))
+                # the cache carries the decisions, not the body (audit D13)
+                self.assertNotIn("data", a)
+                self.assertEqual((a["title"], a["summary"]), ("t", "s"))
                 self.assertEqual(s["entities"][payload["id"]],
                                  {"type": "artifact"})
 
@@ -218,7 +220,7 @@ class ArtifactTests(unittest.TestCase):
             ev("audit", aid, data_of(PL.audit(aid, 1, "PASS"))),
             ev("charter", aid, data_of(second))))
         a = s["artifacts"][aid]
-        self.assertEqual((a["round"], a["status"], a["data"]["title"]),
+        self.assertEqual((a["round"], a["status"], a["title"]),
                          (2, "drafted", "v2"))
 
     def test_cites_become_edges(self):
@@ -516,7 +518,9 @@ class SpawnErrorTests(unittest.TestCase):
         s = self.failed()
         self.assertEqual(s["dispatches"]["D00005"]["spawn_error"], "rate_limit")
         self.assertEqual(s["tasks"][TASK]["state"], "pending")
-        self.assertEqual(s["lost"], {f"{TASK}:report": 1})
+        # keyed by the round the loss belongs to, so an early-phase loss
+        # cannot spend a later phase's budget (audit D18)
+        self.assertEqual(s["lost"], {f"{TASK}:report:0": 1})
 
     def test_a_spawn_error_for_an_unknown_dispatch_is_ignored(self):
         s = fold(journal(created(), ev("spawn_error", TASK,

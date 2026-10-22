@@ -74,7 +74,8 @@ class GateCard(unittest.TestCase):
         live = Live()
         self.addCleanup(live.close)
         live.act()
-        ingest(live.init, {"kind": "halt", "v": "v1", "reason": "client stop"})
+        ingest(live.init, {"kind": "halt", "v": "v1", "reason": "client stop"},
+               actor="human")
         card = status_card(live.init, fold(live.events()))
         self.assertIn("HALTED: client stop", card)
 
@@ -145,9 +146,9 @@ class GateCard(unittest.TestCase):
                           "V3": [{"verdict": "unavailable"},
                                  {"verdict": "failed"}],
                           "V4": [{"verdict": "proven"}]},
-             "artifacts": {"A": {"kind": "vrfy", "data": {"criteria": [
+             "artifacts": {"A": {"kind": "vrfy", "criteria": [
                  {"id": "V1"}, {"id": "V2"}, {"id": "V3"}, {"id": "V4"},
-                 {"id": "V5"}, {"id": "V6"}]}}}}
+                 {"id": "V5"}, {"id": "V6"}]}}}
         # A criterion's state is its latest verdict: V3 ran twice and the
         # second run is the one that counts, so `unavailable` is 0.
         self.assertEqual(evidence_counts(s),
@@ -161,8 +162,8 @@ class GateCard(unittest.TestCase):
         store the reader must be able to inspect."""
         s = {"evidence": {"V1": [{"verdict": "maybe"}],
                           "V2": [{"verdict": "proven"}]},
-             "artifacts": {"A": {"kind": "vrfy", "data": {"criteria": [
-                 {"id": "V1"}, {"id": "V2"}]}}}}
+             "artifacts": {"A": {"kind": "vrfy", "criteria": [
+                 {"id": "V1"}, {"id": "V2"}]}}}
         self.assertEqual(evidence_counts(s),
                          {"proven": 1, "failed": 0, "unavailable": 0,
                           "unanswered": 1})

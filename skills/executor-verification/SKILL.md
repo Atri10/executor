@@ -214,10 +214,12 @@ Rules:
 The evidence record is the journal's `evidence` events — one per
 criterion per round — and the `summary` view renders them as the
 outcomes table. There is no hand-written ledger: `executor status`
-prints the counts, `executor check` verifies a cited `state_commit`
-exists, and `executor ingest` validates every payload against the
-schema. An `evidence` payload with no `observed` output is a schema
-rejection — the record is the output, not the verdict word.
+prints the counts, `executor ingest` rejects an `evidence` whose
+`state_commit` does not resolve at write time (`unknown_rev`), and
+`executor check` verifies the journal chain and the projections — it does
+not re-check a cited commit. An `evidence` payload with no `observed`
+output is a schema rejection — the record is the output, not the verdict
+word.
 
 **Criterion references:** use the `vrfy` artifact's own `criteria[].id`,
 verbatim. Never mint a criterion id and never renumber.

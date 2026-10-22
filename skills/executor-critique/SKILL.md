@@ -87,9 +87,11 @@ repair.
 
 ## The components
 
-Every authoring phase audits its artifacts before its gate opens. The
-`audit` dispatch's `entity` is the artifact id; the catalog below is
-keyed by phase.
+Every authoring phase audits its artifacts before its gate opens, and the
+`review` phase audits each merged plan. The `audit` dispatch's `entity` is
+the artifact or plan id; the catalog below is keyed by phase. The
+`verification` and `handoff` catalogs are close-out checklists — the engine
+dispatches evidence, not audits, in those phases.
 
 | Phase | Targets | Catalog |
 |---|---|---|
@@ -99,9 +101,9 @@ keyed by phase.
 | design | design | design |
 | specification | spec, risk, vrfy | specification |
 | planning / plan_regression | every plan | plans |
-| execution | plan (whole-branch) | code |
+| review | each merged plan, whole-branch | code |
 | verification | vrfy + evidence | verification |
-| handoff | the run itself | handoff |
+| handoff | the run itself (the close-out checklist, not a dispatch) | handoff |
 
 `plans` audits each `PLAN` artifact — the plan-set contract lives in
 `executor-plan-regression`, and one audit contract covers it rather

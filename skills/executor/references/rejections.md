@@ -43,10 +43,10 @@ means something the protocol forbids.
 |---|---|---|---|
 | `no_open_slot` | `$` | The payload answers no open dispatch, or answers the wrong one | Pointing `dispatch_id` at the open slot, or re-running `executor next` |
 | `no_open_gate` | `$.phase` | A `gate_decision` names a phase whose gate is not open | The current gate, from `executor status` |
-| `unauthorized` | `$.kind` | A payload kind only a human may write (`gate_decision`, `ruling`, `resume`) came through `ingest` | `executor decide`, which stamps `actor: human` |
+| `unauthorized` | `$.kind` | A payload kind only a human may write (`gate_decision`, `ruling`, `resume`, `halt`, `change_request`) came through `ingest` | `executor decide` (or `executor change`), which stamps `actor: human` |
 | `halted` | `$.kind` | A worker payload arrived while the run is halted | A human `resume` first |
 | `not_halted` | `$.kind` | `resume` arrived on a running run | Nothing — remove the payload |
-| `unknown_entity` | `$.for_task`, `$.plan`, `$.target` | The named task, plan, or artifact does not exist | An ID from the fold, verbatim |
+| `unknown_entity` | `$.for_task`, `$.plan`, `$.target` | The named task, plan, change, or artifact does not exist | An ID from the fold, verbatim |
 | `unknown_rev` | `$.commits`, `$.merge_sha`, `$.state_commit` | The commit does not exist in the repository, or is not a real revision | A sha from an executed `git` command |
 | `empty_range` | `$.commits` | The report or evidence lists no commits | The commits the change actually made |
 | `range_mismatch` | `$.commit_base` | The commit range is not a contiguous ancestry | `base` is an ancestor of `head` |
@@ -57,6 +57,13 @@ means something the protocol forbids.
 | `missing_evidence` | `$.findings`, `$.artifacts` | A finding or criterion names an artifact the payload does not carry | The artifact, or dropping the reference |
 | `incomplete` | `$.plan` | A `merge` payload names a plan whose tasks are not all complete | Every task reported and merged |
 | `already_merged` | `$.plan` | The plan was already merged | Nothing — the second payload is a duplicate |
+| `not_descendant` | `$.commits` | The reported head does not descend from the dispatch base — work committed on a line that never contained it | Committing on top of the base the dispatch named, then reporting that head |
+| `commit_on_base` | `$.commits` | The head is contained in the branch the dispatch forked from: work committed on the integration line | Moving the work to `task/<TASK-ID>` and reporting that head |
+| `branch_mismatch` | `$.branch`, `$.commits` | No `task/<TASK-ID>` branch contains the head, or `branch` names a different branch | Creating `task/<TASK-ID>` at the dispatch base, committing there and naming it |
+| `bad_commit_message` | `$.commits` | A subject in `base..head` is outside the conventional form `type(scope): subject` | Amending the subject; the convention is in `references/branches.md` |
+| `merge_not_descendant` | `$.merge_sha` | The merge does not contain a task head of the plan it claims | Merging the plan branch at its task heads and reporting that commit |
+| `merge_branch_mismatch` | `$.branch` | The merge names no branch, names one that is not `plan/<PLAN-ID>` or `initiative/<INIT-ID>`, or is not contained in the branch it names | Merging on the plan branch and naming it |
+| `change_not_applied` | `$.constraints`, `$.requirements` | A redraft dispatched to absorb a change does not carry an id the change names | Carrying every changed id in the redraft, or withdrawing the change |
 
 ## Journal and store — `store.py`
 
@@ -67,7 +74,9 @@ means something the protocol forbids.
 | `ambiguous` | Two active initiatives and no ID was given | Naming the initiative explicitly |
 | `store_locked` | Another process holds the store lock | Waiting for it, or removing a stale lock only after confirming its owner is gone |
 | `engine_too_old` | The store was written by a newer major engine than the one installed | Installing executor ≥ the store's major version |
-| `store_outdated` | The store predates this engine's major version | `executor migrate --dry-run` first, then `executor migrate` |
+| `store_outdated` | The store predates this engine: either its engine major or its store *layout* version | `executor migrate --dry-run` first, then `executor migrate --apply` |
+| `id_exhausted` | `INIT-9999` is the last initiative id the layout grammar admits; `executor new` refuses rather than minting an id every path would violate | Archiving the finished initiatives, or a new store root |
+| `migration_failed` | The layout migration wrote the new projections and its verification then disagreed with the fold — the run is left as written and the message names every file that failed | Reporting the listed problems; the journal is untouched, so the migration can be re-run after the cause is fixed |
 | A chain break | A `line_sha` does not match its line: the journal was edited by hand | Restoring from the run-store backup, or the line `executor check` names |
 
 ## CLI and engine errors — `cli.py`, `engine.py`, `policy.py`

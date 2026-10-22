@@ -43,10 +43,12 @@ re-drafts the plan, and re-dispatches a fresh audit until every plan is
 ## Ownership Boundary
 
 The `repair` dispatch redrafts **plan payloads**. Findings that live in
-the spec or an interface contract get `status: "routed"` — the
-controller amends THAT document and records the amendment as a
-`ruling` via `executor decide`; never a plan edit that papers over a
-contract defect. The repairer never writes implementation code.
+the spec or an interface contract get `status: "routed"` — the contract
+itself changes only through a `change_request` (`executor change`), which
+computes the blast radius and re-drafts the owning artifact; a `ruling`
+records a decision, never a contract edit, and a hand-edited artifact is
+a projection the next write overwrites. Never paper over a contract
+defect with a plan edit. The repairer never writes implementation code.
 
 ## Inputs
 
@@ -77,7 +79,7 @@ sequenceDiagram
     participant Q as Re-audit worker
     E->>A: DISPATCH audit/PLAN — plan set, spec, IFCEs in context
     A-->>E: audit payload — verdict FAIL + findings
-    E->>E: routed findings become rulings; contract source amended
+    E->>E: routed findings become change requests; contract re-drafted
     E->>R: DISPATCH repair/PLAN — open findings in context
     R-->>E: redrafted plan payload
     E->>Q: DISPATCH audit/PLAN round+1 — fresh worker
@@ -135,9 +137,10 @@ the order surfaces contract-breaking defects before polish ones:
 7. **Vocabulary consistency.** Same concept, two names across plans
    (queue `x.dlq` vs `x-dead-letter`) → `important`: naming drift is
    how two plans provision incompatible halves of one seam.
-8. **Task contract completeness.** Every task carries `title`, `goal`,
-   `files`, `accepts`, and `depends_on` — the schema enforces their
-   presence, but not their content. A task whose `accepts` a fresh
+8. **Task contract completeness.** Every task carries `id`, `title`,
+   `goal`, `files`, and `accepts` — the schema enforces their presence,
+   but not their content — and its `requirements`/`constraints` arrays
+   name the ids it implements. A task whose `accepts` a fresh
    implementer cannot verify (`"works correctly"`, no observable
    outcome) is `critical`: nobody can finish a task its contract does
    not describe.
@@ -153,9 +156,11 @@ seams to its `ifce` artifacts, and task contracts all apply.
 
 Before dispatching repair, sort the findings:
 
-- **`routed` findings are the controller's.** Amend the SPEC or IFCE at
-  its source, record the amendment as a `ruling` via `executor decide`,
-  and let the fold see it — the re-auditor reads the amended contract.
+- **`routed` findings are the contract's.** A finding that the spec or
+  an interface is itself wrong is a `change_request` via
+  `executor change`; the engine scopes the blast radius, re-drafts the
+  owning artifact, and re-dispatches what it touches. A `ruling` may
+  record why the human wants it, but a ruling never changes a contract.
   Never adapt a plan around a broken contract.
 - **`cross-artifact` findings go to the side that is wrong.** Decide
   which plan owns the fix before the dispatch; one finding, one
@@ -202,8 +207,8 @@ for a target whose artifact was redrafted.
   honest.
 - Never let a repairer audit its own repair, and never dispatch a role
   without its briefing's placeholders filled.
-- Contract amendments (IFCE/SPEC edits) are `ruling` payloads the
-  moment the amendment is made.
+- Contract changes (IFCE/SPEC edits) are `change_request` payloads via
+  `executor change` — never an in-place artifact edit, never a `ruling`.
 - Human waivers are the only path to `waived` — you may recommend,
   never self-grant.
 

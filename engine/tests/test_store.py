@@ -682,11 +682,12 @@ class InitStoreTests(TmpCase):
                                   "schema_version", "store_version")},
             {"initiative": "INIT-0001", "title": "My title",
              "engine_version": __version__, "schema_version": "v1",
-             "store_version": "v1"})
+             "store_version": store.STORE_VERSION})
         self.assertRegex(meta["created_at"], ISO)
         self.assertEqual(store.read_json(P.run_meta_file(self.root)),
                          {"engine_version": __version__,
-                          "schema_version": "v1", "store_version": "v1"})
+                          "schema_version": "v1",
+                          "store_version": store.STORE_VERSION})
 
     def test_autonomy_fails_closed_for_every_phase(self):
         idir = store.init_store(self.root, "INIT-0001", "t")

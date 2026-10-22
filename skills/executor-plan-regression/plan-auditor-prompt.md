@@ -114,8 +114,9 @@ Subagent (general-purpose):
 
     `plan` — the target owns the defect; `cross-plan` — a seam between
     the target and another plan (name both, say which side is wrong);
-    `contract` — the spec or an IFCE is wrong (`status: "routed"` — the
-    controller amends at source, repairers never touch contracts).
+    `contract` — the spec or an IFCE is wrong (`status: "routed"` — it
+    changes through a `change_request`, and repairers never touch
+    contracts).
 
     Every finding quotes the text it is about in `evidence` at
     `path:line` or `§<section-id>` — a `cross-plan` finding quotes both

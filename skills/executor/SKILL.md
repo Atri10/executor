@@ -149,6 +149,8 @@ writing anything new: repeated `executor next` is free.
 | `GATE <phase>` | Present `executor status` (the gate card) to the human. They answer with `executor decide` — a `gate_decision` payload. Under an autonomy mode of `gate`/`allow` a structural phase's gate clears itself as `by: "auto"`; pick phases and handoff never do |
 | `ASK <topic>` | Relay the question to the human; their answer goes in as a `ruling` via `executor decide`, or answers a blocked task's `needs_context` verbatim |
 | `MERGE <plan>` | Run the plan's merge step the skill prescribes, then ingest the `merge` payload with the resulting head |
+| `CHANGE-SCOPE <change>` | The engine scoped a `change_request`; the radius is journaled. Nothing to do — continue the loop |
+| `CHANGE-DONE <change>` | The regression lane closed the change. Nothing to do — continue the loop |
 | `ESCALATE` | A bound was hit: too many fix rounds, a dead or silent dispatch, conflicting ownership. Present the escalation; do not improvise a fourth round |
 | `HALT` | The run is stopped. `halt` was journaled; only a human `resume` payload via `executor decide` unlatches it |
 | `DONE` | The run is finished. Report and stop |
@@ -163,8 +165,8 @@ dispatch or an ingest — never you doing the work:
 - An **ingest** is a transition: the payload lands in the journal, the fold
   updates, and the next `executor next` decides again. `executor ingest`
   is for worker payloads; `executor decide` is for the human-only kinds —
-  `gate_decision`, `ruling`, `resume` — which the CLI stamps `actor: human`
-  so a worker cannot claim them.
+  `gate_decision`, `ruling`, `resume`, `halt` — which the CLI stamps
+  `actor: human` so a worker cannot claim them.
 
 A refused payload writes nothing, and every refusal names a code and a
 field path. [references/rejections.md](references/rejections.md) is the
@@ -193,11 +195,12 @@ the payload you are about to ingest, ingest it.
   past `deadline_s` and redispatched by the engine with the same context.
   Taking over the task yourself deletes the audit trail and is the single
   most damaging thing a pump can do.
-- **Never answers a human-only kind.** `gate_decision`, `ruling` and
-  `resume` are refused by `executor ingest` as `unauthorized`; only
-  `executor decide` writes them, as `actor: human`. You may recommend a
-  waiver of an open finding; you may never grant one, and a waiver the
-  human did not state is not a waiver.
+- **Never answers a human-only kind.** `gate_decision`, `ruling`,
+  `resume`, and `halt` are refused by `executor ingest` as
+  `unauthorized`; only `executor decide` writes them, as `actor: human`.
+  A `change_request` is human-filed too, through `executor change`. You
+  may recommend a waiver of an open finding; you may never grant one, and
+  a waiver the human did not state is not a waiver.
 
 ### Autonomous mode
 
@@ -237,10 +240,10 @@ Write it as a payload through `executor decide`:
   scoped `for_task`/`for_plan` with `question` quoting what was asked.
 - They say something you did not ask about — a `ruling` recording their
   words verbatim.
-- They are stopping the run — a `halt` payload latches: `executor next`
-  emits `HALT` and no dispatch until the human sends a `resume`. While
-  halted, `ruling` and `resume` are the only payloads ingest still
-  accepts.
+- They are stopping the run — a `halt` payload (human-only, so through
+  `executor decide`) latches: `executor next` emits `HALT` and no dispatch
+  until the human sends a `resume`. While halted, only a `ruling` or a
+  `resume` may land, and both are `executor decide` payloads.
 
 Their words go in verbatim. A paraphrase in a ruling is a ruling nobody
 can check against what was actually said.
@@ -288,6 +291,7 @@ artifact:
 /skill:executor-verification
 /skill:executor-handoff
 /skill:executor-brainstorm
+/skill:executor-critique
 ```
 
 An explicit `/skill:<name>` call loads the skill immediately in runtimes
@@ -311,7 +315,7 @@ flowchart LR
         D --> S["Spec"]
         S --> P["Plans"]
     end
-    subgraph EXEC[".executor/ - git-ignored by default"]
+    subgraph EXEC[".executor/ - machine-local, not committed"]
         L["Ledger, Rulings"]
         B["Briefs"]
         RP["Reports"]
@@ -329,8 +333,8 @@ decisions, interfaces, design, spec, risks, verification strategy, plans,
 and brainstorming sessions. A reader who clones the repo gets the complete
 reasoning.
 
-**`.executor/` — the execution record.** Git-ignored by default via a
-self-writing `.gitignore`, and **safe to commit** if the user chooses:
+**`.executor/` — the execution record.** Machine-local: keep `.executor/`
+in the project's ignore file. It is **safe to commit** if the user chooses:
 task briefs, implementer reports, review diffs, review verdicts, the
 progress ledger, rulings, dispatch log. Holds what HAPPENED during
 execution. Never deleted when a plan completes — the reasoning inside it is
@@ -354,28 +358,30 @@ INIT-0004-ADR-03               a decision record
 INIT-0004-IFCE-01              an interface/contract document
 INIT-0004-DSGN-02              a component design
 INIT-0004-SPEC-01              a specification
-INIT-0004-SPEC-01-R07          requirement 7 inside that spec
-INIT-0004-SPEC-01-C03          global constraint 3 inside that spec
 INIT-0004-RISK-01              a risk register / pre-mortem
 INIT-0004-VRFY-01              a verification strategy
 INIT-0004-P01                  a plan
 INIT-0004-P01-T03              task 3 of that plan
 D00112                         the dispatch minted at journal seq 112
-R2                             review round 2 (an integer, paired with its task)
 ```
 
 **Grammar:** `INIT-<4-digit>` then `-<KIND>-<2-digit>`, plans as
-`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<5-digit>`
-(seq-derived), review rounds as an integer `round` field paired with the
-task ID. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
+`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<NNNNN>` —
+five or more digits, the seq of the journal event that minted the
+dispatch. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
 `IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
 `ARTIFACT_SEGMENTS` in `scripts/lib/executor/paths.py` defines them, and an ID
 carrying any other segment is a `pattern` rejection. Sequence within a
 kind is per-initiative and starts at `01`.
 
+A review round is **not** an id: the payload's `round` is an integer the
+engine mints, and `R<NN>` is only the file-name shape under `reviews/`,
+`audits/`, `repairs/`, and `fixes/`.
+
 Items *inside* a payload are addressable too: a spec's requirements as
-`-R<2-digit>` and its global constraints as `-C<2-digit>`, hanging off
-the spec's own ID, and a document's sections by their `sections[].id`.
+`R<n>` and its global constraints as `C<n>`, cited bare — the artifact
+that declares them anchors the reference — and a document's sections by
+their `sections[].id`.
 
 Addressable requirements are what let a review finding name the exact
 contract it violates instead of gesturing at the spec, and what lets a
@@ -392,18 +398,20 @@ pointer resolves inside it.
 
 Cross-initiative relationships exist only at the initiative level,
 declared in the **charter's** `cites` — the charter payload is the only
-one permitted to carry another initiative's IDs. The handoff index
-(generated when the initiative finishes) mirrors them as prose.
+one permitted to carry another initiative's IDs. The committed index
+(`docs/executor/<INIT>/meta/index.json` and `index.md`) mirrors them as
+prose; it is re-rendered on every projection, not only when the
+initiative finishes.
 
 ```yaml
 cites: ["INIT-0002-CHTR-01"]   # the charter this initiative needs first
 ```
 
 The `cites` list is the entire cross-initiative vocabulary. Supersession
-is recorded on both sides: the replacement's charter `cites` its
-predecessor, and the predecessor's charter `cites` its replacement. A
-one-sided link leaves a reader who finds the old initiative first with
-no way forward.
+is recorded by a `ruling` on each initiative, and the successor's charter
+`cites` its predecessor; the predecessor's documents are not edited to
+point forward — the ruling is the hand-off record, and its reasoning is
+why the successor exists.
 
 A task, spec, or ADR that needs something from another initiative does not
 cite it. It states the requirement in its own words and, if the dependency
@@ -445,9 +453,10 @@ output, and a gate that must pass before the next phase starts.
 
 **Phases compress, they never vanish.** A small initiative can produce a
 charter and a spec in one exchange and skip discovery entirely — but
-skipping is a stated decision recorded in the charter, not an omission. The
-`skipped_phases` field exists so a reader knows the difference between "we
-considered alternatives and picked one" and "nobody looked."
+skipping is a stated decision recorded in the journal, not an omission: a
+`waived` `gate_decision` with a `note`, which the fold records as the
+phase `passed`. A reader can tell "we considered alternatives and picked
+one" from "nobody looked" because only the first has that note.
 
 ## The Approval Gate
 
@@ -519,6 +528,7 @@ template carries the same two sections for the agent's own output.
 | Write the requirements contract | `executor-spec` |
 | Turn a spec into tasks | `executor-planning` |
 | Audit the plan set before executing it | `executor-plan-regression` |
+| Audit an authored artifact, or repair one that failed its audit | `executor-critique` |
 | Run the plan with subagents | `executor-execution` |
 | Review a task, a fix round, or a branch | `executor-review` |
 | Prove the work actually works | `executor-verification` |
@@ -565,9 +575,40 @@ Between phases, every gate is a human-approval stop — the gates and the
 decision-class lane are the only places the workflow waits on the human,
 and both write their answers into the record.
 
+## Mid-run change
+
+A requirement, constraint, or acceptance criterion that changes while the
+run is live is a **`change_request`** — never an artifact edit, and never
+a `ruling`:
+
+```bash
+executor change - <<'JSON'
+{"kind": "change_request", "v": "v1",
+ "title": "C07 tightens to 200 ms",
+ "requested_by": "human",
+ "why": "the load harness measured 240 ms at 10k tenants",
+ "change": {"constraints": ["C07"]}}
+JSON
+executor change --list
+```
+
+The engine mints `CR-NNNN`, computes the blast radius from the fold —
+tasks whose `requirements`/`constraints` intersect the changed ids,
+closed over `depends_on`; criteria whose `cites` intersect; then the
+affected artifacts and plans — and journals `change_scoped`. A regression
+lane re-drafts each affected artifact (`repair`), re-audits it,
+re-dispatches the affected tasks, re-proves the affected criteria, and
+journals `change_applied`. A `ruling` whose `for_task` is a `CR-NNNN`
+withdraws the change; work already dispatched still finishes.
+`executor status` prints a `change:` line while one is open.
+
+Editing the artifact directly is the failure this replaces: the payload
+changes, no task is re-dispatched, and the code silently implements the
+old contract.
+
 ## Secret Hygiene
 
-`.executor/` is git-ignored by default, but the user may commit it. Write
+`.executor/` is machine-local, but the user may commit it. Write
 every file in both stores as though it will be public.
 
 Never write credentials, API keys, tokens, cookies, private keys, connection
@@ -595,7 +636,8 @@ $ executor status
 INITIATIVE INIT-0004 - cells
 phase: planning (gate_pending)
 events: 96 | artifacts: 9 | tasks: 7
--> GATE planning: awaiting a human decision
+policy: audit<=5 fix<=5 evidence<=5 autonomy[planning]=deny (from default)
+-> GATE planning: awaiting a human decision (ingest a gate_decision payload)
 
 Me: "INIT-0004 is at the planning gate: plan P01 (7 tasks) is drafted and
 linted clean. Two execution modes: 1) subagent-driven — a fresh

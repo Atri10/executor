@@ -7,6 +7,103 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-22
+
+Minor release: a deep audit of the engine against a live 325-event
+initiative (`INIT-0002`, 135 dispatches, 36 tasks, 6 plans) and the three
+structural changes it demanded — a store layout that stops accumulating,
+a mid-run change protocol, and git discipline the engine enforces instead
+of documenting. The audit register and the three design records exist as
+working notes under `docs/proposals/`; this repository treats `docs/` as
+non-shipping, so they are not in the tree.
+
+**Store layout changed: a 2.0.x store must be migrated** (`executor
+migrate --dry-run`, then `--apply`). The writer refuses a v1 tree with
+`store_outdated` rather than mixing two layouts in one directory.
+
+### Added
+
+- **Mid-run change requests.** `executor change <file|->` files a
+  journaled, ID-bearing `change_request` (`CR-NNNN`; `--list` reads).
+  The engine computes the blast radius from the fold — tasks whose
+  `requirements`/`constraints` intersect the changed ids, closed over
+  `depends_on`, criteria whose `cites` intersect, then artifacts and
+  plans — journals `change_scoped`, drives a regression lane (revise,
+  re-audit, re-dispatch, re-prove) and journals `change_applied`. A
+  `ruling` naming the change withdraws it. `task` rows gained optional
+  `requirements` and `constraints` — the structured link the radius reads.
+- **Per-component design artifacts.** An `arch` payload may declare
+  `components: [{id,title,responsibility}]`; the design phase then mints
+  one design artifact per component and binds each draft through the
+  dispatch context. Artifact instance ids are minted per kind, so `ADR-02`
+  and `DSGN-02` are reachable.
+- **Enforced git discipline** on a `report` answering a v2 dispatch: the
+  head must descend from the dispatch base (`not_descendant`), must not be
+  contained in the branch recorded at dispatch (`commit_on_base`), must be
+  on `task/<TASK-ID>` (`branch_mismatch`), and every subject in
+  `base..head` must be conventional (`bad_commit_message`). A `merge` now
+  requires `branch` (`plan/…` or `initiative/…`), must be contained in it
+  (`merge_branch_mismatch`), and must contain every task head of the plan
+  (`merge_not_descendant`). Dispatches minted before this engine carry no
+  `rules` marker and are exempt.
+- **A whole-plan final audit** in the `review` phase: one audit per merged
+  plan, under the review phase's own critique key.
+- **A committed index written on every projection** (`docs/executor/
+  <INIT>/meta/index.{json,md}`), verified against a re-render by
+  `executor check`.
+- **A layout migration** (`executor migrate --dry-run|--apply`,
+  `scripts/migrate_layout.py`): deterministic, verified, byte-idempotent.
+  `scripts/measure_store.py` prints the cost curve the layout proposal
+  cites.
+
+### Changed
+
+- **Views are a tree with one leaf per entity**: `views/index.md`,
+  `views/plans/<PLAN>/plan.md`, `views/tasks/<TASK>/task.md` (every round
+  of that task). The flat per-round `<TASK>-R<NN>-verdict.md` is gone, so
+  the tree grows with entities, not rounds.
+- **A plan is an index; a task is a file.** `plan.json` carries the plan's
+  fields and a task list of ids, titles and dependencies; each contract is
+  `plans/<PLAN>/tasks/<TASK>/task.json`, written at authoring time. The
+  committed store mirrors it with `task.md`.
+- **Projections are deterministic.** Views stamp the journal tip, not the
+  wall clock, so a re-render is byte-identical — the precondition for the
+  drift check and the idempotent migration.
+- **The fold cache carries decisions, not bodies.** `state.json`
+  2.4 MB → 1.10 MB on the corpus; the bytes a whole-state rewrite would
+  have written over the run 470 MB → 160 MB. The journal keeps the bodies,
+  and its 6.2 MB is unchanged (compaction is a v3 format change, specified
+  in `docs/proposals/layout.md §7`).
+- `executor status` prints the effective `policy:` and any open `change:`;
+  `views/progress.md` renders the rulings; `executor check` reports a
+  missing canonical file and a stale committed index, not only a file the
+  grammar rejects.
+
+### Removed
+
+- `slot.json` — documented, in the grammar, and never written. The
+  journal's `answered` map is what makes a dispatch single-use.
+- The prose-only plan fields `sequential`, `skipped_phases`,
+  `supersedes_initiative`/`superseded_by_initiative`, and the
+  `wrong_plan` rejection code (the engine raises `mismatch`).
+
+### Fixed
+
+- **A worker could latch a halt** while `executor decide` refused one:
+  `halt` is human-only now, in both authority lists.
+- **A commit on an unrelated branch satisfied "the work advanced"**:
+  `_check_advances` never required the base to be an ancestor of the head.
+- **Dispatch ids mis-ordered past 99 999 events** (`"D100000" < "D99999"`
+  as strings); ordering is numeric, and the id's gap is explained in the
+  view and in `executor graph`.
+- **The `review` phase was inert**, so the whole-plan audit two documents
+  promised never dispatched.
+- An abandoned dispatch is labelled `abandoned`, not `answered`; the loss
+  budget is keyed by round so an early-phase loss cannot spend a later
+  phase's budget; a re-audit carries the findings it must confirm; a
+  charter may cite another initiative; `sk-` keys are scanned; `INIT-10000`
+  is refused instead of minted.
+
 ## [2.0.3] — 2026-10-19
 
 Patch release: the Windows suite goes green. The v2.0.2 install path was

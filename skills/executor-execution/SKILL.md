@@ -52,7 +52,21 @@ engine records `commit_base`/`commit_head` on verdicts and checks the
   N+1 already contains task N's merged work.
 - A task branch merges back only when its verdict is clean — the engine
   won't emit `MERGE` for a plan with an open review.
-- A `sequential: true` plan's tasks commit directly to the plan branch.
+
+The engine enforces the mechanics on any `report` answering a dispatch it
+minted (`rules: v2` in the dispatch context, printed in `prompt.md`):
+
+| Rule | Refusal |
+|---|---|
+| The reported head descends from the dispatch base | `not_descendant` |
+| The head is not contained in the branch the run was on at dispatch | `commit_on_base` |
+| `task/<TASK-ID>` contains the head, and `report.branch` names it | `branch_mismatch` |
+| Every subject in `base..head` is a conventional commit — a type from `feat fix chore docs refactor test perf build ci`, optional scope, then `: subject` | `bad_commit_message` |
+
+So: create `task/<TASK-ID>` at the dispatch base, commit there with a
+conventional subject (`feat(cells): score placement candidates`), and name
+that branch in `report.branch`. A commit on the integration branch or on a
+sibling branch is refused, not merged.
 
 **2. Read the journal before anything else.** Conversation memory does
 not survive compaction — controllers that lost their place have
@@ -90,7 +104,7 @@ Use the **least powerful model that can handle each role**:
 | Task review | scaled to the diff's size, complexity, and risk |
 | Scoped re-review of a small fix diff | cheap-to-mid |
 | Fix rounds near the cap | **at least one tier above the implementer that got stuck** |
-| The final whole-branch audit | most capable — never the session default |
+| The whole-plan audit (`review` phase) | most capable — never the session default |
 
 **Always specify the model explicitly when dispatching.** An omitted
 model inherits your session's — usually the most capable and most
@@ -236,18 +250,25 @@ The verdict folds clean → the task merges (its branch merges to the plan
 branch) → `executor next` moves to the next task or, when the plan's
 tasks all merge, emits `MERGE` for the plan.
 
+The `merge` payload names the branch it landed on — `plan/<PLAN-ID>` or
+`initiative/<INIT-ID>` — and the engine checks that the branch contains
+`merge_sha` and that `merge_sha` contains every task head of the plan
+(`merge_branch_mismatch`, `merge_not_descendant` otherwise).
+
 **Never move to the next task while a review has open `critical`/
 `important` findings that are neither fixed nor parked-with-ruling at
 the cap.**
 
-## The final whole-branch audit
+## The whole-plan audit (the `review` phase)
 
-`executor next` emits a plan-level `DISPATCH` with `role: "audit"` —
+When execution's gate passes, `executor next` enters `review` and emits one
+plan-level `DISPATCH` with `role: "audit"` per merged plan —
 `final-reviewer-prompt.md`, most capable model. It judges the branch as
 one change: cross-task coherence, spec compliance end to end, every
 deferred minor and `routed` finding triaged. A `FAIL` enters the plan's
 fix wave — **one** fix dispatch with the complete findings list, not one
-per finding, then one re-audit.
+per finding, then one re-audit. `executor-review` owns that phase; this
+skill ends when execution's gate opens.
 
 ## Finish
 
@@ -256,7 +277,8 @@ per finding, then one re-audit.
 2. `executor status` — the run's state agrees with what you saw.
 3. **The workspace is never deleted** — the reports and verdicts are the
    reasoning record.
-4. Route to `executor-verification`, then `executor-handoff`.
+4. Route to `executor-review`, then `executor-verification`, then
+   `executor-handoff`.
 
 ## The Citation Rule
 

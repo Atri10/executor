@@ -55,8 +55,14 @@ class Live:
     def __init__(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self.git("init", "-q")
-        self.git("commit", "-q", "--allow-empty", "-m", "init")
+        self.git("init", "-q", "-b", "integration")
+        # The stores are engine state, not source: excluded from git so a
+        # checkout between branches is not blocked by a journal write, and so
+        # `land_change` commits only the code a worker would commit.
+        (self.root / ".git" / "info").mkdir(parents=True, exist_ok=True)
+        (self.root / ".git" / "info" / "exclude").write_text(
+            ".executor/\ndocs/\n", encoding="utf-8")
+        self.git("commit", "-q", "--allow-empty", "-m", "feat: init")
         self.init = create_initiative(self.root, "live")
         self._changes = 0
 
@@ -68,13 +74,23 @@ class Live:
         done.check_returncode()
         return done.stdout.strip()
 
-    def land_change(self) -> str:
-        """Commit one new file on HEAD, the way a worker's change lands."""
+    def branch_at(self, name: str, base: str | None = None) -> None:
+        """Check out `name`, forked from `base` (default: HEAD)."""
+        if base is None:
+            self.git("checkout", "-q", "-B", name)
+        else:
+            self.git("checkout", "-q", "-B", name, base)
+
+    def land_change(self, branch: str | None = None) -> str:
+        """Commit one new file on HEAD (or on `branch`), the way a worker's
+        change lands: a conventional subject, on the task's own branch."""
+        if branch is not None:
+            self.branch_at(branch)
         self._changes += 1
         (self.root / f"change{self._changes}.txt").write_text(
             f"{self._changes}\n", encoding="utf-8")
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", f"change {self._changes}")
+        self.git("commit", "-q", "-m", f"feat: change {self._changes}")
         return self.git("rev-parse", "HEAD")
 
     def events(self) -> list[dict]:
@@ -110,7 +126,9 @@ class Live:
         if role == "audit":
             return PL.audit(target=ent, rnd=ctx["round"])
         if role in ("impl", "fix"):
-            return PL.report(task=ent, commits=(self.land_change(),))
+            branch = f"task/{ent}"
+            return PL.report(task=ent, commits=(self.land_change(branch),),
+                             branch=branch)
         if role == "review":
             return PL.verdict(task=ent, rnd=ctx["round"], base=ctx["base"],
                               head=ctx["head"],
@@ -127,15 +145,18 @@ class Live:
             if stop(act):
                 return act
             kind = act["action"]
-            if kind == "PHASE-ENTER":
+            if kind in ("PHASE-ENTER", "CHANGE-SCOPE", "CHANGE-DONE"):
                 continue
             if kind == "DISPATCH":
                 ingest(self.init, self.answer(act))
             elif kind == "GATE":
                 ingest(self.init, PL.gate(phase=act["phase"]), actor="human")
             elif kind == "MERGE":
+                branch = f"plan/{act['plan']}"
+                self.branch_at(branch)
                 ingest(self.init, PL.merge(plan=act["plan"],
-                                           sha=self.git("rev-parse", "HEAD")))
+                                           sha=self.git("rev-parse", "HEAD"),
+                                           branch=branch))
             else:
                 return act
         raise AssertionError("the run did not settle within the poll limit")

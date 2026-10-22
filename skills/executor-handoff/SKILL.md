@@ -49,7 +49,7 @@ does not, you are still in an earlier phase; go back to its skill.
 | Verification produced observed evidence, not expectation | the `evidence` payloads' `observed` fields |
 | Every `failed`/unanswered/`unavailable` criterion has an explicit human acceptance | a `gate_decision` note or `ruling` naming the criterion and the residual risk — an acceptance the human never made does not exist |
 | The store is consistent | `executor check` — exit 0 required |
-| The journal exports cleanly | `executor doctor` — no finding |
+| No dispatch is silently open | `executor doctor` — `open_dispatch_ids` empty or accounted for |
 
 Run before anything else in this phase:
 
@@ -280,7 +280,7 @@ same message. Wait for the answer; the integration decision is theirs.
 | Never commit to a protected default branch | `main` stays deployable; branch first, always |
 | Conventional Commits, imperative, ≤72 chars | `feat(router): add cell placement scoring` |
 | Review `git diff --cached` before every commit | Last chance to catch a secret or a generated artifact |
-| Never stage `.executor/` | It is ignored by design; committing it makes it public surface (see safety.md) |
+| Never stage `.executor/` | It is machine-local, and committing it makes it public surface (see safety.md) |
 | Squash a feature branch into clean history | A trail of `wip` commits is not a record; the journal is |
 | Force-push only on explicit request | A rejected push means the remote moved — investigate first |
 
@@ -409,9 +409,10 @@ records why.
 
 ## Step 8 — Lifecycle closure
 
-The `GATE handoff` is the human's sign-off — the engine emits it after
-the journal exports, and a `gate_decision` `approved` sets the fold's
-`done`. The human records it:
+The `GATE handoff` is the human's sign-off — the engine opens it when the
+phase has no work left, and a `gate_decision` `approved` sets the fold's
+`done`, which writes the durable journal snapshot
+(`docs/executor/<INIT>/export/events.jsonl`). The human records it:
 
 ```bash
 executor decide - <<'JSON'
@@ -422,7 +423,8 @@ JSON
 ```
 
 `done` is what finishes the initiative: `find_initiative` stops
-treating it as active, and the exported docs store is the archive.
+treating it as active, and the committed docs store plus its
+`export/events.jsonl` snapshot are the archive.
 
 ### Nothing is deleted — deliberately
 
@@ -479,8 +481,9 @@ outcome, not a failure, and it is **not** abandonment:
    reconstructed next session is a guess.
 2. **Secret scan** — run it anyway. A paused store is still a store,
    and the pause may last months.
-3. **The `halt`** — the human (or the fold, on a rejected gate)
-   latches it; `executor status` shows `halt` until `resume`.
+3. **The `halt`** — the human latches it through `executor decide`
+   (`halt` is human-only; the fold latches it itself on a rejected gate);
+   `executor status` shows `halt` until `resume`.
 4. **Session record** — a `.local/handoff/session/` record per
    `local-context-tracking`: numbered `NNNN-YYYYMMDDTHHMMSSZ-topic.md`,
    full frontmatter, plus branch, HEAD, `git status --short`, the

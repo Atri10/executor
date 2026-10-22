@@ -21,16 +21,16 @@ engine renders the `.md`; a pipe table or a fence inside a string is a
  "criteria": [
    {"id": "V01", "criterion": "R01 deterministic placement",
     "procedure": "cd services/placement && npx vitest run test/placement/deterministic.test.ts",
-    "cites": ["INIT-0004-SPEC-01-R01"]},
+    "cites": ["R01"]},
    {"id": "V02", "criterion": "R02 an unknown cell is rejected with 422",
     "procedure": "curl -s -o /tmp/b -w '%{http_code}' localhost:8080/place -d '{\"tenant\":\"t1\",\"cell\":\"cell-9999\"}' then jq -r .error /tmp/b",
-    "cites": ["INIT-0004-SPEC-01-R02"]},
+    "cites": ["R02"]},
    {"id": "V03", "criterion": "R02 no placement recorded on rejection",
     "procedure": "after V02: psql -Atc \"select count(*) from placement where tenant='t1'\"",
-    "cites": ["INIT-0004-SPEC-01-R02"]},
+    "cites": ["R02"]},
    {"id": "V09", "criterion": "R14 operator can evict a cell from the console",
     "procedure": "1. Open http://localhost:3000/cells — the table lists cell-1 … cell-4.\n2. Click Evict on the cell-3 row — a confirm dialog appears naming cell-3.\n3. Confirm — within 2 seconds the cell-3 row's status reads draining.\n4. Reload the page — the status still reads draining.\n5. Run: psql -Atc \"select action,target from audit order by id desc limit 1\" — output is cell.evict|cell-3.",
-    "cites": ["INIT-0004-SPEC-01-R14"]}
+    "cites": ["R14"]}
  ],
  "sections": [
    {"id": "how-to-run", "title": "How to run this",

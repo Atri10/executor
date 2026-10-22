@@ -93,7 +93,7 @@ Subagent (general-purpose):
     `component` (in this artifact), `cross-artifact` (between two
     documents — name both in `evidence`, say which side is wrong), or
     `contract` (in an upstream document — a repairer may not touch it;
-    mark `status: "routed"` and the controller amends the source).
+    mark `status: "routed"` and it changes through a `change_request`).
 
     **Every finding quotes the text it is about.** `evidence` carries
     `path:line` and the quoted text — a finding you cannot quote is not

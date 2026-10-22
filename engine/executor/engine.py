@@ -26,27 +26,36 @@ import threading
 import time
 from pathlib import Path
 
-from .paths import (artifact_file, audit_file, classify, dispatch_id,
-                    dispatches_dir, docs_artifact_file, docs_artifact_md,
+from .paths import (ARTIFACT_SEGMENTS, artifact_file, audit_file,
+                    change_file, classify,
+                    dispatch_id, dispatch_key, dispatches_dir,
+                    docs_artifact_file, docs_artifact_md, docs_change_md,
                     docs_export_journal, docs_index_file, docs_index_md,
-                    docs_init_dir, docs_plan_file, docs_plan_md, docs_report_file,
-                    docs_root, docs_verdict_file, fix_package_file,
-                    fix_report_file, is_dispatch_id, journal_file, payload_file,
+                    docs_init_dir, docs_plan_file, docs_plan_md,
+                    docs_report_file, docs_root, docs_task_md,
+                    docs_verdict_file, fix_package_file, fix_report_file,
+                    is_dispatch_id, journal_file, payload_file,
                     plan_audit_file, plan_file, plan_repair_file, preflight_file,
                     prompt_file, repair_file, review_package_file, run_root,
-                    state_file, task_impl_report, verdict_file, autonomy_file)
+                    state_file, task_impl_report, task_spec_file,
+                    view_task_file,
+                    verdict_file, autonomy_file)
 from .policy import default_state, effective_policy, normalize_autonomy, policy_sha
 from .schemas import ARTIFACT_KINDS, schema_for, validate
 from .store import (PHASES, ExecError, Initiative, Rejection, StoreLock,
-                    append_event, atomic_write, init_store, make_event,
+                    append_event, atomic_write, init_store, json_text,
+                    make_event,
                     next_seq, read_events, read_json, scan_journal, sha256,
-                    verify_chain, write_json)
+                    verify_chain, write_json, write_json_if_changed)
 from .views import (render_all, render_handoff_index, render_handoff_md,
                     render_report_md, render_verdict_md)
 
 
-# A human sends these: a worker cannot approve its own gate or rule on its own concern.
-HUMAN_KINDS = frozenset({"gate_decision", "ruling", "resume"})
+# A human sends these: a worker cannot approve its own gate, rule on its own
+# concern, or stop the run. `halt` is here because a worker that can latch a
+# halt can stop every other worker (audit D09).
+HUMAN_KINDS = frozenset({"gate_decision", "ruling", "resume", "halt",
+                         "change_request"})
 # While the run is halted only these may land: a human ending the halt, or the
 # ruling the halt may be waiting on.
 HALT_OPEN_KINDS = frozenset({"ruling", "resume"})
@@ -54,7 +63,8 @@ HALT_OPEN_KINDS = frozenset({"ruling", "resume"})
 SLOT_FREE_KINDS = HUMAN_KINDS | {"halt", "merge"}
 # Kinds the engine writes itself; a worker can never produce these.
 ENGINE_KINDS = frozenset({"created", "phase_entered", "gate_opened",
-                          "task_dispatched", "abandon", "preflight", "policy"})
+                          "task_dispatched", "abandon", "preflight", "policy",
+                          "change_scoped", "change_applied"})
 WORKER_KINDS = (frozenset({"report", "heartbeat", "verdict", "spawn_error",
                            "needs_context", "evidence", "audit"})
                 | frozenset(ARTIFACT_KINDS))
@@ -81,10 +91,7 @@ PICK_PHASES = frozenset({"design", "specification"})
 NEVER_AUTO = PICK_PHASES | {"handoff"}
 
 
-_AKIND = {"charter": "CHTR-01", "options": "OPTS-01", "brainstorm": "BRN-01",
-          "arch": "ARCH-01", "adr": "ADR-01", "ifce": "IFCE-01",
-          "design": "DSGN-01", "spec": "SPEC-01", "risk": "RISK-01",
-          "vrfy": "VRFY-01"}
+RULES_VERSION = "v2"
 
 _held = threading.local()
 
@@ -143,6 +150,41 @@ def _head(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD").strip()
 
 
+BRANCH_CONVENTION = re.compile(
+    r"^(?:feat|fix|chore|docs|refactor|test|perf|build|ci)"
+    r"(?:\([a-z0-9._/-]+\))?: \S.*$")
+
+
+def _branches_containing(root: Path, sha: str) -> set[str]:
+    """The local branches that contain a commit. Empty when git cannot answer,
+    which makes every containment rule fail closed."""
+    try:
+        text = _git(root, "branch", "--contains", sha)
+    except ExecError:
+        return set()
+    return {line.replace("*", "").strip() for line in text.splitlines()
+            if line.strip()}
+
+
+def _commit_subjects(root: Path, base: str, head: str) -> list[str]:
+    try:
+        text = _git(root, "log", "--format=%s", f"{base}..{head}")
+    except ExecError:
+        return []
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _branch(root: Path) -> str:
+    """The branch a dispatch forked from: the integration line its work must not
+    be committed on (git rule G2). A detached HEAD records an empty name and the
+    G2 check skips."""
+    try:
+        name = _git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    except ExecError:
+        return ""
+    return "" if name == "HEAD" else name
+
+
 def _resolve(root: Path, rev: str) -> str:
     return _git(root, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
 
@@ -160,7 +202,13 @@ def fold(events: list[dict]) -> dict:
 
     `answered` maps each dispatch id to the digest of the payload that closed
     it (None when the engine closed it without an answer). Openness, base and
-    context of a dispatch live in the journal too, so a lost file costs nothing."""
+    context of a dispatch live in the journal too, so a lost file costs nothing.
+
+    Artifact *bodies* are not folded. Each artifact keeps the distilled record
+    the engine decides on — kind, status, round, cites, the ids its payload
+    declares, its criteria and its `more_plans` flag — while the payload itself
+    stays in the journal and in its canonical file. Folding the bodies made
+    `state.json` 2.4 MB and every projection rewrite all of it (audit D13)."""
     s: dict = {
         "phase": "intake", "phase_state": {},
         "artifacts": {}, "critiques": {},
@@ -168,10 +216,11 @@ def fold(events: list[dict]) -> dict:
         "tasks": {}, "verdicts": {}, "reports": {},
         "rulings": [], "evidence": {},
         "dispatches": {}, "answered": {}, "lost": {},
-        "needs_ruling": [], "questions": [],
+        "needs_ruling": [], "questions": [], "changes": {},
         "halt": None, "done": False, "entities": {}, "edges": [],
         "policy": default_state(),
         "seq": len(events),
+        "last_ts": events[-1]["ts"] if events else "",
     }
     for ev in events:
         _apply(s, ev)
@@ -213,7 +262,7 @@ def _apply(s: dict, ev: dict) -> None:
     elif k == "spawn_error":
         _apply_lost(s, did, "spawn_error", d["error_class"])
     elif k == "report":
-        _apply_report(s, e, d)
+        _apply_report(s, e, {**d, "_seq": ev["seq"]})
     elif k == "heartbeat":
         if did in s["dispatches"]:
             s["dispatches"][did]["last_beat"] = ev["ts"]
@@ -236,6 +285,14 @@ def _apply(s: dict, ev: dict) -> None:
     elif k == "merge":
         s["plans"].setdefault(d["plan"], {"status": "draft"}).update(
             status="merged", merge_sha=d["merge_sha"])
+    elif k == "change_request":
+        _apply_change_request(s, e, d, ev["seq"])
+    elif k == "change_scoped":
+        _apply_change_scoped(s, d)
+    elif k == "change_applied":
+        c = s["changes"].get(e)
+        if c is not None:
+            c.update(state="applied", reason=d.get("reason", ""))
 
 
 def _apply_gate(s: dict, d: dict) -> None:
@@ -248,10 +305,35 @@ def _apply_gate(s: dict, d: dict) -> None:
         s["done"] = True
 
 
+def _artifact_record(kind: str, d: dict) -> dict:
+    """What the engine needs to decide about an artifact, and nothing more.
+
+    `ids` is the union of the requirement, constraint, criterion and component
+    ids the payload declares — exactly what `_known_ids` used to recompute from
+    the whole body on every call."""
+    ids: set[str] = set()
+    for key in ("requirements", "constraints", "criteria"):
+        ids |= {x["id"] for x in d.get(key, [])
+                if isinstance(x, dict) and "id" in x}
+    ids |= {c["id"] for c in d.get("components", [])
+            if isinstance(c, dict) and "id" in c}
+    return {"kind": kind, "status": "drafted",
+            "title": d.get("title", ""), "summary": d.get("summary", ""),
+            "cites": list(d.get("cites", [])), "ids": sorted(ids),
+            "component": d.get("component", ""),
+            "criteria": list(d.get("criteria", [])),
+            "components": list(d.get("components", [])),
+            "more_plans": bool(d.get("more_plans"))}
+
+
 def _apply_artifact(s: dict, kind: str, aid: str, d: dict) -> None:
-    a = s["artifacts"].setdefault(aid, {"kind": kind, "status": "drafted",
-                                        "round": 0, "data": d})
-    a.update(status="drafted", round=a["round"] + 1, data=d)
+    rec = _artifact_record(kind, d)
+    cur = s["artifacts"].get(aid)
+    if cur is None:
+        s["artifacts"][aid] = {**rec, "round": 1}
+    else:
+        cur.update(rec)
+        cur["round"] = cur["round"] + 1
     _node(s, aid, "artifact")
     for c in d.get("cites", []):
         _edge(s, aid, c, "cites")
@@ -275,7 +357,12 @@ def _apply_plan_tasks(s: dict, pid: str, rows: list[dict]) -> None:
     for tid, row in wanted.items():
         fields = {"title": row["title"], "goal": row["goal"],
                   "files": row["files"], "accepts": row["accepts"],
-                  "depends_on": row.get("depends_on", [])}
+                  "depends_on": row.get("depends_on", []),
+                  # the dependency data a regression pass reads (audit D15)
+                  "provides": row.get("provides", []),
+                  "consumes": row.get("consumes", []),
+                  "requirements": row.get("requirements", []),
+                  "constraints": row.get("constraints", [])}
         cur = s["tasks"].get(tid)
         if cur is None:
             s["tasks"][tid] = {"state": "pending", "round": 0, "fix_rounds": 0,
@@ -284,6 +371,124 @@ def _apply_plan_tasks(s: dict, pid: str, rows: list[dict]) -> None:
             _edge(s, pid, tid, "contains")
         elif cur["state"] == "pending":
             cur.update(fields)
+
+
+def _next_change_id(s: dict) -> str:
+    """Mint the next change id: CR-0001, CR-0002, ... Dense and per-initiative,
+    so a change is citable and its id says nothing about the journal."""
+    used = {int(cid.split("-")[1]) for cid in s["changes"]
+            if cid.startswith("CR-") and cid.split("-")[1].isdigit()}
+    n = 1
+    while n in used:
+        n += 1
+    return f"CR-{n:04d}"
+
+
+def _apply_change_request(s: dict, cid: str, d: dict, seq: int) -> None:
+    s["changes"][cid] = {"id": cid, "title": d["title"],
+                         "requested_by": d["requested_by"], "why": d["why"],
+                         "change": d["change"], "note": d.get("note", ""),
+                         "state": "requested", "seq": seq,
+                         "radius": None, "baselines": None, "reason": ""}
+
+
+def _apply_change_scoped(s: dict, d: dict) -> None:
+    c = s["changes"].get(d["id"])
+    if c is None:
+        return
+    c.update(state="scoped", radius=d["radius"], baselines=d["baselines"])
+    # An affected criterion must be re-proven: dropping its evidence is what
+    # makes "proven" mean "proven after the change".
+    for cid in d["radius"]["criteria"]:
+        s["evidence"].pop(cid, None)
+
+
+def _last_report_seq(s: dict, tid: str) -> int:
+    return int((s["reports"].get(tid) or {}).get("_seq", 0))
+
+
+def _blast_radius(s: dict, change: dict) -> dict:
+    """Who is affected by a change, from fold dependency data only.
+
+    Owning artifacts come from the ids the artifacts declare; criteria come from
+    the ids their `cites` name; tasks come from the requirement/constraint links
+    their rows declare, closed over `depends_on`. No prose is read. When no task
+    declares a changed id the radius falls back to the plans that cite the owning
+    artifact and says `coarse`, so a reader knows the difference."""
+    seeds: set[str] = set()
+    for key in ("requirements", "constraints", "criteria"):
+        seeds |= set(change.get(key, []))
+    named_art = set(change.get("artifacts", []))
+    artifacts: dict[str, str] = {}
+    for aid, a in s["artifacts"].items():
+        if aid in named_art:
+            artifacts[aid] = "named"
+        elif set(a.get("ids", [])) & seeds:
+            artifacts[aid] = "owns"
+    criteria: dict[str, str] = {}
+    for a in s["artifacts"].values():
+        if a["kind"] != "vrfy":
+            continue
+        for crit in a.get("criteria", []):
+            cites = set(crit.get("cites", []))
+            if cites & seeds or cites & set(artifacts):
+                criteria[crit["id"]] = "cites"
+    changed = True
+    while changed:                      # reverse cite closure
+        changed = False
+        for ed in s["edges"]:
+            if ed["kind"] != "cites":
+                continue
+            src, dst = ed["from"], ed["to"]
+            if dst in artifacts and src in s["artifacts"] and src not in artifacts:
+                artifacts[src] = "cites"
+                changed = True
+    plans = {pid for pid in s["plan_order"]
+             if set(s["artifacts"].get(pid, {}).get("cites", [])) & set(artifacts)}
+    tasks: dict[str, str] = {}
+    bound = [tid for tid, row in s["tasks"].items()
+             if set(row.get("requirements", [])) & seeds
+             or set(row.get("constraints", [])) & seeds]
+    for tid in bound:
+        tasks[tid] = "binds"
+    coarse = not bound
+    if coarse:
+        for tid, row in s["tasks"].items():
+            if row["plan"] in plans:
+                tasks[tid] = "plan"
+    for tid in change.get("tasks", []):
+        if tid in s["tasks"]:
+            tasks[tid] = "named"
+    changed = True
+    while changed:                      # dependents closure
+        changed = False
+        for tid, row in s["tasks"].items():
+            if tid in tasks:
+                continue
+            deps = {f"{row['plan']}-{d}" for d in row.get("depends_on", [])}
+            if deps & set(tasks):
+                tasks[tid] = "depends"
+                changed = True
+    plans |= {s["tasks"][tid]["plan"] for tid in tasks}
+    return {"artifacts": sorted(artifacts), "plans": sorted(plans),
+            "tasks": sorted(tasks), "criteria": sorted(criteria),
+            "docs": sorted([f"artifacts/{a}" for a in artifacts]
+                           + [f"plans/{p}" for p in plans]
+                           + [f"plans/{s['tasks'][t]['plan']}/tasks/{t}"
+                              for t in tasks]),
+            "coarse": coarse,
+            "reasons": {"artifacts": artifacts, "tasks": tasks}}
+
+
+def _change_baselines(s: dict, radius: dict) -> dict:
+    return {"artifact_round": {aid: s["artifacts"][aid]["round"]
+                               for aid in radius["artifacts"]},
+            "critique_round": {aid: _audit_rounds(s, aid)
+                               for aid in radius["artifacts"]},
+            "task_report": {tid: _last_report_seq(s, tid)
+                            for tid in radius["tasks"]},
+            "criteria": {cid: len(s["evidence"].get(cid, []))
+                         for cid in radius["criteria"]}}
 
 
 def _apply_audit(s: dict, d: dict) -> None:
@@ -328,7 +533,8 @@ def _apply_lost(s: dict, did: str | None, key: str, value: str) -> None:
     if dsp is None:
         return
     dsp[key] = value
-    lk = f"{dsp['entity']}:{dsp['schema']}"
+    rnd = (dsp.get("context") or {}).get("round", 0)
+    lk = f"{dsp['entity']}:{dsp['schema']}:{rnd}"
     s["lost"][lk] = s["lost"].get(lk, 0) + 1
     t = s["tasks"].get(dsp["entity"])
     if t is not None:
@@ -371,6 +577,8 @@ def _apply_ruling(s: dict, d: dict) -> None:
     if d.get("stop"):
         s["halt"] = d["decision"]
     tgt, quoted = d.get("for_task"), d.get("answered")
+    if tgt in s["changes"]:
+        _record_change_withdrawal(s, tgt, d.get("decision", ""))
     for n in s["needs_ruling"]:
         if tgt and n["task"] == tgt:
             n["ruled"] = True
@@ -383,6 +591,13 @@ def _apply_ruling(s: dict, d: dict) -> None:
         t = s["tasks"].get(tid)
         if t is not None and t["state"] in ("blocked", "needs_context"):
             t["state"] = t.get("prior_state", "pending")
+
+
+def _record_change_withdrawal(s: dict, cid: str, reason: str) -> None:
+    """A human ruling naming a change stops the regression lane. It does not
+    undo work already dispatched: the journal is append-only, and the record
+    shows both the request and the withdrawal."""
+    s["changes"][cid].update(state="withdrawn", reason=reason)
 
 
 def _apply_preflight(s: dict, d: dict) -> None:
@@ -443,7 +658,7 @@ def _criteria_defs(s: dict) -> list[dict]:
     out: list[dict] = []
     for a in s["artifacts"].values():
         if a["kind"] == "vrfy":
-            out.extend(a["data"].get("criteria", []))
+            out.extend(a.get("criteria", []))
     return out
 
 
@@ -462,8 +677,7 @@ def _known_ids(s: dict) -> set[str]:
     dispatch that has not produced its artifact yet is not a citable id."""
     known = set(s["artifacts"]) | set(s["tasks"]) | set(s["plans"])
     for a in s["artifacts"].values():
-        for key in ("requirements", "constraints", "criteria"):
-            known |= {x["id"] for x in a["data"].get(key, [])}
+        known |= set(a.get("ids", []))
     return known
 
 
@@ -480,8 +694,7 @@ def _more_plans_wanted(s: dict) -> bool:
     """The planner says whether another plan is needed. No plan yet means one is."""
     if not s["plan_order"]:
         return True
-    last = s["artifacts"][s["plan_order"][-1]]["data"]
-    return bool(last.get("more_plans"))
+    return bool(s["artifacts"][s["plan_order"][-1]].get("more_plans"))
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -523,23 +736,81 @@ def _sync_policy(init: Initiative) -> dict:
 
 
 def _project(init: Initiative) -> None:
-    """Refresh the fold cache and every projection after a journal change. Once
-    the handoff gate is approved, the committed handoff files follow."""
+    """Refresh the fold cache and every projection after a journal change.
+
+    The committed index is written on *every* projection, not only at handoff:
+    it is a pure function of the fold, so it cannot drift, and a tracked store
+    without it is unusable mid-run (audit D08). The journal export stays
+    handoff-only — it is a durable snapshot, not a projection."""
     s = fold(init.events)
-    write_json(state_file(init.idir), s | {"last_seq": len(init.events)})
+    write_json_if_changed(state_file(init.idir),
+                          s | {"last_seq": len(init.events)})
     render_all(init)
+    _write_changes(init, s)
+    _export_index(init, s)
     if s["done"]:
-        _export_handoff(init, s)
+        _export_journal(init)
 
 
-def _export_handoff(init: Initiative, s: dict) -> None:
-    """The committed handoff: an index of the run and a byte copy of its journal.
-    Both are pure functions of the journal, so a re-export rewrites identical
-    bytes."""
-    write_json(docs_index_file(init.root, init.id),
-               render_handoff_index(init.id, s))
+def change_files(init: Initiative, cid: str, c: dict) -> dict:
+    """Both stores' record of one change: the request, its radius and its
+    state. A projection of the fold, like every other."""
+    return {change_file(init.idir, cid): json_text(c),
+            docs_change_md(init.root, init.id, cid): _render_change(c)}
+
+
+def _write_changes(init: Initiative, s: dict) -> None:
+    for cid, c in sorted(s["changes"].items()):
+        _write_files(change_files(init, cid, c))
+
+
+def _render_change(c: dict) -> str:
+    lines = [f"# {c['id']} — {c['title']}", "",
+             f"- state: **{c['state']}**",
+             f"- requested by: {c['requested_by']}",
+             f"- why: {c['why']}"]
+    if c.get("note"):
+        lines.append(f"- note: {c['note']}")
+    ch = c.get("change") or {}
+    for key in ("requirements", "constraints", "criteria", "artifacts",
+                "tasks"):
+        if ch.get(key):
+            lines.append(f"- {key}: " + ", ".join(f"`{x}`" for x in ch[key]))
+    r = c.get("radius")
+    if r:
+        scope = "coarse: no task binds a changed id" if r["coarse"] \
+            else "task-scoped"
+        lines += ["", f"## Blast radius ({scope})", "",
+                  "| kind | ids |", "|---|---|"]
+        for key in ("artifacts", "plans", "tasks", "criteria"):
+            lines.append(f"| {key} | "
+                         + (", ".join(f"`{x}`" for x in r[key]) or "-") + " |")
+        if r.get("docs"):
+            lines += ["", "**affected committed docs:**",
+                      *[f"- `{d}`" for d in r["docs"]]]
+    if c.get("reason"):
+        lines += ["", f"reason: {c['reason']}"]
+    return "\n".join(lines) + "\n"
+
+
+def index_files(init: Initiative, s: dict) -> dict:
+    """The committed index, machine and human forms, as text."""
+    return {docs_index_file(init.root, init.id):
+            json_text(render_handoff_index(init.id, s)),
+            docs_index_md(init.root, init.id):
+            render_handoff_md(init.id, s)}
+
+
+def _export_index(init: Initiative, s: dict) -> None:
+    write_json_if_changed(docs_index_file(init.root, init.id),
+                          render_handoff_index(init.id, s))
     _write_text(docs_index_md(init.root, init.id),
                 render_handoff_md(init.id, s))
+
+
+def _export_journal(init: Initiative) -> None:
+    """The durable handoff snapshot: a byte copy of the journal, deterministic,
+    so a re-export rewrites identical bytes."""
     atomic_write(docs_export_journal(init.root, init.id),
                  journal_file(init.idir).read_bytes())
 
@@ -552,7 +823,8 @@ def _open_slots(s: dict) -> list[dict]:
     return [{"dispatch_id": did, "entity": d["entity"], "schema": d["schema"],
              "role": d["role"], "respond_to": d["respond_to"],
              "base": d["base"], "context": d["context"]}
-            for did, d in sorted(s["dispatches"].items())
+            for did, d in sorted(s["dispatches"].items(),
+                                 key=lambda kv: dispatch_key(kv[0]))
             if did not in s["answered"]]
 
 
@@ -618,6 +890,13 @@ def _decide(init: Initiative, s: dict, now: float) -> dict:
     if unruled:
         return _action("ASK", init.id, topic=unruled[0]["concern"],
                        task=unruled[0]["task"])
+    # A change is absorbed by the phase's work, so it waits while the phase is
+    # asking the human to approve its result: re-running work under a gate that
+    # is about to pass would invalidate the decision being taken.
+    if s["phase_state"].get(s["phase"]) != "gate_pending":
+        lane = _change_work(init, s, now)
+        if lane is not None:
+            return lane
     ph = s["phase"]
     pstate = s["phase_state"].get(ph)
     if pstate == "passed":
@@ -629,6 +908,88 @@ def _decide(init: Initiative, s: dict, now: float) -> dict:
         return _action("GATE", init.id, phase=ph)
     work = _phase_work(init, s, ph, now)
     return work if work is not None else _open_gate(init, s, ph, now)
+
+
+def _change_work(init: Initiative, s: dict, now: float):
+    """One step of the regression lane, in change-id order. A change is a
+    first-class journaled object: requested -> scoped (radius journalled) ->
+    revise, re-audit, re-dispatch, re-prove -> applied. Every step is a pure
+    function of the fold, so a repeated poll writes nothing new."""
+    open_ = [c for c in s["changes"].values()
+             if c["state"] in ("requested", "scoped")]
+    for c in sorted(open_, key=lambda x: x["seq"]):
+        if c["state"] == "requested":
+            radius = _blast_radius(s, c["change"])
+            _record(init, "engine", "change_scoped", c["id"],
+                    {"id": c["id"], "radius": radius,
+                     "baselines": _change_baselines(s, radius)})
+            return _action("CHANGE-SCOPE", init.id, change=c["id"],
+                           radius=radius)
+        act = _change_advance(init, s, c, now)
+        if act is not None:
+            return act
+    return None
+
+
+def _change_advance(init: Initiative, s: dict, c: dict, now: float):
+    radius, base = c["radius"], c["baselines"]
+    ctx = {"change": c["id"], "change_summary": c["title"],
+           "change_targets": c["change"], "note": c["note"]}
+    for aid in radius["artifacts"]:
+        if s["artifacts"][aid]["round"] <= base["artifact_round"][aid]:
+            return _dispatch(init, s, "repair", aid, _kind_of(s, aid), now=now,
+                             context={**ctx, "round": _audit_rounds(s, aid) + 1,
+                                      "findings": []})
+    for aid in radius["artifacts"]:
+        if _audit_rounds(s, aid) <= base["critique_round"][aid]:
+            return _dispatch(init, s, "audit", aid, "audit", now=now,
+                             context={"round": _audit_rounds(s, aid) + 1,
+                                      "findings": [], "change": c["id"]})
+    for tid in _change_order(s, radius["tasks"]):
+        row = s["tasks"].get(tid)
+        if row is None or row["state"] not in ("pending", "complete"):
+            continue                    # in flight: the ordinary loop owns it
+        if row["state"] == "complete" and _last_report_seq(s, tid) > c["seq"]:
+            continue                    # already redone since the change
+        if not _ready(s, row):
+            continue
+        return _dispatch(init, s, "impl", tid, "report", now=now,
+                         base=_head(init.root), context=ctx)
+    for cid in radius["criteria"]:
+        runs = s["evidence"].get(cid, [])
+        if runs and runs[-1]["verdict"] == "proven":
+            continue
+        crit = next((x for x in _criteria_defs(s) if x["id"] == cid), {})
+        return _dispatch(init, s, "evidence", cid, "evidence", now=now,
+                         context={"criterion": crit.get("criterion", ""),
+                                  "procedure": crit.get("procedure", ""),
+                                  "change": c["id"]})
+    # Nothing left to dispatch. Close only when the work is actually done.
+    for tid in radius["tasks"]:
+        row = s["tasks"].get(tid)
+        if row is None:
+            continue
+        if row["state"] != "complete" or _last_report_seq(s, tid) <= c["seq"]:
+            return None                 # in flight or not redone yet
+    reason = "absorbed" if (radius["tasks"] or radius["artifacts"]) else "no_impact"
+    _record(init, "engine", "change_applied", c["id"],
+            {"id": c["id"], "reason": reason})
+    return _action("CHANGE-DONE", init.id, change=c["id"], reason=reason)
+
+
+def _change_order(s: dict, tids: list[str]) -> list[str]:
+    """Affected tasks in plan order, then id order: the order a reader expects
+    and the order the dependency check needs."""
+    return sorted(tids, key=lambda t: (s["tasks"][t]["plan"]
+                                       if t in s["tasks"] else "", t))
+
+
+def _ready(s: dict, row: dict) -> bool:
+    for dep in row.get("depends_on", []):
+        other = s["tasks"].get(f"{row['plan']}-{dep}")
+        if other is not None and other["state"] != "complete":
+            return False
+    return True
 
 
 def _enter(init: Initiative, phase: str) -> dict:
@@ -675,10 +1036,18 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
                                    f"{cap} plans")
         return _author(init, s, "plan", now)
     for kind in PHASE_ARTIFACTS.get(ph, []):
-        if not any(a["kind"] == kind for a in s["artifacts"].values()):
+        if _wants_instance(s, kind):
             return _author(init, s, kind, now)
-    targets = (list(s["plan_order"]) if ph == "plan_regression"
-               else _phase_artifacts(s, ph))
+    if ph == "review":
+        # The whole-plan final audit: one audit per merged plan, keyed by the
+        # review phase so it neither inherits nor overwrites the planning or
+        # plan-regression verdict (audit D10).
+        targets = [pid for pid in s["plan_order"]
+                   if s["plans"][pid]["status"] == "merged"]
+    elif ph == "plan_regression":
+        targets = list(s["plan_order"])
+    else:
+        targets = _phase_artifacts(s, ph)
     for tgt in targets:
         c = s["critiques"].get(_crit_key(s, tgt))
         if c is None or c["status"] == "repaired":
@@ -687,8 +1056,13 @@ def _phase_work(init: Initiative, s: dict, ph: str, now: float):
             if rnd >= cap:
                 return _escalate(init, f"{tgt} not cleared after "
                                        f"{cap} audit rounds")
+            ctx = {"round": rnd + 1}
+            if c is not None:
+                # a re-auditor is told to confirm the prior findings and must
+                # be given them (audit D21)
+                ctx["findings"] = c.get("open", [])
             return _dispatch(init, s, "audit", tgt, "audit", now=now,
-                             context={"round": rnd + 1})
+                             context=ctx)
         if c["status"] == "fail":
             return _dispatch(init, s, "repair", tgt, _kind_of(s, tgt), now=now,
                              context={"round": c["round"], "findings": c["open"]})
@@ -703,10 +1077,57 @@ def _audit_rounds(s: dict, tgt: str) -> int:
                 if key.split(":", 1)[1] == tgt), default=0)
 
 
+def _components(s: dict) -> list[dict]:
+    """The components the architecture declares. An artifact kind is not capped
+    at one instance: the design phase mints one design per component (audit
+    D05). An arch payload without `components` yields the single design every
+    pre-existing store already has."""
+    for a in s["artifacts"].values():
+        if a["kind"] == "arch" and a.get("components"):
+            return [c for c in a["components"] if isinstance(c, dict) and "id" in c]
+    return []
+
+
+def _next_artifact_id(init: Initiative, s: dict, kind: str) -> str:
+    """The next free instance id for a kind: INIT-NNNN-<SEG>-NN. Minted, not
+    hardcoded, so DSGN-02 is reachable without an id-shape change."""
+    prefix = f"{init.id}-{ARTIFACT_SEGMENTS[kind]}-"
+    used = set()
+    for aid in s["artifacts"]:
+        if aid.startswith(prefix):
+            tail = aid[len(prefix):]
+            if tail.isdigit():
+                used.add(int(tail))
+    n = 1
+    while n in used:
+        n += 1
+    return f"{prefix}{n:02d}"
+
+
+def _wants_instance(s: dict, kind: str) -> bool:
+    """Whether the phase still needs another instance of this kind."""
+    if kind == "design":
+        comps = _components(s)
+        if comps:
+            covered = {a.get("component", "") for a in s["artifacts"].values()
+                       if a["kind"] == "design"}
+            return any(c["id"] not in covered for c in comps)
+    return not any(a["kind"] == kind for a in s["artifacts"].values())
+
+
 def _author(init: Initiative, s: dict, kind: str, now: float) -> dict:
-    eid = (f"{init.id}-P{len(s['plan_order']) + 1:02d}" if kind == "plan"
-           else f"{init.id}-{_AKIND[kind]}")
-    return _dispatch(init, s, "author", eid, kind, now=now)
+    if kind == "plan":
+        eid = f"{init.id}-P{len(s['plan_order']) + 1:02d}"
+        return _dispatch(init, s, "author", eid, kind, now=now)
+    ctx: dict = {}
+    if kind == "design":
+        covered = {a.get("component", "") for a in s["artifacts"].values()
+                   if a["kind"] == "design"}
+        nxt = next((c for c in _components(s) if c["id"] not in covered), None)
+        if nxt is not None:
+            ctx = {"component": nxt["id"], "component_title": nxt.get("title", "")}
+    return _dispatch(init, s, "author", _next_artifact_id(init, s, kind), kind,
+                     now=now, context=ctx or None)
 
 
 def _verification(init: Initiative, s: dict, now: float):
@@ -879,10 +1300,17 @@ def _dispatch(init: Initiative, s: dict, role: str, entity: str, schema: str,
                 {"reason": f"silent past {pol['deadline_s']}s"},
                 dispatch_id_=open_sl["dispatch_id"])
         s = fold(init.events)
-    lost = s["lost"].get(f"{entity}:{schema}", 0)
-    if lost > pol["spawn_retry_cap"]:
-        return _escalate(init, f"{entity}: {schema} dispatch lost {lost} times")
     ctx = dict(context or {})
+    rnd = ctx.get("round", 0)
+    lost = s["lost"].get(f"{entity}:{schema}:{rnd}", 0)
+    if lost > pol["spawn_retry_cap"]:
+        return _escalate(init, f"{entity}: {schema} lost {lost} times in "
+                               f"round {rnd}")
+    # The git rules a dispatch is minted under. An answer is judged by the
+    # rules it was asked under, so an upgrade never rejects in-flight work.
+    ctx.setdefault("rules", RULES_VERSION)
+    if base is not None:
+        ctx.setdefault("base_branch", _branch(init.root))
     package = None
     if role == "review":
         assert base is not None, "a review is measured from its task's dispatch base"
@@ -942,6 +1370,26 @@ def _render_prompt(init: Initiative, s: dict, sl: dict) -> str:
                   f"Set `reviewed_package_sha` to `{ctx['package_sha']}`, "
                   f"`commit_base` to `{ctx['base']}` and `commit_head` to "
                   f"`{ctx['head']}`.", ""]
+    if ctx.get("rules"):
+        lines += [f"- rules: {ctx['rules']}", ""]
+    if ctx.get("change"):
+        ch = ctx.get("change_targets") or {}
+        named = [x for key in ("requirements", "constraints", "criteria",
+                               "artifacts", "tasks") for x in ch.get(key, [])]
+        lines += [f"## Change {ctx['change']}",
+                  f"This work exists because `{ctx['change']}` changed the "
+                  f"contract: {ctx.get('change_summary', '')}",
+                  f"Changed ids: " + (", ".join(f"`{x}`" for x in named) or "-"),
+                  "You are absorbing that change. Do not restate the old "
+                  "contract; update it."]
+        if ctx.get("note"):
+            lines += [f"Requester's note: {ctx['note']}"]
+        lines += [""]
+    if ctx.get("component"):
+        lines += ["## Component",
+                  f"- id: `{ctx['component']}`",
+                  f"- title: {ctx.get('component_title', '')}",
+                  "Design only this component's internals.", ""]
     if ctx.get("findings"):
         lines += ["## Findings to address",
                   *[f"- {f.get('id', '?')} ({f.get('severity', '?')}): "
@@ -1068,6 +1516,7 @@ def _check(init: Initiative, s: dict, p: dict, sl: dict) -> str:
     k = p["kind"]
     if k in ARTIFACT_KINDS:
         _check_artifact(s, p)
+        _check_change_absorbed(s, p, sl)
         return p["id"]
     if k == "report":
         for c in p.get("commits", []):
@@ -1076,6 +1525,7 @@ def _check(init: Initiative, s: dict, p: dict, sl: dict) -> str:
                                 "resolvable commit(s)", c)
         if p["result"] != "BLOCKED":
             _check_advances(init, s, p, sl)
+            _check_git_discipline(init, p, sl)
         return p["task"]
     if k == "verdict":
         _check_verdict(init, p, sl)
@@ -1106,14 +1556,35 @@ def _check_free(init: Initiative, s: dict, p: dict) -> str:
         return init.id
     if k == "ruling":
         tgt = p.get("for_task")
-        if tgt and tgt not in s["tasks"] and tgt not in s["plans"]:
+        if tgt and tgt not in s["tasks"] and tgt not in s["plans"] \
+                and tgt not in s.get("changes", {}):
             raise Rejection("unknown_entity", "$.for_task",
-                            "a known task or plan", tgt)
+                            "a known task, plan or change", tgt)
         return tgt or init.id
     if k == "merge":
         _check_merge(init, s, p)
         return p["plan"]
+    if k == "change_request":
+        known = _known_ids(s)
+        for key in ("requirements", "constraints", "criteria", "artifacts",
+                    "tasks"):
+            for x in p["change"].get(key, []):
+                if x not in known:
+                    raise Rejection("dangling_ref", f"$.change.{key}",
+                                    "an authored id", x,
+                                    "a change names ids the initiative has "
+                                    "authored; a typo would scope the wrong work")
+        return _next_change_id(s)
     return init.id            # halt
+
+
+FOREIGN_ID = re.compile(r"INIT-\d{4}(?:-[A-Z]{3,4}-\d{2})?$")
+
+
+def _own_initiative(aid: str) -> str:
+    """The initiative an id was minted by: INIT-0002-CHTR-01 -> INIT-0002."""
+    parts = aid.split("-")
+    return "-".join(parts[:2])
 
 
 def _check_artifact(s: dict, p: dict) -> None:
@@ -1124,9 +1595,17 @@ def _check_artifact(s: dict, p: dict) -> None:
                             "another artifact, task, or criterion", c,
                             "a payload cannot cite itself: the reference "
                             "would add nothing a reader can check")
-        if c not in known:
-            raise Rejection("dangling_ref", "$.cites", "an authored id", c,
-                            "cite only artifacts, tasks or criteria that exist")
+        if c in known:
+            continue
+        own = _own_initiative(p["id"])
+        if p["kind"] == "charter" and FOREIGN_ID.fullmatch(c) \
+                and _own_initiative(c) != own:
+            # The charter is the one place another initiative's id may appear.
+            # It lives in another store, so the reference is shape-checked and
+            # recorded, never resolved against this fold (audit D20).
+            continue
+        raise Rejection("dangling_ref", "$.cites", "an authored id", c,
+                        "cite only artifacts, tasks or criteria that exist")
     if p["kind"] == "plan":
         if p.get("plan_id") != p["id"]:
             raise Rejection("mismatch", "$.plan_id", p["id"],
@@ -1141,6 +1620,17 @@ def _check_artifact(s: dict, p: dict) -> None:
                     raise Rejection("dangling_ref",
                                     f"$.tasks.{t['id']}.depends_on",
                                     "a task id in this plan", dep)
+    if p["kind"] == "plan":
+        known = _known_ids(s) | {p["id"]}
+        for t in p["tasks"]:
+            for key in ("requirements", "constraints"):
+                for x in t.get(key, []):
+                    if x not in known:
+                        raise Rejection("dangling_ref",
+                                        f"$.tasks.{t['id']}.{key}",
+                                        "an authored id", x,
+                                        "a task may only bind ids the "
+                                        "initiative has authored")
     if p["kind"] == "vrfy":
         ids = [c["id"] for c in p["criteria"]]
         if len(set(ids)) != len(ids):
@@ -1168,6 +1658,73 @@ def _check_advances(init: Initiative, s: dict, p: dict, sl: dict) -> None:
             raise Rejection("empty_range", "$.commits",
                             f"a commit after {base[:12]}", head[:12],
                             "the change is not in the repository yet")
+
+
+def _check_git_discipline(init: Initiative, p: dict, sl: dict) -> None:
+    """The mechanically checkable half of the branch model. A dispatch minted
+    before this engine carries no `rules` marker and is judged by the rules it
+    was asked under, so an upgrade never rejects the work it inherited."""
+    ctx = sl["context"]
+    if ctx.get("rules") != RULES_VERSION:
+        return
+    commits = p["commits"]          # non-empty: _check_advances ran first
+    head = _resolve(init.root, commits[-1])
+    base = _resolve(init.root, sl["base"]) if sl.get("base") else None
+    if base is not None and not _is_ancestor(init.root, base, head):
+        raise Rejection("not_descendant", "$.commits",
+                        f"a commit descending from {base[:12]}", head[:12],
+                        "commit on top of the dispatch base, then report "
+                        "that head")
+    containing = _branches_containing(init.root, head)
+    on_base = ctx.get("base_branch") or ""
+    if on_base and on_base != f"task/{p['task']}" and on_base in containing:
+        raise Rejection("commit_on_base", "$.commits",
+                        f"a commit that is not on {on_base}", head[:12],
+                        f"move the work to task/{p['task']} and report that "
+                        f"head; the integration branch takes merges only")
+    want = f"task/{p['task']}"
+    named = p.get("branch")
+    if want not in containing or (named and named != want):
+        raise Rejection("branch_mismatch", "$.branch", want,
+                        named or (", ".join(sorted(containing)) or "none"),
+                        f"create {want} at the dispatch base, commit there, "
+                        f"and name it in `branch`")
+    if base is not None:
+        for subject in _commit_subjects(init.root, base, head):
+            if not BRANCH_CONVENTION.match(subject):
+                raise Rejection("bad_commit_message", "$.commits",
+                                "a conventional subject "
+                                "(type(scope): subject)", subject[:80],
+                                "amend the subject; the convention is in "
+                                "references/branches.md")
+
+
+def _declared_ids(p: dict) -> set[str]:
+    ids: set[str] = set()
+    for key in ("requirements", "constraints", "criteria"):
+        ids |= {x["id"] for x in p.get(key, [])
+                if isinstance(x, dict) and "id" in x}
+    return ids
+
+
+def _check_change_absorbed(s: dict, p: dict, sl: dict) -> None:
+    """A redraft dispatched to absorb a change must actually carry the ids the
+    change names. Otherwise "the spec now says C07 differently" is asserted
+    rather than true (audit D06)."""
+    cid = (sl.get("context") or {}).get("change")
+    if not cid:
+        return
+    c = s["changes"].get(cid)
+    if c is None:
+        return
+    want = (set(c["change"].get("constraints", []))
+            | set(c["change"].get("requirements", [])))
+    missing = want - _declared_ids(p)
+    if missing:
+        raise Rejection("change_not_applied", "$.constraints",
+                        "every changed id present",
+                        ", ".join(sorted(missing)),
+                        f"this draft answers {cid}: carry the ids it names")
 
 
 def _check_verdict(init: Initiative, p: dict, sl: dict) -> None:
@@ -1223,6 +1780,26 @@ def _check_merge(init: Initiative, s: dict, p: dict) -> None:
     if not rev_exists(init.root, p["merge_sha"]):
         raise Rejection("unknown_rev", "$.merge_sha",
                         "a resolvable merge commit", p["merge_sha"])
+    merge_sha = _resolve(init.root, p["merge_sha"])
+    allowed = {f"plan/{p['plan']}", f"initiative/{init.id}"}
+    branch = p.get("branch") or ""
+    if branch not in allowed:
+        raise Rejection("merge_branch_mismatch", "$.branch",
+                        "|".join(sorted(allowed)), branch or "missing",
+                        "merge on the plan branch and name it")
+    if branch not in _branches_containing(init.root, merge_sha):
+        raise Rejection("merge_branch_mismatch", "$.branch",
+                        f"a branch containing {merge_sha[:12]}", branch,
+                        "the merge commit is not on the branch named")
+    for tid, task in s["tasks"].items():
+        if task["plan"] != p["plan"]:
+            continue
+        head = ((s["reports"].get(tid) or {}).get("commits") or [None])[-1]
+        if head and not _is_ancestor(init.root, _resolve(init.root, head),
+                                     merge_sha):
+            raise Rejection("merge_not_descendant", "$.merge_sha",
+                            f"a merge containing {head[:12]}", merge_sha[:12],
+                            "merge the plan branch at its task heads")
 
 
 def _effects(init: Initiative, s: dict, p: dict, sl: dict) -> None:
@@ -1267,20 +1844,95 @@ def _write_repair_record(init: Initiative, p: dict, sl: dict) -> None:
                else repair_file(init.idir, p["id"], rnd), record)
 
 
-def _write_artifact(init: Initiative, p: dict) -> None:
-    """Run-store copy of the latest payload, plus the committed thinking store:
-    canonical JSON and rendered markdown, both deterministic."""
+def _plan_index(p: dict) -> dict:
+    """The plan without its task bodies: a pure projection whose task list is
+    ids, titles and dependencies. Reading one task never parses the whole plan
+    (audit D04)."""
+    return {k: v for k, v in p.items() if k != "tasks"} | {
+        "tasks": [{"id": t["id"], "title": t["title"],
+                   "depends_on": t.get("depends_on", [])}
+                  for t in p.get("tasks", [])]}
+
+
+def _task_spec(tid: str, pid: str, row: dict) -> dict:
+    """One task's contract, in its own file, written when the plan lands."""
+    return {"id": tid, "plan": pid, "title": row["title"],
+            "goal": row["goal"], "files": row["files"],
+            "accepts": row["accepts"],
+            "depends_on": row.get("depends_on", []),
+            "provides": row.get("provides", []),
+            "consumes": row.get("consumes", []),
+            "requirements": row.get("requirements", []),
+            "constraints": row.get("constraints", [])}
+
+
+def _plan_files(init: Initiative, p: dict) -> dict:
+    """The plan's projections: an index and one file per task, in both stores.
+    Reading one task never parses the whole plan (audit D04)."""
     aid = p["id"]
-    if p["kind"] == "plan":
-        write_json(plan_file(init.idir, aid), p)
-        jf = docs_plan_file(init.root, init.id, aid)
-        mf = docs_plan_md(init.root, init.id, aid)
-    else:
-        write_json(artifact_file(init.idir, aid), p)
-        jf = docs_artifact_file(init.root, init.id, aid)
-        mf = docs_artifact_md(init.root, init.id, aid)
-    write_json(jf, p)
-    _write_text(mf, _render_doc(p))
+    idx = _plan_index(p)
+    out = {plan_file(init.idir, aid): json_text(idx),
+           docs_plan_file(init.root, init.id, aid): json_text(idx),
+           docs_plan_md(init.root, init.id, aid): _render_plan_index(p)}
+    for row in p.get("tasks", []):
+        tid = f"{aid}-{row['id']}"
+        out[task_spec_file(init.idir, tid)] = json_text(_task_spec(tid, aid, row))
+        out[docs_task_md(init.root, init.id, tid)] = _render_task_spec(tid, row)
+    return out
+
+
+def _artifact_files(init: Initiative, p: dict) -> dict:
+    aid = p["id"]
+    return {artifact_file(init.idir, aid): json_text(p),
+            docs_artifact_file(init.root, init.id, aid): json_text(p),
+            docs_artifact_md(init.root, init.id, aid): _render_doc(p)}
+
+
+def _write_files(files: dict) -> None:
+    for path, text in files.items():
+        atomic_write(path, text.encode("utf-8"))
+
+
+def _write_artifact(init: Initiative, p: dict) -> None:
+    """Projections of a validated payload. A plan splits into an index and one
+    file per task in both stores, so the shape is uniform across plans and no
+    file is a mega-file."""
+    _write_files(_plan_files(init, p) if p["kind"] == "plan"
+                 else _artifact_files(init, p))
+
+
+def _render_plan_index(p: dict) -> str:
+    out = [f"# {p['id']} — {p.get('title', '')}", "",
+           f"*{p.get('summary', '')}*", "",
+           f"**objective:** {p.get('objective', '')}", "",
+           f"**more plans after this one:** "
+           f"{'yes' if p.get('more_plans') else 'no'}", ""]
+    if p.get("cites"):
+        out += ["**cites:** " + ", ".join(f"`{c}`" for c in p["cites"]), ""]
+    if p.get("gates"):
+        out += ["## Gates", "", *[f"- {g}" for g in p["gates"]], ""]
+    out += ["## Tasks", "", "| Task | Title | Depends on |", "|---|---|---|"]
+    for r in p.get("tasks", []):
+        deps = ", ".join(r.get("depends_on", [])) or "-"
+        out.append(f"| {r['id']} | {r['title']} | {deps} |")
+    return "\n".join(out) + "\n"
+
+
+def _render_task_spec(tid: str, row: dict) -> str:
+    out = [f"# {tid} — {row['title']}", "", row["goal"], "",
+           "**files:** " + ", ".join(f"`{f}`" for f in row["files"]), "",
+           "**accepts:**", *[f"- {a}" for a in row["accepts"]], ""]
+    if row.get("depends_on"):
+        out += ["**depends on:** " + ", ".join(row["depends_on"]), ""]
+    if row.get("provides"):
+        out += ["**provides:** " + ", ".join(row["provides"]), ""]
+    if row.get("consumes"):
+        out += ["**consumes:** " + ", ".join(row["consumes"]), ""]
+    if row.get("requirements"):
+        out += ["**requirements:** " + ", ".join(row["requirements"]), ""]
+    if row.get("constraints"):
+        out += ["**constraints:** " + ", ".join(row["constraints"]), ""]
+    return "\n".join(out) + "\n"
 
 
 def _render_doc(p: dict) -> str:
@@ -1300,10 +1952,6 @@ def _render_doc(p: dict) -> str:
     for c in p.get("criteria", []):
         out += [f"### {c['id']}", f"{c['criterion']}  ",
                 f"*procedure:* {c['procedure']}  ", ""]
-    for t in p.get("tasks", []):
-        out += [f"## {t['id']} — {t['title']}", t.get("goal", ""), "",
-                "**files:** " + ", ".join(f"`{f}`" for f in t["files"]), "",
-                "**accepts:**", *[f"- {a}" for a in t["accepts"]], ""]
     return "\n".join(out) + "\n"
 
 
@@ -1332,9 +1980,16 @@ def _render_section(sec: dict) -> list[str]:
 # ------------------------------------------------------------ initiatives
 
 def _next_init_id(root: Path) -> str:
+    """Mint the next initiative id, or refuse: INIT-10000 does not match
+    INIT-\\d{4}, so every file of such a store would be non-canonical
+    (audit D19). Refusing is the only honest option."""
     nums = [int(d.name.split("-")[1]) for d in run_root(root).glob("INIT-*")
             if d.is_dir() and d.name.split("-")[1].isdigit()]
-    return f"INIT-{max(nums, default=0) + 1:04d}"
+    n = max(nums, default=0) + 1
+    if n > 9999:
+        raise ExecError("initiative id space exhausted: INIT-9999 is the last "
+                        "id the layout grammar admits", "id_exhausted")
+    return f"INIT-{n:04d}"
 
 
 def create_initiative(root: Path, title: str) -> Initiative:
@@ -1412,8 +2067,59 @@ def check(init: Initiative, now: float | None = None) -> dict:
                     problems.append(f"orphan dispatch directory {d.name}: "
                                     f"never journaled")
         problems += _layout_problems(init)
+        problems += _projection_problems(init, s)
+        problems += _missing_problems(init, s)
         return _report(init, events, chain, problems,
                        [sl["dispatch_id"] for sl in open_])
+
+
+def _projection_problems(init: Initiative, s: dict) -> list[str]:
+    """The committed index is a pure function of the fold, so a disagreement is
+    a stale projection, not a judgement call (audit D11)."""
+    out: list[str] = []
+    jf = docs_index_file(init.root, init.id)
+    mf = docs_index_md(init.root, init.id)
+    want = render_handoff_index(init.id, s)
+    have = read_json(jf)
+    if have is None:
+        out.append(f"committed index missing: {jf.relative_to(init.root).as_posix()}"
+                   f" (the next write or `executor migrate` writes it)")
+    elif have != want:
+        out.append(f"committed index stale: "
+                   f"{jf.relative_to(init.root).as_posix()} differs from the fold")
+    try:
+        md_ok = mf.read_text(encoding="utf-8") == render_handoff_md(init.id, s)
+    except OSError:
+        md_ok = False
+    if not md_ok:
+        out.append(f"committed index stale: "
+                   f"{mf.relative_to(init.root).as_posix()} differs from the fold")
+    return out
+
+
+def _missing_problems(init: Initiative, s: dict) -> list[str]:
+    """Every journaled entity has the canonical files it must have. The grammar
+    rejects a file that does not belong; this rejects a missing one (audit
+    D16). Both directions are needed before `check` can say a store is sound."""
+    out: list[str] = []
+
+    def need(path: Path) -> None:
+        if not path.is_file():
+            out.append(f"missing canonical file: "
+                       f"{path.relative_to(init.root).as_posix()}")
+
+    for did in sorted(s["dispatches"], key=dispatch_key):
+        need(prompt_file(init.idir, did))
+    for aid, a in sorted(s["artifacts"].items()):
+        need(plan_file(init.idir, aid) if a["kind"] == "plan"
+             else artifact_file(init.idir, aid))
+    for pid in s["plan_order"]:
+        need(plan_file(init.idir, pid))
+    for tid in sorted(s["tasks"]):
+        need(task_spec_file(init.idir, tid))
+    need(docs_index_file(init.root, init.id))
+    need(docs_index_md(init.root, init.id))
+    return out
 
 
 def _layout_problems(init: Initiative) -> list[str]:
@@ -1437,6 +2143,7 @@ SECRET_RULES = (
     ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("github_token", re.compile(r"\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}\b")),
     ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("openai_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("generic_secret", re.compile(
         r"(?i)\b(?:api[_-]?key|secret|token|password|passwd)\b"
         r"\s*[:=]\s*[\"']?[A-Za-z0-9+/=._~|-]{16,}")),

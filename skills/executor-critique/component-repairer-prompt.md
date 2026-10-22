@@ -8,9 +8,9 @@ laundering of the defect, and the re-auditor grades it as a new `critical`.
 
 The engine's dispatch brief names the `target`, the minted `round` (the
 round being answered — echo it), and the audit's findings in `context`.
-`contract`-class findings are **not yours**: the controller amends the
-source and passes the amendments in context — never adapt the document
-around a broken contract.
+`contract`-class findings are **not yours**: a contract change is a
+`change_request` (`executor change`), which dispatches the owning
+artifact's repair — never adapt this document around a broken contract.
 
 Fill every `[BRACKET]`. An unfilled bracket is a defect.
 
@@ -35,8 +35,8 @@ Subagent (general-purpose):
     **Respond to:** [absolute path of dispatches/D<NNNNN>/payload.json]
     **Findings assigned to you:** the `open` `component`/`cross-artifact`
     findings in your context, with the evidence the auditor quoted
-    **Contract amendments already applied by the controller (evidence,
-    do not re-apply):** the `routed` findings in your context
+    **Contract changes in flight (evidence, do not re-apply):** the
+    `change` and `change_targets` in your context, when present
 
     Every ID you cite belongs to initiative [INITIATIVE_ID].
 
@@ -90,8 +90,8 @@ Subagent (general-purpose):
       it: record it in `concerns` of the payload; routing the fix to the
       far side of the seam is the controller's call.
     - **A `contract`-class finding is assigned anyway** — do not repair it:
-      it is `routed`, and the amendment lands via a `ruling`, not your
-      redraft.
+      it is `routed`, and the change lands as a `change_request` that
+      re-drafts the contract, not your redraft.
     - **You find a defect no assigned finding covers** — do not fix it in
       place: record it in `concerns` with the quoted `path:line`; the next
       audit owns it.

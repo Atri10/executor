@@ -117,7 +117,8 @@ Subagent (general-purpose):
     - **Extra** — features not requested, over-engineering
     - **Misunderstood** — the right feature built the wrong way
 
-    Cite requirements by their ID (`[SPEC_ID]-R07`, `[SPEC_ID]-C03`).
+    Cite requirements by their bare id (`R07`, `C03`) — the spec the plan
+    cites anchors them; a composite id is not an id.
     `spec_verdict` is `PASS` only when every requirement is implemented
     and evidenced.
 

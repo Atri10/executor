@@ -14,9 +14,18 @@ from __future__ import annotations
 
 import re
 
-from .paths import (ARTIFACT_ID, DISPATCH_ID, PLAN_ID, TASK_ID,
+from .paths import (ARTIFACT_ID, CHANGE_ID, DISPATCH_ID, PLAN_ID, TASK_ID,
                     artifact_pattern)
 from .store import PHASES, Rejection
+
+# Inner ids an artifact declares. They are citable (audit D06, D15).
+REQUIREMENT_ID = r"R\d+"
+CONSTRAINT_ID = r"C\d+"
+CRITERION_ID = r"V\d+"
+
+# A branch a task or plan may own: task/<TASK-ID>, plan/<PLAN-ID>,
+# initiative/<INIT-ID>, side/<slug>, hotfix/<slug>. The git rules read it.
+BRANCH_NAME = (r"(?:task|plan|initiative|side|hotfix)/[A-Za-z0-9._/-]+")
 
 TYPES = {"object": dict, "array": list, "string": str,
          "integer": int, "number": (int, float), "boolean": bool,
@@ -275,14 +284,14 @@ SECTION = _obj({
 }, req=["id", "title"], shape="section")
 
 REQUIREMENT = _obj({
-    "id": _str(pattern=r"R\d+"),
+    "id": _str(pattern=REQUIREMENT_ID),
     "requirement": _prose(minLength=1),
     "observable": _prose(),
     "cites": _arr(_str()),
 }, req=["id", "requirement", "observable"])
 
 CONSTRAINT = _obj({
-    "id": _str(pattern=r"C\d+"),
+    "id": _str(pattern=CONSTRAINT_ID),
     "constraint": _prose(minLength=1),
     "observable": _prose(),
 }, req=["id", "constraint", "observable"])
@@ -307,6 +316,10 @@ TASK = _obj({
     "provides": _arr(_str()),
     "consumes": _arr(_str()),
     "depends_on": _arr(_str(pattern=TASK_LOCAL)),
+    # The structured link between a task and the contract it implements. A
+    # regression pass reads these; prose is never parsed (audit D06).
+    "requirements": _arr(_str(pattern=REQUIREMENT_ID)),
+    "constraints": _arr(_str(pattern=CONSTRAINT_ID)),
 }, req=["id", "title", "goal", "files", "accepts"])
 
 FINDING = _obj({
@@ -352,6 +365,16 @@ def artifact_schema(artifact_kind: str) -> dict:
             "more_plans": {"type": "boolean"},
         })
         req += ["plan_id", "objective", "tasks", "more_plans"]
+    if artifact_kind == "arch":
+        # Per-component design artifacts: the engine mints one design instance
+        # per component (audit D05). Optional, so every stored arch payload
+        # still validates and still yields exactly one design.
+        props["components"] = _arr(_obj({
+            "id": _str(minLength=1), "title": _str(minLength=1),
+            "responsibility": _str(),
+        }, req=["id", "title"]))
+    if artifact_kind == "design":
+        props["component"] = _str(minLength=1)
     if artifact_kind in ("arch", "design"):
         props.update({
             "adrs": _arr(_obj({
@@ -379,6 +402,8 @@ def artifact_schema(artifact_kind: str) -> dict:
                 req=["kind", "v", *req], shape="artifact")
 
 
+
+
 ARTIFACT_KINDS = ["charter", "options", "brainstorm", "arch", "adr", "ifce",
                   "design", "spec", "risk", "vrfy", "plan"]
 
@@ -394,6 +419,7 @@ REPORT = _obj({
     "result": _enum("DONE", "DONE_WITH_CONCERNS", "BLOCKED", "PARTIAL"),
     "summary": _str(minLength=1),
     "commits": _arr(_str(minLength=1)),
+    "branch": _str(pattern=BRANCH_NAME),
     "concerns": _arr(_str()),
     "tests": _arr(_obj({
         "name": _str(minLength=1), "ran": {"type": "boolean"},
@@ -453,8 +479,25 @@ RULING = _obj({
     "answered": _str(),
     "unsolicited": _str(),
     "stop": {"type": "boolean"},
-    "for_task": _str(pattern=f"(?:{TASK_ID}|{PLAN_ID})"),
+    "for_task": _str(pattern=f"(?:{TASK_ID}|{PLAN_ID}|{CHANGE_ID})"),
 }, req=["kind", "v", "decision", "why"])
+
+# A mid-run change: the ids that changed, who asked, why. The blast radius is
+# computed from the fold, never declared here.
+CHANGE_REQUEST = _obj({
+    **_base("change_request"),
+    "title": _str(minLength=1),
+    "requested_by": _str(minLength=1),
+    "why": _prose(minLength=1),
+    "change": _obj({
+        "requirements": _arr(_str(pattern=REQUIREMENT_ID)),
+        "constraints": _arr(_str(pattern=CONSTRAINT_ID)),
+        "criteria": _arr(_str(pattern=CRITERION_ID)),
+        "artifacts": _arr(_str(pattern=ARTIFACT_OR_PLAN)),
+        "tasks": _arr(_str(pattern=TASK_ID)),
+    }, req=[]),
+    "note": _prose(),
+}, req=["kind", "v", "title", "requested_by", "why", "change"])
 
 AUDIT = _obj({
     **_base("audit"),
@@ -488,8 +531,8 @@ MERGE = _obj({
     **_base("merge"),
     "plan": _str(pattern=PLAN_ID),
     "merge_sha": _str(minLength=4),
-    "branch": _str(),
-}, req=["kind", "v", "plan", "merge_sha"])
+    "branch": _str(pattern=BRANCH_NAME),
+}, req=["kind", "v", "plan", "merge_sha", "branch"])
 
 RESUME = _obj({
     **_base("resume"),
@@ -523,6 +566,7 @@ SCHEMAS = {
     "audit": AUDIT,
     "merge": MERGE,
     "resume": RESUME,
+    "change_request": CHANGE_REQUEST,
 }
 
 

@@ -13,11 +13,13 @@ Identifiers
 -----------
     INIT-NNNN                initiative
     INIT-NNNN-<KIND>-NN      artifact (CHTR OPTS BRN ARCH ADR IFCE DSGN SPEC
-                             RISK VRFY)
+                             RISK VRFY), NN engine-minted per kind
     INIT-NNNN-PNN            plan
     INIT-NNNN-PNN-TNN        task, always inside its plan
     D<NNNNN>                 dispatch: the seq of the journal event minting it
+                             (five digits minimum; order with `dispatch_key`)
     R<NN>                    round (audit, repair, review, fix)
+    CR-NNNN                  change request
 
 Layout
 ------
@@ -36,29 +38,35 @@ Layout
           audits/R<NN>.audit.json
           repairs/R<NN>.repair.json
         plans/<PLAN-ID>/
-          plan.json                      latest validated plan payload
+          plan.json                      plan index (no task bodies)
           preflight.json                 conflict-scan verdict
           audits/R<NN>.audit.json
           repairs/R<NN>.repair.json
           tasks/<TASK-ID>/
+            task.json                    the task contract
             impl/D<NNNNN>.report.json
             reviews/R<NN>.package.json   review package (what reviewer saw)
             reviews/R<NN>.verdict.json
             fixes/R<NN>.fix-package.json
             fixes/R<NN>.report.json
         dispatches/D<NNNNN>/
-          slot.json                      minted single-use slot
           prompt.md                      rendered worker prompt
           payload.json                   the respond_to target
+        changes/CR-NNNN/
+          change.json                    change request and its blast radius
         views/
+          index.md                       stable root index
           progress.md  dispatches.md  summary.md  graph.json
-          <TASK-ID>-R<NN>-verdict.md
+          plans/<PLAN-ID>/plan.md        one leaf per plan
+          tasks/<TASK-ID>/task.md        one leaf per task (all its rounds)
     <repo>/docs/executor/INIT-NNNN/      committed thinking store
-      meta/index.json + index.md
+      meta/index.json + index.md + policy.json
       artifacts/<ARTIFACT-ID>/artifact.json + artifact.md
       plans/<PLAN-ID>/plan.json + plan.md
+      plans/<PLAN-ID>/tasks/<TASK-ID>/task.md
       plans/<PLAN-ID>/tasks/<TASK-ID>/impl/D<NNNNN>.report.md
       plans/<PLAN-ID>/tasks/<TASK-ID>/reviews/R<NN>.verdict.md
+      changes/CR-NNNN/change.md
       export/events.jsonl                durable journal snapshot (handoff)
 """
 from __future__ import annotations
@@ -93,11 +101,21 @@ PLAN_ID = INIT_ID + r"-P\d{2}"
 TASK_ID = PLAN_ID + r"-T\d{2}"
 DISPATCH_ID = r"D\d{5,}"
 ROUND_ID = r"R\d{2}"
+CHANGE_ID = r"CR-\d{4}"
 
 
 def dispatch_id(seq: int) -> str:
-    """The id of the dispatch recorded by journal event `seq`."""
+    """The id of the dispatch recorded by journal event `seq`. Five digits is a
+    minimum width, not a limit: event 100000 mints D100000, and the grammar
+    admits it. Ordering is `dispatch_key`, never a string sort."""
     return f"D{seq:05d}"
+
+
+def dispatch_key(did: str) -> int:
+    """Sort key for a dispatch id: the journal sequence number it encodes.
+    A string sort puts D100000 before D99999, which would mis-order the
+    registry and the open-dispatch list past 99 999 events."""
+    return int(did[1:])
 
 
 def is_dispatch_id(text: str) -> bool:
@@ -213,6 +231,11 @@ def task_impl_report(idir: _P, tid: str, did: str) -> _P:
     return task_dir(idir, tid) / "impl" / f"{did}.report.json"
 
 
+def task_spec_file(idir: _P, tid: str) -> _P:
+    """The task's own contract: the plan index carries no task bodies."""
+    return task_dir(idir, tid) / "task.json"
+
+
 def review_package_file(idir: _P, tid: str, rnd: int) -> _P:
     return task_dir(idir, tid) / "reviews" / f"R{rnd:02d}.package.json"
 
@@ -239,10 +262,6 @@ def dispatch_dir(idir: _P, did: str) -> _P:
     return dispatches_dir(idir) / did
 
 
-def slot_file(idir: _P, did: str) -> _P:
-    return dispatch_dir(idir, did) / "slot.json"
-
-
 def prompt_file(idir: _P, did: str) -> _P:
     return dispatch_dir(idir, did) / "prompt.md"
 
@@ -262,8 +281,26 @@ def view_file(idir: _P, name: str) -> _P:
     return views_dir(idir) / name
 
 
-def verdict_view_file(idir: _P, tid: str, rnd: int) -> _P:
-    return views_dir(idir) / f"{tid}-R{rnd:02d}-verdict.md"
+def view_plan_file(idir: _P, pid: str) -> _P:
+    return views_dir(idir) / "plans" / pid / "plan.md"
+
+
+def view_task_file(idir: _P, tid: str) -> _P:
+    return views_dir(idir) / "tasks" / tid / "task.md"
+
+
+# ---------------------------------------------------------------- changes
+
+def changes_dir(idir: _P) -> _P:
+    return idir / "changes"
+
+
+def change_dir(idir: _P, cr: str) -> _P:
+    return changes_dir(idir) / cr
+
+
+def change_file(idir: _P, cr: str) -> _P:
+    return change_dir(idir, cr) / "change.json"
 
 
 # ---------------------------------------------------------------- committed
@@ -318,6 +355,15 @@ def docs_verdict_file(root: _P, init_id: str, tid: str, rnd: int) -> _P:
             / f"R{rnd:02d}.verdict.md")
 
 
+def docs_task_md(root: _P, init_id: str, tid: str) -> _P:
+    """The committed per-task render: the task contract, one file."""
+    return docs_task_dir(root, init_id, tid) / "task.md"
+
+
+def docs_change_md(root: _P, init_id: str, cr: str) -> _P:
+    return docs_init_dir(root, init_id) / "changes" / cr / "change.md"
+
+
 def docs_export_journal(root: _P, init_id: str) -> _P:
     return docs_init_dir(root, init_id) / "export" / "events.jsonl"
 
@@ -350,8 +396,10 @@ _I = r"(?P<init>" + INIT_ID + r")"
 _ART = r"(?P<art>(?P=init)-(?:" + _SEGMENT_ALT + r")-\d{2})"
 _PLAN = r"(?P<plan>(?P=init)-P\d{2})"
 _TASK = r"(?P<task>(?P=plan)-T\d{2})"
+_TVIEW = r"(?P<task>(?P=init)-P\d{2}-T\d{2})"
 _DISP = r"(?P<disp>" + DISPATCH_ID + r")"
 _RND = r"(?P<rnd>" + ROUND_ID + r")"
+_CR = r"(?P<cr>" + CHANGE_ID + r")"
 _TASK_DIR = _I + r"/plans/" + _PLAN + r"/tasks/" + _TASK
 
 _RUN_ROWS = (
@@ -367,6 +415,7 @@ _RUN_ROWS = (
     ("artifact_repair",
      _I + r"/artifacts/" + _ART + r"/repairs/" + _RND + r"\.repair\.json"),
     ("plan", _I + r"/plans/" + _PLAN + r"/plan\.json"),
+    ("plan_task", _TASK_DIR + r"/task\.json"),
     ("preflight", _I + r"/plans/" + _PLAN + r"/preflight\.json"),
     ("plan_audit",
      _I + r"/plans/" + _PLAN + r"/audits/" + _RND + r"\.audit\.json"),
@@ -377,14 +426,13 @@ _RUN_ROWS = (
     ("verdict", _TASK_DIR + r"/reviews/" + _RND + r"\.verdict\.json"),
     ("fix_package", _TASK_DIR + r"/fixes/" + _RND + r"\.fix-package\.json"),
     ("fix_report", _TASK_DIR + r"/fixes/" + _RND + r"\.report\.json"),
-    ("dispatch_slot", _I + r"/dispatches/" + _DISP + r"/slot\.json"),
     ("dispatch_prompt", _I + r"/dispatches/" + _DISP + r"/prompt\.md"),
     ("dispatch_payload", _I + r"/dispatches/" + _DISP + r"/payload\.json"),
-    ("view", _I + r"/views/(?P<name>progress\.md|dispatches\.md|summary\.md"
-     r"|graph\.json)"),
-    ("view_verdict",
-     _I + r"/views/(?P<task>(?P=init)-P\d{2}-T\d{2})-" + _RND
-     + r"-verdict\.md"),
+    ("change", _I + r"/changes/" + _CR + r"/change\.json"),
+    ("view", _I + r"/views/(?P<name>index\.md|progress\.md|dispatches\.md"
+     r"|summary\.md|graph\.json)"),
+    ("view_plan", _I + r"/views/plans/" + _PLAN + r"/plan\.md"),
+    ("view_task", _I + r"/views/tasks/" + _TVIEW + r"/task\.md"),
 )
 
 _DOCS_ROWS = (
@@ -396,9 +444,11 @@ _DOCS_ROWS = (
     ("docs_artifact_md", _I + r"/artifacts/" + _ART + r"/artifact\.md"),
     ("docs_plan_json", _I + r"/plans/" + _PLAN + r"/plan\.json"),
     ("docs_plan_md", _I + r"/plans/" + _PLAN + r"/plan\.md"),
+    ("docs_task_md", _TASK_DIR + r"/task\.md"),
     ("docs_task_report", _TASK_DIR + r"/impl/" + _DISP + r"\.report\.md"),
     ("docs_task_verdict",
      _TASK_DIR + r"/reviews/" + _RND + r"\.verdict\.md"),
+    ("docs_change_md", _I + r"/changes/" + _CR + r"/change\.md"),
     ("docs_export", _I + r"/export/events\.jsonl"),
 )
 

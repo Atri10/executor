@@ -102,7 +102,8 @@ class GateAndAllow(AutonomyCase):
     def test_an_automatic_pass_never_clears_a_halted_run(self):
         self.set_policy(intake="gate")
         self.live.run(lambda a: a["action"] == "DISPATCH" and a["role"] == "author")
-        ingest(self.init, {"kind": "halt", "v": "v1", "reason": "client stop"})
+        ingest(self.init, {"kind": "halt", "v": "v1", "reason": "client stop"},
+               actor="human")
         self.assertEqual(self.live.act()["action"], "HALT")
         self.assertEqual(self.gate_decisions(), [])
 
@@ -119,7 +120,8 @@ class GateAndAllow(AutonomyCase):
         """Resume clears the halt latch only: the journaled policy still decides
         every gate afterward, so an automatic gate keeps passing unattended."""
         self.set_policy(intake="gate")
-        ingest(self.init, {"kind": "halt", "v": "v1", "reason": "client stop"})
+        ingest(self.init, {"kind": "halt", "v": "v1", "reason": "client stop"},
+               actor="human")
         self.assertEqual(self.live.act()["action"], "HALT")
         ingest(self.init, {"kind": "resume", "v": "v1", "reason": "client ok"},
                actor="human")

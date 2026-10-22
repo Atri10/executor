@@ -531,7 +531,7 @@ A decision made during this phase is an **`adr` artifact**, not a
 | Concept | When | Where | Requires |
 |---|---|---|---|
 | `adr` | Discovery, architecture, design, specification | a tracked artifact, human in the loop | Nothing but the initiative |
-| `ruling` | Execution, controller deciding without the human mid-run | a journal payload via `executor decide` | A running phase |
+| `ruling` | Execution, when the human answers a question or states a decision mid-run | a journal payload via `executor decide` (human-only) | A running phase |
 
 A structural gap you discover while specifying goes to
 `executor-architecture` as an `adr`. A question only the human can

@@ -87,7 +87,7 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v2.0.3 git@github.com:Atri10/executor.git
+git clone --branch v2.1.0 git@github.com:Atri10/executor.git
 ```
 
 There are no dependencies to install: the engine is the standard library,
@@ -116,7 +116,7 @@ Install The Executor skill library for me:
    The engine ships inside skills/executor/scripts/lib/, so copy the whole
    directory — do not copy only the .md files.
 4. Verify: run python3 <skills-dir>/executor/scripts/executor --version
-   (prints 2.0.3), then python3 <skills-dir>/executor/scripts/executor
+   (prints 2.1.0), then python3 <skills-dir>/executor/scripts/executor
    --help (lists the command surface). Do not set PYTHONPATH and do not
    install a package: the launcher carries its engine. Also confirm every
    copied skills/<name>/ directory contains a SKILL.md — count the
@@ -275,6 +275,53 @@ so a question raised during review resumes review rather than
 implementation. `needs_context` is that waiting state, and it is entered
 only by a question payload.
 
+### A change mid-run
+
+A requirement or constraint that changes after execution started is a
+journaled object, not an edit: `executor change` files a `change_request`
+(`CR-NNNN`), the engine computes the blast radius from the fold's
+dependency data, and a regression lane redoes exactly the affected work
+before the run continues.
+
+```mermaid
+stateDiagram-v2
+    [*] --> requested: executor change files CR-NNNN
+    requested --> scoped: radius computed from the fold, journalled
+    scoped --> scoped: revise the affected artifacts
+    scoped --> scoped: re-audit each revision
+    scoped --> scoped: re-dispatch affected tasks and re-prove criteria
+    scoped --> applied: every affected task redone, every criterion proven
+    requested --> withdrawn: a ruling naming CR-NNNN
+    scoped --> withdrawn: a ruling naming CR-NNNN
+    applied --> [*]
+    withdrawn --> [*]
+```
+
+The lane runs before phase work and yields the moment ordinary work is
+moving: a task already in flight finishes first, and a phase waiting on a
+human gate is not re-opened under the decision. Every step is a function of
+the fold, so a repeated poll writes nothing new, and the whole protocol is
+withdrawn rather than undone — the journal is append-only.
+
+### The branch rules are code
+
+`references/branches.md` describes the initiative → plan → task model; the
+engine enforces the part that can be decided from a payload and the object
+database, and says which part it leaves to the skill:
+
+| Enforced, with a rejection code | Left to the skill |
+|---|---|
+| the head descends from the dispatch base (`not_descendant`) | which worktree a task runs in |
+| no commit on the integration branch (`commit_on_base`) | merge ordering across plans |
+| the head lives on `task/<TASK-ID>` (`branch_mismatch`) | how a branch is forked |
+| every commit subject is conventional (`bad_commit_message`) | one-task-per-branch isolation, which needs topology the engine does not own |
+| a merge contains every task head (`merge_not_descendant`) | abandoning a branch, a `ruling` decision |
+| a merge names and sits on `plan/…` (`merge_branch_mismatch`) | `side/` and `hotfix/` conventions |
+
+Enforcement is per dispatch: a dispatch this engine minted records
+`rules: v2` in its context (and in its prompt), and only those answers are
+judged — an upgrade never rejects the work it inherited.
+
 ## The skills, and when each one loads
 
 | Skill | Loads when | It owns |
@@ -300,13 +347,17 @@ only by a question payload.
 Every accepted payload is one JSON line in
 `.executor/INIT-NNNN/journal/events.v1.jsonl`, hash-chained (`prev_sha`,
 `line_sha`) — `executor check` recomputes the chain and refuses a store
-that was edited by hand. Views (`views/progress.md`, `views/dispatches.md`,
-`views/summary.md`, `views/graph.json`, the rendered `.md` beside each
-committed payload) are derived projections; `state.json` is a cache the
-engine detects and refolds when stale. A dispatch is single-use and
-answered exactly once: `slot.json` records the minting event, `prompt.md`
-is the worker's brief, and `payload.json` is the `respond_to` path
-`executor ingest` validates against the `kind`'s schema.
+that was edited by hand. Views are a tree with one leaf per entity
+(`views/index.md`, `views/plans/<PLAN>/plan.md`,
+`views/tasks/<TASK>/task.md`, plus the four aggregates) and the rendered
+`.md` beside each committed payload; `state.json` is a cache the engine
+detects and refolds when stale. A projection is a function of the journal —
+it stamps the journal tip, not the clock — so `executor check` compares a
+view or a committed index with a fresh render instead of guessing. A
+dispatch is single-use and answered exactly once: the journal's `answered`
+map is the only authority (there is no slot file), `prompt.md` is the
+worker's brief, and `payload.json` is the `respond_to` path `executor
+ingest` validates against the `kind`'s schema.
 
 ### Every payload is a closed, typed document
 
@@ -438,12 +489,13 @@ launcher passes its arguments straight through.
 executor new "<title>"                     scaffold INIT-NNNN
 executor next [INIT]                       one typed action + its prompt
 executor ingest <path.json|-> [INIT]        a worker payload: validate → fold → render
-executor decide <path.json|-> [INIT]        a human decision: gate_decision, ruling, resume
+executor decide <path.json|-> [INIT]        a human decision: gate_decision, ruling, resume, halt
+executor change <path.json|-> [INIT]        a mid-run change request; --list reads them
 executor status [INIT]                     the gate card
 executor check [INIT] [--secrets]           chain, dangling edges, liveness, layout; or scan
 executor doctor [INIT]                     check + open dispatches + policy in force
 executor graph [INIT] [--format json|mermaid]
-executor migrate [INIT] [--dry-run]        reports the store version verdict; never edits
+executor migrate [INIT] [--dry-run|--apply] the version verdict, or convert to this layout
 executor autonomy [INIT] [<phase> <allow|gate|deny>]
 ```
 
@@ -472,10 +524,14 @@ stores against the naming grammar and flag drift rather than assume it.
 
 ### Versioned, and honest about skew
 
-Each store records the engine version that wrote it in `meta.json`. When a
-newer engine opens an older store, commands report the mismatch and say
-what `executor migrate` would report — `migrate` never edits the store
-itself. A reader of an old journal gets the old fold, not a guess.
+Each store records the engine version *and* the store-layout version that
+wrote it in `meta.json`. A newer engine refuses to write into an older
+layout (`store_outdated`) rather than mixing two layouts in one directory:
+`executor migrate --dry-run` prints every write and removal, and
+`executor migrate --apply` converts, verifies and stamps. The migration is
+deterministic and byte-idempotent — a second `--apply` rewrites identical
+bytes and removes nothing. A reader of an old journal gets the old fold,
+not a guess.
 
 ### The merge contract
 
@@ -483,8 +539,11 @@ itself. A reader of an old journal gets the old fold, not a guess.
 action names the plan and each task's head commit. The `merge` payload is
 slot-free — it answers no dispatch — so ingest checks it directly against
 the fold and the repository: the plan is known and unmerged, every task is
-complete, and the named `merge_sha` resolves. A merge claim about a commit
-that does not exist is a rejection, not a plausible-sounding summary.
+complete, the named `merge_sha` resolves, it is contained in the branch the
+payload names (`plan/<PLAN-ID>` or `initiative/<INIT-ID>`), and it contains
+every task head of the plan. A merge claim about a commit that does not
+exist — or a merge that drops a task's work — is a rejection, not a
+plausible-sounding summary.
 
 ## The Two Stores
 
@@ -497,10 +556,10 @@ flowchart LR
     end
     subgraph EXEC[".executor/ - git-ignored by default"]
         J["journal/events.v1.jsonl — the truth"]
-        D["dispatches/D<NNNNN>/ — slot, prompt, payload"]
-        R["reviews/, fixes/"]
-        V["views/ — derived projections"]
-        PR["plan-regression audits and repairs"]
+        D["dispatches/D<NNNNN>/ — prompt, payload"]
+        R["plans/<PLAN>/tasks/<TASK>/ — task.json, impl/, reviews/, fixes/"]
+        V["views/ — index.md + per-plan and per-task leaves"]
+        CH["changes/CR-NNNN/ — the request and its blast radius"]
     end
     P -->|"each task dispatch"| D
     D --> J
@@ -512,7 +571,8 @@ flowchart LR
   initiative, per artifact, plus the exported journal snapshot. A reader
   who clones the repo gets the complete reasoning.
 - **`.executor/`** — the execution record: the journal, the dispatch
-  slots, the review packages, the fix packages, and the run views.
+  prompts and payloads, the plan index and one contract file per task, the
+  review and fix packages, the change requests, and the run view tree.
   Git-ignored by default, safe to commit if you choose; never deleted —
   the reasoning is the point.
 
@@ -531,30 +591,35 @@ INIT-0004-ARCH-01              an architecture document
 INIT-0004-ADR-03               a decision record
 INIT-0004-IFCE-01              an interface/contract document
 INIT-0004-DSGN-02              a component design
-INIT-0004-SPEC-01              a specification
-INIT-0004-SPEC-01-R07          requirement 7 inside that spec
-INIT-0004-SPEC-01-C03          global constraint 3 inside that spec
+INIT-0004-SPEC-01              a specification, declaring R01…, C01…
 INIT-0004-RISK-01              a risk register / pre-mortem
-INIT-0004-VRFY-01              a verification strategy
-INIT-0004-P01                  a plan
+INIT-0004-VRFY-01              a verification strategy, declaring V01…
+INIT-0004-P01                  a plan (its index and one file per task)
 INIT-0004-P01-T03              task 3 of that plan
 D00112                         the dispatch minted at journal seq 112
-R2                             review round 2 (an integer, paired with its task)
+CR-0001                        a mid-run change request
 ```
 
 **Grammar:** `INIT-<4-digit>` then `-<KIND>-<2-digit>`, plans as
-`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<5-digit>`
-(seq-derived), review rounds as an integer `round` field paired with the
-task ID. The kind segments are `CHTR`, `OPTS`, `BRN`, `ARCH`, `ADR`,
-`IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
+`-P<2-digit>`, tasks as `-T<2-digit>`, dispatches as `D<NNNNN>` — five or
+more digits, exactly the seq of the event that minted them — change
+requests as `CR-<4-digit>`, review rounds as an integer `round` field
+paired with the task ID. The kind segments are `CHTR`, `OPTS`, `BRN`,
+`ARCH`, `ADR`, `IFCE`, `DSGN`, `SPEC`, `RISK`, `VRFY` — the closed set
 `ARTIFACT_SEGMENTS` in `engine/executor/paths.py` defines them, and an ID
-carrying any other segment is a `pattern` rejection. Sequence within a
-kind is per-initiative and starts at `01`.
+carrying any other segment is a `pattern` rejection. Artifact instances are
+minted per kind, so a second `ADR` is `-02`, and a per-component design
+mints `DSGN-01`, `-02`, … one per component the architecture declares.
 
-**A payload must not cite another initiative's ID.** Cross-initiative
-relationships exist in exactly one place: the charter's `cites`. Everything
-else states the requirement in its own words, so an initiative stays
-archivable — open the folder and every pointer resolves inside it.
+Inner ids — `R<n>`, `C<n>`, `V<n>`, and a component id — are what a `cites`
+list names; a composite such as `INIT-0004-SPEC-01-R07` is not an id, and
+a citation states the bare `R07`.
+
+**A payload must not cite another initiative's ID**, with one exception:
+the charter's `cites` may name one, shape-checked and recorded but never
+resolved against this store, because the other initiative lives in its own.
+Everything else states the requirement in its own words, so an initiative
+stays archivable — open the folder and every pointer resolves inside it.
 
 ## Where things live
 
@@ -572,7 +637,7 @@ flowchart TD
 | Path | What it is |
 |---|---|
 | `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
-| `engine/tests/` | the suite (742 tests), including the tree-walking contract tests |
+| `engine/tests/` | the suite (828 tests), including the tree-walking contract tests |
 | `skills/executor/` | the router skill, its prompt templates, the references, and the engine that ships with it |
 | `skills/executor/scripts/executor` | the launcher; resolves `scripts/lib/executor/` relative to itself |
 | `skills/executor/scripts/lib/executor/` | the installed engine — a generated mirror of `engine/executor/` |
@@ -582,7 +647,7 @@ flowchart TD
 | `scripts/mutate.py` | mutation testing; the allow list records equivalent survivors |
 | `scripts/validate_skills.py` | the skill contract: registry, references, payload shapes |
 | `scripts/lint-prompt-injection.py` | blocks override directives and concealment in skill text |
-| `docs/executor/` | the committed thinking record, exported by handoff (this repo is the tool, not a consumer: `docs/` is ignored here) |
+| `docs/executor/` | the committed thinking record: its index is written on every projection and the journal export at handoff (this repo is the tool, not a consumer: `docs/` is ignored here) |
 | `.executor/` | the run store — journal, dispatches, views (git-ignored) |
 
 ## Testing and CI

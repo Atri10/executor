@@ -76,7 +76,8 @@ impressionistic — the `plans` audit walks them.
 
 `executor next` mints it: `INIT-0004-P01`, `P02`, … — numbered
 per-initiative. The `author` `DISPATCH`'s `entity` is the id; the
-payload's `plan_id` echoes it (`wrong_plan` rejection otherwise).
+payload's `id` and `plan_id` both echo it (`mismatch` rejection
+otherwise).
 
 ## Step 2 — One plan or several
 
@@ -149,13 +150,35 @@ Tasks are `T01`…`Tnn` **per plan**, local ids. `P02` starts again at
 
 ```json
 {"kind": "plan", "v": "v1", "dispatch_id": "D00012",
- "plan_id": "INIT-0004-P01", "title": "Cell router",
+ "id": "INIT-0004-P01", "plan_id": "INIT-0004-P01",
+ "title": "Cell router",
  "objective": "one sentence: what this builds",
- "summary": "…", "more_plans": false,
+ "summary": "one paragraph: the plan's shape and why it is one plan",
+ "more_plans": false,
  "cites": ["INIT-0004-SPEC-01", "INIT-0004-IFCE-01"],
- "tasks": [...], "gates": [...],
- "sections": [...]}
+ "tasks": [
+   {"id": "T01", "title": "Cell placement scoring",
+    "goal": "Implements R04 and R05 under C01 and C02. Consumes CellId from src/cells/types.py. Produces score(cell, load) returning 0.0..1.0, raising ValueError when load is negative.",
+    "files": ["src/cells/scoring.py", "tests/cells/test_scoring.py"],
+    "accepts": ["score(CellId(\"eu-west\", 3), 0) == 0.0",
+                "score(..., -1) raises ValueError",
+                "pytest tests/cells/test_scoring.py -v: 2 passed, exit 0"],
+    "depends_on": [],
+    "requirements": ["R04", "R05"],
+    "constraints": ["C01", "C02"]}],
+ "gates": ["the merged diff passes mypy --strict"],
+ "sections": [
+   {"id": "file-map", "title": "File Map",
+    "bullets": ["src/cells/scoring.py: the scoring functions",
+                "tests/cells/test_scoring.py: their tests"]}]}
 ```
+
+**On disk**, the engine writes `plans/<PLAN-ID>/plan.json` in both stores
+as an index: the plan's own fields plus `tasks[]` reduced to `id`, `title`,
+and `depends_on`. Each task's full contract goes to
+`plans/<PLAN-ID>/tasks/<TASK-ID>/task.json` when the plan lands, and the
+committed store mirrors the pair as `plan.md` plus one
+`tasks/<TASK-ID>/task.md`. Reading one task never parses the whole plan.
 
 ### `objective` and `sections`
 
@@ -213,8 +236,9 @@ here, before execution — the plan-auditor grades a cycle as `critical`.
 
 ### The `tasks[]` contract
 
-Each task is `{id: "T03", title, goal, files, accepts, depends_on}` —
-all required except `depends_on`:
+Each task is `{id: "T03", title, goal, files, accepts, depends_on,
+requirements, constraints}` — `id`, `title`, `goal`, `files`, and
+`accepts` are required; the rest default to empty:
 
 ```json
 {"id": "T03", "title": "Cell placement scoring",
@@ -223,8 +247,17 @@ all required except `depends_on`:
  "accepts": ["`score(CellId(\"eu-west\", 3), 0) == 0.0`",
              "`score(…, -1)` raises ValueError",
              "pytest tests/cells/test_scoring.py -v → 2 passed, exit 0"],
- "depends_on": ["T02"]}
+ "depends_on": ["T02"],
+ "requirements": ["R04", "R05"],
+ "constraints": ["C01", "C02"]}
 ```
+
+`requirements` and `constraints` are the structured link between a task
+and the contract it implements: `executor change` computes a change's
+blast radius from these arrays, so a task that names its ids in prose
+only is invisible to the regression lane and will not be re-dispatched
+when the requirement changes. Both may be empty — `[]` is the honest
+answer for a task that discharges no numbered requirement.
 
 | Field | Status in the dispatch |
 |---|---|
@@ -232,6 +265,8 @@ all required except `depends_on`:
 | `files` | contract — verbatim; the implementer writes only these |
 | `accepts` | contract — verbatim; the acceptance criteria the `verdict` grades — the test expectations in full |
 | `depends_on` | contract — `T`-local ids; the engine dispatches only when they complete |
+| `requirements` | the `R` ids this task discharges — the change lane's link, not prose |
+| `constraints` | the `C` ids that bind this task — the same link |
 | Implementation code inside `goal` | sketch — reference only, never authority |
 
 **Acceptance criteria stay verbatim.** `accepts` entries are the
@@ -357,9 +392,10 @@ expected failure, the minimal implementation, the green run, the
 refactor, the commit.
 
 **8. Task completeness.** Every task carries `id`, `title`, `goal`,
-`files`, `accepts`, `depends_on` — the schema enforces presence; you
-enforce content. An `accepts` a fresh implementer cannot verify is a
-`critical` finding.
+`files`, `accepts` — the schema enforces presence — and its
+`requirements`/`constraints` arrays name the ids it implements, because
+that is what a mid-run change reads. You enforce content. An `accepts` a
+fresh implementer cannot verify is a `critical` finding.
 
 **9. The fresh-implementer test.** For each task, ask: could a worker
 who reads only `goal`/`files`/`accepts` — no plan, no conversation,

@@ -7,8 +7,8 @@ The only mutation surface. Everything a run ever records lives here:
 - ``events.vN.jsonl`` — append-only, hash-chained journal. The truth.
 - ``state.json``        — a rebuildable fold cache, never authoritative.
 - ``meta.json``          — engine/schema/store version stamps.
-- ``slots/``             — minted, single-use payload slots.
-- ``in/`` ``out/`` ``views/`` — payloads, prompts/packages, projections.
+- ``dispatches/``       — prompts and the worker respond_to targets.
+- ``views/``             — projections, never sources of truth.
 
 No other module writes to ``.executor/``; all writes funnel through these
 helpers so atomicity and the hash chain hold in one place.
@@ -117,9 +117,29 @@ def atomic_write(path: Path, data: bytes) -> None:
         raise
 
 
+def json_text(obj) -> str:
+    """The one serialisation of a JSON projection: two-space indent, insertion
+    order, trailing newline. Migrations and renderers compare bytes, so this
+    must be the only writer."""
+    return json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+
+
 def write_json(path: Path, obj) -> None:
-    atomic_write(path, json.dumps(obj, indent=2, ensure_ascii=False,
-                                  sort_keys=False).encode("utf-8") + b"\n")
+    atomic_write(path, json_text(obj).encode("utf-8"))
+
+
+def write_json_if_changed(path: Path, obj) -> bool:
+    """Write only when the bytes differ. A projection that has not changed costs
+    nothing, which is what makes a repeated poll free and a byte comparison
+    against a re-render meaningful."""
+    data = json_text(obj).encode("utf-8")
+    try:
+        if path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    atomic_write(path, data)
+    return True
 
 
 def read_json(path: Path, default=None):
@@ -359,8 +379,23 @@ def store_version_verdict(engine_version) -> str:
     return "current"
 
 
+def layout_major(version: str) -> int:
+    """The numeric part of a store-layout version: v2 -> 2."""
+    try:
+        return int(str(version).lstrip("v").split(".")[0])
+    except (ValueError, IndexError):
+        return 0
+
+
 def check_store_version(idir: Path) -> None:
-    """Refuse clearly on version skew rather than misreading a store."""
+    """Refuse clearly on version skew rather than misreading a store.
+
+    Two gates, because they mean different things: the *engine* major says
+    whether this binary understands the store at all, and the *layout* version
+    says whether the projections on disk are the ones this engine writes. A v1
+    layout under a v2 engine is readable but not writable — the engine would
+    mix two layouts in one tree, which is exactly the half-migrated state the
+    layout proposal forbids."""
     meta = read_json(meta_file(idir))
     if meta is None:
         raise ExecError(f"no meta.json in {idir}: not an executor store "
@@ -376,7 +411,13 @@ def check_store_version(idir: Path) -> None:
     if verdict == "store_outdated":
         raise ExecError(
             f"store written by engine v{ev}; you have v{__version__}. "
-            f"Run `executor migrate --dry-run` then `executor migrate`.",
+            f"Run `executor migrate --dry-run` then `executor migrate --apply`.",
+            "store_outdated")
+    sv = str(meta.get("store_version", STORE_VERSION))
+    if layout_major(sv) < layout_major(STORE_VERSION):
+        raise ExecError(
+            f"store layout {sv}; this engine writes {STORE_VERSION}. "
+            f"Run `executor migrate --dry-run` then `executor migrate --apply`.",
             "store_outdated")
 
 
