@@ -1,0 +1,19 @@
+{
+  "name": "executor",
+  "version": "2.1.1",
+  "description": "Initiative-scoped workflow engine and skill library for coding agents: journaled state, typed engine actions, enforced git discipline, and 13 phase skills from discovery through handoff.",
+  "author": {
+    "name": "Atri10",
+    "url": "https://github.com/Atri10"
+  },
+  "homepage": "https://github.com/Atri10/executor",
+  "repository": "https://github.com/Atri10/executor",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "agent",
+    "initiative",
+    "planning",
+    "skills"
+  ]
+}

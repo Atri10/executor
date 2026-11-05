@@ -87,12 +87,41 @@ cp -R executor/skills/* <your-agents-skills-dir>/
 Pin to a release tag instead of `main` for stability:
 
 ```bash
-git clone --branch v2.1.0 git@github.com:Atri10/executor.git
+git clone --branch v2.1.1 git@github.com:Atri10/executor.git
 ```
 
 There are no dependencies to install: the engine is the standard library,
 and its own test suite needs nothing but Python (plus `coverage` if you
 want the branch report — `pip install -r requirements-dev.txt`).
+
+### Claude Code plugin
+
+The repo is also a Claude Code plugin marketplace — the manifests live in
+`.claude-plugin/`. From inside Claude Code:
+
+```text
+/plugin marketplace add Atri10/executor
+/plugin install executor@executor
+```
+
+All 13 skills load from the plugin and activate on their descriptions —
+asking to "start an initiative" routes to `executor`. The engine stays
+bundled inside the `executor` skill, so Python 3.11+ is still the only
+requirement.
+
+Seven slash commands ship with the plugin for the verbs a human types —
+worker traffic stays inside the skills:
+
+| Command | Runs |
+|---|---|
+| `/executor:new` | `executor new "<title>"` — create the initiative |
+| `/executor:next` | `executor next` — the engine loop |
+| `/executor:status` | `executor status` — gate card |
+| `/executor:decide` | `executor decide` — gate_decision, ruling, resume, halt |
+| `/executor:check` | `executor check` — chain, edges, liveness, index |
+| `/executor:doctor` | `executor doctor` — diagnostics + policy in force |
+| `/executor:change` | `executor change` — mid-run change requests, `--list` |
+
 
 ### One-paste install for any LLM agent
 
@@ -116,7 +145,7 @@ Install The Executor skill library for me:
    The engine ships inside skills/executor/scripts/lib/, so copy the whole
    directory — do not copy only the .md files.
 4. Verify: run python3 <skills-dir>/executor/scripts/executor --version
-   (prints 2.1.0), then python3 <skills-dir>/executor/scripts/executor
+   (prints 2.1.1), then python3 <skills-dir>/executor/scripts/executor
    --help (lists the command surface). Do not set PYTHONPATH and do not
    install a package: the launcher carries its engine. Also confirm every
    copied skills/<name>/ directory contains a SKILL.md — count the

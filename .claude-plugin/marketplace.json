@@ -1,0 +1,31 @@
+{
+  "name": "executor",
+  "owner": {
+    "name": "Atri10",
+    "url": "https://github.com/Atri10"
+  },
+  "metadata": {
+    "description": "Initiative-scoped workflow engine and skill library for coding agents",
+    "version": "2.1.1"
+  },
+  "plugins": [
+    {
+      "name": "executor",
+      "source": "./",
+      "description": "Journaled, phase-gated workflow engine: 13 skills covering discovery, architecture, specification, planning, execution, review, verification, and handoff.",
+      "version": "2.1.1",
+      "author": {
+        "name": "Atri10"
+      },
+      "homepage": "https://github.com/Atri10/executor",
+      "license": "MIT",
+      "keywords": [
+        "workflow",
+        "agent",
+        "initiative",
+        "planning",
+        "skills"
+      ]
+    }
+  ]
+}

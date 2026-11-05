@@ -7,6 +7,25 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-11-05
+
+Patch release: packaging only — no engine behavior changes. The repo is
+now installable as a Claude Code plugin.
+
+### Added
+
+- **Claude Code plugin packaging.** `.claude-plugin/plugin.json` and
+  `marketplace.json` make the repo installable as a plugin
+  (`/plugin marketplace add Atri10/executor`, then `/plugin install
+  executor@executor`). All 13 skills load from the plugin unchanged;
+  the engine stays bundled inside the `executor` skill.
+
+- **Slash commands for the human verbs.** `commands/` ships
+  `/executor:new`, `next`, `status`, `decide`, `check`, `doctor`, and
+  `change` — the loop heartbeat, gate decisions, integrity checks, and
+  mid-run changes. Worker traffic (`ingest`, repair dispatches) stays
+  inside the skills; `ingest` has no slash command on purpose.
+
 ## [2.1.0] — 2026-10-22
 
 Minor release: a deep audit of the engine against a live 325-event
