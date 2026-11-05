@@ -18,7 +18,7 @@ the engine refuses it, in code, before it lands. Contracts enforced by
 prose are hopes; contracts enforced by schemas and a fold are contracts.
 
 Works with any agent that can read skill files from a directory — Claude
-Code, Codex, [omp](https://github.com/Atri10/omp), or anything similar. The
+Code, Codex, omp, or anything similar. The
 skills are markdown; the engine is Python 3.11+, dependency-free, and runs
 on macOS, Linux, and Windows.
 
