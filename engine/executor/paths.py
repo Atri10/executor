@@ -55,10 +55,11 @@ Layout
         changes/CR-NNNN/
           change.json                    change request and its blast radius
         views/
-          index.md                       stable root index
+          index.md  index.html                   stable root index (markdown + explorer)
           progress.md  dispatches.md  summary.md  graph.json
           plans/<PLAN-ID>/plan.md        one leaf per plan
           tasks/<TASK-ID>/task.md        one leaf per task (all its rounds)
+      views/index.html                    explorer root index (all initiatives)
     <repo>/docs/executor/INIT-NNNN/      committed thinking store
       meta/index.json + index.md + policy.json
       artifacts/<ARTIFACT-ID>/artifact.json + artifact.md
@@ -289,6 +290,14 @@ def view_task_file(idir: _P, tid: str) -> _P:
     return views_dir(idir) / "tasks" / tid / "task.md"
 
 
+def root_views_dir(root: _P) -> _P:
+    return run_root(root) / "views"
+
+
+def root_views_file(root: _P) -> _P:
+    return root_views_dir(root) / "index.html"
+
+
 # ---------------------------------------------------------------- changes
 
 def changes_dir(idir: _P) -> _P:
@@ -429,8 +438,9 @@ _RUN_ROWS = (
     ("dispatch_prompt", _I + r"/dispatches/" + _DISP + r"/prompt\.md"),
     ("dispatch_payload", _I + r"/dispatches/" + _DISP + r"/payload\.json"),
     ("change", _I + r"/changes/" + _CR + r"/change\.json"),
-    ("view", _I + r"/views/(?P<name>index\.md|progress\.md|dispatches\.md"
+    ("view", _I + r"/views/(?P<name>index\.md|index\.html|progress\.md|dispatches\.md"
      r"|summary\.md|graph\.json)"),
+    ("run_views_index", r"views/index\.html"),
     ("view_plan", _I + r"/views/plans/" + _PLAN + r"/plan\.md"),
     ("view_task", _I + r"/views/tasks/" + _TVIEW + r"/task\.md"),
 )

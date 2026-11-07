@@ -120,6 +120,11 @@ def migrate_layout(init: Initiative, *, dry_run: bool = True) -> dict:
         "schema_version": stamped.get("schema_version", "v1"),
         "store_version": stamped["store_version"]})
     init.reload()
+    # The explorer page shows the store's version verdict, which reads meta.json.
+    # Write the complete view set now that the new version is stamped; otherwise
+    # the first apply leaves a page that still says the store needs a migration.
+    for path, text in V.render_plan(init).items():
+        V._text(path, text)
     s = E.fold(init.events)
     problems = (E._layout_problems(init) + E._missing_problems(init, s)
                 + E._projection_problems(init, s))
