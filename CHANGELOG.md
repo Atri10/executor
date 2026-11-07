@@ -7,6 +7,26 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+### Added
+
+- `executor views` writes an offline HTML explorer for each initiative
+  (`.executor/<INIT>/views/index.html`) and a parent index of every initiative
+  in the store (`.executor/views/index.html`). The explorer has an overview, a
+  dependency graph, an entity graph, tables for tasks, dispatches, evidence,
+  decisions, and artifacts, a daily timeline, an inspector, and a command palette.
+- The explorer's browser libraries are vendored under `engine/executor/web/vendor/`
+  (Preact 10.29.8, htm 3.1.1, D3 7.9.2, MiniSearch 7.2.0) with their licenses and
+  a SHA-256 manifest. The engine refuses to build a page when a vendored file has
+  changed or is missing from the manifest.
+- The store's version verdict (current, migration needed, or a newer executor
+  needed) appears on both explorer pages.
+
+### Security
+
+- Explorer pages make no network requests. Each page's Content-Security-Policy
+  admits only its own inline script and style, by hash. The model is embedded as
+  escaped JSON.
+
 ## [2.1.1] — 2026-11-05
 
 Patch release: packaging only — no engine behavior changes. The repo is

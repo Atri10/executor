@@ -28,9 +28,11 @@ BUNDLE = ROOT / "skills" / "executor" / "scripts" / "lib" / "executor"
 
 
 def modules(directory: Path) -> dict[str, Path]:
-    """The shipped modules, by name. `__pycache__` is residue from running
-    the engine here, not something a user installs."""
-    return {p.name: p for p in sorted(directory.glob("*.py")) if p.is_file()}
+    """The shipped files, by bundle-relative name: the top-level Python modules.
+    The explorer's browser assets (`web/`) stay in the source tree: the skill
+    ships Python only, and the skill's validator forbids HTML and scripts under
+    `skills/`. `__pycache__` is residue from running the engine here."""
+    return {p.name: p for p in directory.glob("*.py") if p.is_file()}
 
 
 def same(a: Path, b: Path) -> bool:
@@ -61,6 +63,7 @@ def sync() -> list[str]:
     changed = []
     for name in sorted(src):
         target = BUNDLE / name
+        target.parent.mkdir(parents=True, exist_ok=True)
         if name in dst and same(src[name], target):
             continue
         target.write_bytes(src[name].read_bytes())

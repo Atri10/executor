@@ -389,6 +389,49 @@ class Errors(CliCase):
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(err)["code"], "missing_file")
 
+class Views(CliCase):
+    """`executor views` owns the explorer pages. A journal event never writes
+    them, so this command is the only place they change."""
+
+    def page(self) -> Path:
+        from executor.paths import view_file
+        return view_file(self.live.init.idir, "index.html")
+
+    def root_page(self) -> Path:
+        from executor.paths import root_views_file
+        return root_views_file(self.root)
+
+    def test_views_writes_the_initiative_page_and_the_parent_index(self):
+        code, out, _ = self.cli("views", self.live.init.id)
+        self.assertEqual(code, 0)
+        self.assertIn("<script", self.page().read_text(encoding="utf-8"))
+        self.assertIn("<script", self.root_page().read_text(encoding="utf-8"))
+        self.assertIn("view", json.loads(out))
+
+    def test_a_second_views_run_writes_identical_bytes(self):
+        self.cli("views", "--all")
+        first = (self.page().read_bytes(), self.root_page().read_bytes())
+        code, _, _ = self.cli("views", "--all")
+        self.assertEqual(code, 0)
+        self.assertEqual(first, (self.page().read_bytes(), self.root_page().read_bytes()))
+
+    def test_views_all_writes_every_initiative_page_and_the_index(self):
+        code, out, _ = self.cli("views", "--all")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["initiatives"], [self.live.init.id])
+        self.assertTrue(self.page().exists())
+        self.assertTrue(self.root_page().exists())
+
+    def test_without_explorer_assets_views_writes_markdown_and_no_pages(self):
+        """The skill bundle ships Python only. Its `views` must still write every
+        markdown projection, and must not crash for want of the browser assets."""
+        from executor import views as V
+        with mock.patch.object(V, "explorer_available", return_value=False):
+            code, _, _ = self.cli("views", self.live.init.id)
+        self.assertEqual(code, 0)
+        self.assertFalse(self.page().exists())
+        self.assertTrue((self.live.init.idir / "views" / "index.md").exists())
 
 if __name__ == "__main__":
     unittest.main()
+

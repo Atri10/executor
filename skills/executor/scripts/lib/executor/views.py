@@ -19,8 +19,14 @@ Two rules make a view checkable:
 """
 from __future__ import annotations
 
-from .paths import view_plan_file, view_task_file
-from .store import Initiative, json_text, views_dir, write_json
+from pathlib import Path
+
+from . import html_views
+from .paths import root_views_file, run_meta_file, view_file, view_plan_file, view_task_file
+from .store import (STORE_VERSION, Initiative, json_text, layout_major, read_json,
+                    run_root, store_version_verdict, views_dir)
+from .view_model import initiative_model, initiative_row, root_model
+from .web_assets import assets_present
 
 SEV = {"critical": 0, "important": 1, "minor": 2, "info": 3}
 
@@ -37,10 +43,9 @@ def _stamp(init: Initiative) -> str:
     return init.events[-1]["ts"] if init.events else "no-events"
 
 
-def render_plan(init: Initiative) -> dict:
-    """Every view file, as text, without writing. The migration needs the same
-    bytes the engine writes, so the renderer is one function and `render_all`
-    is its only writer."""
+def render_projections(init: Initiative) -> dict:
+    """Every markdown and JSON projection, as text, without the explorer pages.
+    Each journal event writes these; they are cheap to render and to compare."""
     from .engine import fold
     s = fold(init.events)
     stamp = _stamp(init)
@@ -57,9 +62,67 @@ def render_plan(init: Initiative) -> dict:
     return out
 
 
+def explorer_available() -> bool:
+    """True when this install ships the explorer's browser assets. Presence only:
+    a file that fails its pin must raise when a page is built, never hide quietly."""
+    return assets_present()
+
+
+def render_initiative_page_text(init: Initiative) -> str:
+    """The initiative explorer page, from the fold alone."""
+    from .engine import fold
+    s = fold(init.events)
+    return html_views.render_initiative_page(
+        _initiative_model(init, s, parent_href="../../views/index.html"))
+
+
+def render_plan(init: Initiative) -> dict:
+    """Every view file, complete: the projections plus the initiative page.
+    Migration writes this set and the tests compare against it."""
+    out = render_projections(init)
+    if explorer_available():
+        out[view_file(init.idir, "index.html")] = render_initiative_page_text(init)
+    return out
+
+
 def render_all(init: Initiative) -> None:
-    """Regenerate every projection into the views tree."""
-    for path, text in render_plan(init).items():
+    """Regenerate the journal projections. The explorer pages are not written
+    here: they cost far more than the markdown, so `executor views` owns them."""
+    for path, text in render_projections(init).items():
+        _text(path, text)
+
+
+def render_explorer(init: Initiative) -> bool:
+    """Write the initiative page. Returns False, writing nothing, when this
+    install has no explorer assets: the markdown views are still complete."""
+    if not explorer_available():
+        return False
+    _text(view_file(init.idir, "index.html"), render_initiative_page_text(init))
+    return True
+
+
+def render_root_plan(root) -> dict:
+    """The parent index (every initiative), without writing. Empty when this
+    install has no explorer assets."""
+    if not explorer_available():
+        return {}
+    from .engine import fold
+    store = run_root(root)
+    rows = []
+    for idir in sorted(store.glob("INIT-*")):
+        if not idir.is_dir():
+            continue
+        child = Initiative(idir.name, root, idir).reload()
+        model = _initiative_model(child, fold(child.events), parent_href="../../views/index.html")
+        rows.append(initiative_row(model, href=f"../{child.id}/views/index.html"))
+    meta = read_json(run_meta_file(root)) or {}
+    return {root_views_file(root): html_views.render_parent_page(
+        root_model(rows, store_info(meta), home=str(Path.home())))}
+
+
+def render_root_all(root) -> None:
+    """Write the root explorer (all initiatives) only when bytes change."""
+    for path, text in render_root_plan(root).items():
         _text(path, text)
 
 
@@ -85,6 +148,25 @@ def _header(init: Initiative, title: str, stamp: str) -> list[str]:
 def _version() -> str:
     from . import __version__
     return __version__
+
+
+def store_info(meta: dict) -> dict:
+    """The store's version as the explorer shows it. The verdict is the engine's
+    own gate (`store_version_verdict`) plus the layout check the engine runs on
+    open, so the page and the CLI always agree."""
+    engine = str(meta.get("engine_version", "0"))
+    layout = str(meta.get("store_version", ""))
+    verdict = store_version_verdict(engine)
+    if verdict == "current" and layout and layout_major(layout) < layout_major(STORE_VERSION):
+        verdict = "store_outdated"
+    return {"engine": engine, "store_version": layout, "running": _version(), "verdict": verdict}
+
+
+def _initiative_model(init: Initiative, s: dict, *, parent_href: str) -> dict:
+    return initiative_model(
+        init_id=init.id, title=init.meta.get("title", ""), folded=s, events=init.events,
+        criteria=_criteria_defs(s), store=store_info(init.meta), home=str(Path.home()),
+        parent_href=parent_href)
 
 
 def fold_phase(init: Initiative) -> str:
@@ -174,6 +256,7 @@ def index_md(init: Initiative, s: dict, stamp: str) -> str:
               "- [dispatches](dispatches.md) — every dispatch and its outcome",
               "- [summary](summary.md) — phase states, criteria, changes",
               "- [graph](graph.json) — entities and edges, machine-readable",
+              "- [explorer](index.html) — rich single-page HTML (offline, generated from the fold)",
               "", f"*{DISPATCH_SEMANTICS}*", ""]
     if s["plan_order"]:
         lines += ["## Plans", ""]
