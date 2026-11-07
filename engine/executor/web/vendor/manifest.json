@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "key": "preact",
+      "path": "preact/preact.umd.js",
+      "package": "preact",
+      "version": "10.29.8",
+      "license": "MIT",
+      "license_file": "preact/LICENSE",
+      "source": "dist/preact.umd.js",
+      "sha256": "134b77bc803fa38661dc1b1e44e96eb0bb6a1a00edbb96d34dcde421b2e80b06",
+      "npm_integrity": "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q=="
+    },
+    {
+      "key": "preact-hooks",
+      "path": "preact/hooks.umd.js",
+      "package": "preact",
+      "version": "10.29.8",
+      "license": "MIT",
+      "license_file": "preact/LICENSE",
+      "source": "hooks/dist/hooks.umd.js",
+      "sha256": "5c29238e5dc99df306d7f7fff038591a397cfcfabb59f81fbdef43d670aa0566",
+      "npm_integrity": "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q=="
+    },
+    {
+      "key": "htm",
+      "path": "htm/htm.umd.js",
+      "package": "htm",
+      "version": "3.1.1",
+      "license": "Apache-2.0",
+      "license_file": "htm/LICENSE",
+      "source": "dist/htm.umd.js",
+      "sha256": "7a31776e04bd4afde0d4308177d26f377716fcf7e4bd70be590746d6aa594f08",
+      "npm_integrity": "sha512-983Vyg8NwUE7JkZ6NmOqpCZ+sh1bKv2iYTlUkzlWmA5JD2acKoxd4KVxbMmxX/85mtfdnDmTFoNKcg5DGAvxNQ=="
+    },
+    {
+      "key": "d3",
+      "path": "d3/d3.min.js",
+      "package": "d3",
+      "version": "7.9.2",
+      "license": "ISC",
+      "license_file": "d3/LICENSE",
+      "source": "dist/d3.min.js",
+      "sha256": "912111098ea99503a6f4967361d2bbdc9dbf58cf9c678c8e27e5b02d1a07f0c1",
+      "npm_integrity": "sha512-ZKb/mONPVKzaO5UlcWcwN8bS4ezvQaYu+bsou+XgNABdGC800kwH651ADTbbTxMPHW13UlvbQafdmJQDk1w7Mg=="
+    },
+    {
+      "key": "minisearch",
+      "path": "minisearch/minisearch.umd.js",
+      "package": "minisearch",
+      "version": "7.2.0",
+      "license": "MIT",
+      "license_file": "minisearch/LICENSE",
+      "source": "dist/umd/index.js",
+      "sha256": "03c27931eb603af1d3358579e9885eafdb6a2f5fa9929557b3e77d7e99d06d03",
+      "npm_integrity": "sha512-dqT2XBYUOZOiC5t2HRnwADjhNS2cecp9u+TJRiJ1Qp/f5qjkeT5APcGPjHw+bz89Ms8Jp+cG4AlE+QZ/QnDglg=="
+    }
+  ]
+}

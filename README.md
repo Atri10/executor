@@ -388,6 +388,12 @@ map is the only authority (there is no slot file), `prompt.md` is the
 worker's brief, and `payload.json` is the `respond_to` path `executor
 ingest` validates against the `kind`'s schema.
 
+Each initiative also gets `views/index.html`: one offline page with the overview,
+graphs, tables, timeline, and inspector, built only from the journal. The page
+makes no network requests and runs only its pinned scripts. `executor views`
+writes these pages, and the store root gets `.executor/views/index.html`, which
+lists every initiative and opens each page.
+
 ### Every payload is a closed, typed document
 
 `engine/executor/schemas.py` defines each `kind` as a closed object with
@@ -524,6 +530,7 @@ executor status [INIT]                     the gate card
 executor check [INIT] [--secrets]           chain, dangling edges, liveness, layout; or scan
 executor doctor [INIT]                     check + open dispatches + policy in force
 executor graph [INIT] [--format json|mermaid]
+executor views [INIT] [--all]              the HTML explorer, one page per initiative, plus the parent index
 executor migrate [INIT] [--dry-run|--apply] the version verdict, or convert to this layout
 executor autonomy [INIT] [<phase> <allow|gate|deny>]
 ```
@@ -587,7 +594,7 @@ flowchart LR
         J["journal/events.v1.jsonl — the truth"]
         D["dispatches/D<NNNNN>/ — prompt, payload"]
         R["plans/<PLAN>/tasks/<TASK>/ — task.json, impl/, reviews/, fixes/"]
-        V["views/ — index.md + per-plan and per-task leaves"]
+        V["views/ — index.md, per-plan and per-task leaves, index.html explorer"]
         CH["changes/CR-NNNN/ — the request and its blast radius"]
     end
     P -->|"each task dispatch"| D
@@ -665,7 +672,7 @@ flowchart TD
 
 | Path | What it is |
 |---|---|
-| `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `policy.py` |
+| `engine/executor/` | the engine source: `cli.py`, `engine.py`, `schemas.py`, `paths.py`, `store.py`, `views.py`, `view_model.py`, `html_views.py`, `graph_layout.py`, `web_assets.py`, `policy.py`; the explorer's scripts, styles, and pinned vendor libraries are in `engine/executor/web/` |
 | `engine/tests/` | the suite (828 tests), including the tree-walking contract tests |
 | `skills/executor/` | the router skill, its prompt templates, the references, and the engine that ships with it |
 | `skills/executor/scripts/executor` | the launcher; resolves `scripts/lib/executor/` relative to itself |

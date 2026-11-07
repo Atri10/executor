@@ -12,6 +12,7 @@
     executor check [INIT] [--secrets]          chain, edges, liveness, layout; or scan for secrets
     executor doctor [INIT]                     check + open dispatches + policy in force
     executor graph [INIT] [--format json|mermaid]
+    executor views [--all] [INIT]            regenerate HTML explorer views
     executor migrate [INIT] [--dry-run|--apply] the version verdict, or convert to this layout
     executor autonomy [INIT] [<phase> <allow|gate|deny>]   per-phase autonomy; deny by default
 
@@ -37,7 +38,7 @@ from executor.policy import (AUTONOMY_MODES, effective_policy,      # noqa: E402
 from executor.store import (PHASES, ExecError, Initiative,          # noqa: E402
                             Rejection, find_initiative, meta_file, read_json,
                             repo_root, store_version_verdict, write_json)
-from executor.views import status_card                             # noqa: E402
+from executor.views import render_all, render_explorer, render_root_all, status_card
 
 HUMAN_COMMANDS = frozenset({"gate_decision", "ruling", "resume", "halt"})
 
@@ -284,10 +285,38 @@ def cmd_change(args: list[str]) -> int:
     return 0
 
 
+def cmd_views(args: list[str]) -> int:
+    """Regenerate the HTML explorer views.
+
+        executor views [INIT]        one initiative + the root index
+        executor views --all         every initiative + the root index
+    """
+    if "--all" in args:
+        root = repo_root()
+        inits = [d.name for d in sorted((root / ".executor").glob("INIT-*"))
+                 if d.is_dir()]
+        for name in inits:
+            idir = root / ".executor" / name
+            init = Initiative(name, root, idir).reload()
+            render_all(init)
+            render_explorer(init)
+        render_root_all(root)
+        _emit({"initiatives": inits, "root": ".executor/views/index.html"})
+        return 0
+    init, _extra = _target(args)
+    render_all(init)
+    render_explorer(init)
+    render_root_all(init.root)
+    _emit({"initiative": init.id, "view": str(init.idir / "views" / "index.html"),
+           "root": ".executor/views/index.html"})
+    return 0
+
+
 COMMANDS = {"new": cmd_new, "next": cmd_next, "ingest": cmd_ingest,
             "change": cmd_change,
             "decide": cmd_decide, "status": cmd_status, "check": cmd_check,
             "doctor": cmd_doctor, "graph": cmd_graph, "migrate": cmd_migrate,
+            "views": cmd_views,
             "autonomy": cmd_autonomy}
 
 

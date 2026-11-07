@@ -36,6 +36,25 @@ SKILL = REPO / "skills" / "executor"
 LAUNCHER = SKILL / "scripts" / "executor"
 
 
+class BundleIsPythonOnly(unittest.TestCase):
+    """The skill ships Python only. The explorer's browser assets stay in the
+    source tree, because the skill validator forbids scripts and HTML under
+    `skills/`. A web file under the bundle would fail validation, so this pins
+    the contract where the bundle is built."""
+
+    def test_the_bundled_tree_has_no_browser_assets(self):
+        bundle = SKILL / "scripts" / "lib" / "executor"
+        offenders = [p.relative_to(bundle).as_posix() for p in bundle.rglob("*")
+                     if p.is_file() and p.suffix.lower() in {".js", ".html", ".css", ".svg"}]
+        self.assertEqual(offenders, [])
+
+    def test_the_sync_mirrors_top_level_python_and_nothing_else(self):
+        names = set(sync_engine.modules(sync_engine.SOURCE))
+        self.assertIn("views.py", names)
+        self.assertFalse(any(n.startswith("web/") for n in names))
+        self.assertTrue(all(n.endswith(".py") for n in names))
+
+
 class BundleMatchesSource(unittest.TestCase):
     """The bundled copy is generated, so a hand edit to either side is the
     failure this catches: the repository would test one engine and ship
