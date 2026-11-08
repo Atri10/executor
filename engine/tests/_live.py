@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 import _payloads as PL
@@ -65,6 +66,8 @@ class Live:
         self.git("commit", "-q", "--allow-empty", "-m", "feat: init")
         self.init = create_initiative(self.root, "live")
         self._changes = 0
+        # Polls may run on several threads; provisioning touches shared git state.
+        self._provision_lock = threading.Lock()
 
     def close(self) -> None:
         self._tmp.cleanup()
@@ -157,10 +160,13 @@ class Live:
     def _docs_commit(self, branch: str, message: str) -> None:
         """Commit the worktree's docs onto `branch` without moving HEAD or the
         worktree: a throwaway index, then commit-tree and update-ref. This is how
-        the orchestrator commits projections while a worker stays on its branch."""
-        index = self.root / ".git" / f"engine-docs-{os.getpid()}.index"
-        for stale in (index, index.with_suffix(".index.lock")):
-            stale.unlink(missing_ok=True)
+        the orchestrator commits projections while a worker stays on its branch.
+
+        The index name carries the thread id: concurrent callers share a process,
+        and two threads writing one index leave a `.index.lock` the other cannot
+        clear."""
+        index = self.root / ".git" / (
+            f"engine-docs-{os.getpid()}-{threading.get_ident()}.index")
         env = {**_GIT_ENV, "GIT_INDEX_FILE": str(index)}
 
         def run(*args: str) -> str:
@@ -170,32 +176,37 @@ class Live:
                 raise AssertionError(done.stderr)
             return done.stdout.strip()
 
-        run("read-tree", branch)
-        run("add", "-f", "--", "docs")
-        tree = run("write-tree")
-        parent = run("rev-parse", branch)
-        if tree == run("rev-parse", f"{parent}^{{tree}}"):
-            return
-        sha = run("commit-tree", tree, "-p", parent, "-m", message)
-        run("update-ref", f"refs/heads/{branch}", sha)
+        try:
+            run("read-tree", branch)
+            run("add", "-f", "--", "docs")
+            tree = run("write-tree")
+            parent = run("rev-parse", branch)
+            if tree == run("rev-parse", f"{parent}^{{tree}}"):
+                return
+            sha = run("commit-tree", tree, "-p", parent, "-m", message)
+            run("update-ref", f"refs/heads/{branch}", sha)
+        finally:
+            for stale in (index, index.with_suffix(".index.lock")):
+                stale.unlink(missing_ok=True)
 
     def _provision_plans(self) -> None:
         """What the orchestrator does before a plan's first implementation: create
         `plan/<PLAN-ID>` at the current tip. Idempotent, so every task of a plan
-        starts from the same base."""
-        from executor.engine import fold
-        branched = self.__dict__.setdefault("_branched", set())
-        init_branch = f"initiative/{self.init.id}"
-        if self.git("branch", "--list", init_branch) == "":
-            self.git("branch", init_branch, "HEAD")
-        self._docs_commit(init_branch,
-                          "docs(executor): record initiative projections")
-        for plan in fold(self.init.events)["plan_order"]:
-            if plan in branched:
-                continue
-            if self.git("branch", "--list", f"plan/{plan}") == "":
-                self.git("branch", f"plan/{plan}", "HEAD")
-            branched.add(plan)
+        starts from the same base. Serialized: concurrent polls in one process
+        would otherwise both see a missing branch and one would fail."""
+        with self._provision_lock:
+            init_branch = f"initiative/{self.init.id}"
+            if self.git("branch", "--list", init_branch) == "":
+                self.git("branch", init_branch, "HEAD")
+            self._docs_commit(init_branch,
+                              "docs(executor): record initiative projections")
+            branched = self.__dict__.setdefault("_branched", set())
+            for plan in fold(self.init.events)["plan_order"]:
+                if plan in branched:
+                    continue
+                if self.git("branch", "--list", f"plan/{plan}") == "":
+                    self.git("branch", f"plan/{plan}", "HEAD")
+                branched.add(plan)
 
     def run(self, stop, limit: int = 200, provision: bool = True) -> dict:
         """Poll and answer until `stop(action)` holds, or until the engine asks
