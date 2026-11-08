@@ -7,6 +7,8 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-11-08
+
 ### Added
 
 - `executor views` writes an offline HTML explorer for each initiative
@@ -29,6 +31,16 @@ project is tagged; between releases, entries are dated and `main` moves.
 - A plan merge must name `initiative/<INIT-ID>`. A merge that names only the
   plan branch is refused with `merge_branch_mismatch`, and the refusal says
   where the merge belongs.
+- An implementation is refused until the plan's documents are committed on
+  `initiative/<INIT-ID>` (`projections_uncommitted`, `initiative_branch_missing`)
+  and until its base carries every dependency head already reported
+  (`dependency_not_contained`).
+- Handoff is refused while any plan is unmerged or absent from the initiative
+  branch (`integration_incomplete`).
+- New dispatches carry `rules: v3`; reports are judged under any supported rules
+  version, so an upgrade never drops the git-discipline checks for work in flight.
+- The skill bundle ships Python only. The explorer's browser assets stay in the
+  source tree, and a bundled `executor views` writes the markdown views alone.
 
 ### Security
 
