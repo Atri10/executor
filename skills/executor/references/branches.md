@@ -52,6 +52,9 @@ exemption is in force.
 | **G5 merge branch** — `merge.branch` exists, is `initiative/<INIT-ID>`, and contains `merge_sha` | `merge` | `merge_branch_mismatch` |
 | **G6 commit subjects** — every subject in `base..head` matches the convention below | `report` | `bad_commit_message` |
 | **G7 implementation base** — an implementation dispatches from the tip of `plan/<PLAN-ID>`; a missing plan branch is refused | `dispatch` (impl) | `missing_plan_branch` |
+| **G8 plan documents committed** — the plan's folder must be committed on `initiative/<INIT-ID>` before its branch exists | `dispatch` (impl) | `projections_uncommitted`, `initiative_branch_missing` |
+| **G9 dependency containment** — the base must contain every `depends_on` head the plan already reported | `dispatch` (impl) | `dependency_not_contained` |
+| **G10 integration before handoff** — every plan is merged and its merge commit is contained in `initiative/<INIT-ID>` | `gate_decision` (handoff) | `integration_incomplete` |
 
 The commit-subject convention, enforced verbatim:
 

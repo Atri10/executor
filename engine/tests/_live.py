@@ -143,6 +143,42 @@ class Live:
             return PL.evidence(criterion=ent, commit=self.git("rev-parse", "HEAD"))
         raise AssertionError(f"no cooperative answer for role {role!r}")
 
+    def _merge_commit(self, into: str, head: str, message: str) -> str:
+        """A real two-parent merge commit whose tree is `head`'s, built without a
+        checkout: `commit-tree` writes it, and the caller moves the ref."""
+        tree = self.git("rev-parse", f"{head}^{{tree}}")
+        done = subprocess.run(["git", "-C", str(self.root), *_GIT_IDENTITY,
+                               "commit-tree", tree, "-p", into, "-p", head,
+                               "-m", message], capture_output=True, text=True,
+                              env=_GIT_ENV)
+        done.check_returncode()
+        return done.stdout.strip()
+
+    def _docs_commit(self, branch: str, message: str) -> None:
+        """Commit the worktree's docs onto `branch` without moving HEAD or the
+        worktree: a throwaway index, then commit-tree and update-ref. This is how
+        the orchestrator commits projections while a worker stays on its branch."""
+        index = self.root / ".git" / f"engine-docs-{os.getpid()}.index"
+        for stale in (index, index.with_suffix(".index.lock")):
+            stale.unlink(missing_ok=True)
+        env = {**_GIT_ENV, "GIT_INDEX_FILE": str(index)}
+
+        def run(*args: str) -> str:
+            done = subprocess.run(["git", "-C", str(self.root), *_GIT_IDENTITY,
+                                   *args], capture_output=True, text=True, env=env)
+            if done.returncode != 0:
+                raise AssertionError(done.stderr)
+            return done.stdout.strip()
+
+        run("read-tree", branch)
+        run("add", "-f", "--", "docs")
+        tree = run("write-tree")
+        parent = run("rev-parse", branch)
+        if tree == run("rev-parse", f"{parent}^{{tree}}"):
+            return
+        sha = run("commit-tree", tree, "-p", parent, "-m", message)
+        run("update-ref", f"refs/heads/{branch}", sha)
+
     def _provision_plans(self) -> None:
         """What the orchestrator does before a plan's first implementation: create
         `plan/<PLAN-ID>` at the current tip. Idempotent, so every task of a plan
@@ -152,11 +188,13 @@ class Live:
         init_branch = f"initiative/{self.init.id}"
         if self.git("branch", "--list", init_branch) == "":
             self.git("branch", init_branch, "HEAD")
+        self._docs_commit(init_branch,
+                          "docs(executor): record initiative projections")
         for plan in fold(self.init.events)["plan_order"]:
             if plan in branched:
                 continue
             if self.git("branch", "--list", f"plan/{plan}") == "":
-                self.git("branch", f"plan/{plan}", init_branch)
+                self.git("branch", f"plan/{plan}", "HEAD")
             branched.add(plan)
 
     def run(self, stop, limit: int = 200, provision: bool = True) -> dict:
@@ -175,29 +213,32 @@ class Live:
             elif kind == "GATE":
                 ingest(self.init, PL.gate(phase=act["phase"]), actor="human")
             elif kind == "MERGE":
-                # The contract G5 now enforces: task heads land on the plan, and
-                # the plan lands on the initiative branch as a merge commit.
+                # Task heads land on the plan, and the plan lands on the initiative
+                # branch as a real merge commit. Both are built with commit-tree, so
+                # the worker's checkout and worktree are never disturbed.
                 plan = act["plan"]
                 init_branch = f"initiative/{self.init.id}"
                 plan_branch = f"plan/{plan}"
                 if self.git("branch", "--list", init_branch) == "":
                     self.git("branch", init_branch, "HEAD")
                 tasks = fold(self.init.events)["tasks"]
-                self.git("checkout", "-q", plan_branch)
+                tip = self.git("rev-parse", plan_branch)
                 for tid in sorted(tasks):
                     if tasks[tid].get("plan") != plan:
                         continue
                     task_branch = f"task/{tid}"
                     if self.git("branch", "--list", task_branch) == "":
                         continue
-                    merged = hermetic_git(self.root, "merge-base", "--is-ancestor",
-                                          task_branch, plan_branch).returncode == 0
-                    if not merged:
-                        self.git("merge", "-q", "--no-ff", "-m", f"merge({tid})", task_branch)
-                self.git("checkout", "-q", init_branch)
-                self.git("merge", "-q", "--no-ff", "-m", f"merge({plan})", plan_branch)
-                ingest(self.init, PL.merge(plan=plan,
-                                           sha=self.git("rev-parse", "HEAD"),
+                    head = self.git("rev-parse", task_branch)
+                    if hermetic_git(self.root, "merge-base", "--is-ancestor",
+                                    head, tip).returncode == 0:
+                        continue
+                    tip = self._merge_commit(tip, head, f"merge({tid})")
+                    self.git("update-ref", f"refs/heads/{plan_branch}", tip)
+                merged = self._merge_commit(self.git("rev-parse", init_branch), tip,
+                                            f"merge({plan})")
+                self.git("update-ref", f"refs/heads/{init_branch}", merged)
+                ingest(self.init, PL.merge(plan=plan, sha=merged,
                                            branch=init_branch))
             else:
                 return act
