@@ -62,7 +62,8 @@ means something the protocol forbids.
 | `branch_mismatch` | `$.branch`, `$.commits` | No `task/<TASK-ID>` branch contains the head, or `branch` names a different branch | Creating `task/<TASK-ID>` at the dispatch base, committing there and naming it |
 | `bad_commit_message` | `$.commits` | A subject in `base..head` is outside the conventional form `type(scope): subject` | Amending the subject; the convention is in `references/branches.md` |
 | `merge_not_descendant` | `$.merge_sha` | The merge does not contain a task head of the plan it claims | Merging the plan branch at its task heads and reporting that commit |
-| `merge_branch_mismatch` | `$.branch` | The merge names no branch, names one that is not `plan/<PLAN-ID>` or `initiative/<INIT-ID>`, or is not contained in the branch it names | Merging on the plan branch and naming it |
+| `merge_branch_mismatch` | `$.branch` | The merge names no branch, names one that is not `initiative/<INIT-ID>`, or is not contained in the branch it names. A merge onto the plan branch alone never reaches the initiative | Merging the plan into `initiative/<INIT-ID>` and naming that branch |
+| `missing_plan_branch` | `$.plan` | An implementation was dispatched before `plan/<PLAN-ID>` exists, so it would start from an arbitrary base | Creating `plan/<PLAN-ID>` at the initiative branch tip, then dispatching again |
 | `change_not_applied` | `$.constraints`, `$.requirements` | A redraft dispatched to absorb a change does not carry an id the change names | Carrying every changed id in the redraft, or withdrawing the change |
 
 ## Journal and store — `store.py`

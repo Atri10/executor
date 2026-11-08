@@ -21,6 +21,15 @@ project is tagged; between releases, entries are dated and `main` moves.
 - The store's version verdict (current, migration needed, or a newer executor
   needed) appears on both explorer pages.
 
+### Changed
+
+- Implementation dispatches start from the tip of `plan/<PLAN-ID>`, not from
+  whatever branch is checked out. A missing plan branch is refused with
+  `missing_plan_branch`.
+- A plan merge must name `initiative/<INIT-ID>`. A merge that names only the
+  plan branch is refused with `merge_branch_mismatch`, and the refusal says
+  where the merge belongs.
+
 ### Security
 
 - Explorer pages make no network requests. Each page's Content-Security-Policy

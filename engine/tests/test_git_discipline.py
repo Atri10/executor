@@ -99,13 +99,31 @@ class Merge(unittest.TestCase):
         self.plan = act["plan"]
 
     def test_a_merge_that_does_not_contain_a_task_head_is_refused(self):
-        self.live.branch_at(f"plan/{self.plan}",
+        branch = f"initiative/{self.init.id}"
+        self.live.branch_at(branch,
                             base=self.live.git("rev-list", "--max-parents=0",
                                                "HEAD"))
         sha = self.live.git("rev-parse", "HEAD")
         with self.assertRaises(Rejection) as err:
-            ingest(self.init, PL.merge(plan=self.plan, sha=sha))
+            ingest(self.init, PL.merge(plan=self.plan, sha=sha, branch=branch))
         self.assertEqual(err.exception.code, "merge_not_descendant")
+    def test_a_plan_merged_only_onto_its_own_branch_is_refused(self):
+        """The fault this closes: the plan merged onto `plan/<PLAN>` and never
+        reached the initiative. The refusal must say where it belongs."""
+        self.live.branch_at(f"plan/{self.plan}")
+        sha = self.live.git("rev-parse", "HEAD")
+        with self.assertRaises(Rejection) as err:
+            ingest(self.init, PL.merge(plan=self.plan, sha=sha,
+                                       branch=f"plan/{self.plan}"))
+        self.assertEqual(err.exception.code, "merge_branch_mismatch")
+        self.assertIn(f"initiative/{self.init.id}", err.exception.hint)
+
+    def test_a_plan_merged_onto_the_initiative_branch_is_accepted(self):
+        self.live.branch_at(f"initiative/{self.init.id}")
+        sha = self.live.git("rev-parse", "HEAD")
+        ingest(self.init, PL.merge(plan=self.plan, sha=sha,
+                                   branch=f"initiative/{self.init.id}"))
+        self.assertEqual(fold(self.init.events)["plans"][self.plan]["status"], "merged")
 
     def test_a_merge_naming_a_branch_it_is_not_on_is_refused(self):
         self.live.branch_at(f"plan/{self.plan}")
@@ -131,6 +149,30 @@ class PromptCarriesTheRule(unittest.TestCase):
         text = prompt_file(live.init.idir, act["dispatch_id"]).read_text(
             encoding="utf-8")
         self.assertIn(f"rules: {act['context']['rules']}", text)
+
+
+class PlanBase(unittest.TestCase):
+    """Every implementation of a plan starts from the plan branch tip. The
+    checked-out branch is never the base: that was how one plan acquired thirteen
+    different bases."""
+
+    def setUp(self) -> None:
+        self.live = Live()
+        self.addCleanup(self.live.close)
+        self.live.land_change()
+
+    def test_the_first_implementation_starts_from_the_plan_branch_tip(self):
+        act = self.live.run(lambda a: a["action"] == "DISPATCH" and a["role"] == "impl")
+        plan = fold(self.live.init.events)["tasks"][act["entity"]]["plan"]
+        self.assertEqual(act["base"], self.live.git("rev-parse", f"plan/{plan}"))
+
+    def test_a_missing_plan_branch_refuses_the_dispatch_instead_of_using_head(self):
+        """The fault this closes: with no plan branch, the engine used to take
+        whatever HEAD was. It must refuse, naming the branch to create."""
+        with self.assertRaises(Rejection) as err:
+            self.live.run(lambda a: a["action"] == "DISPATCH" and a["role"] == "impl",
+                          provision=False)
+        self.assertEqual(err.exception.code, "missing_plan_branch")
 
 
 if __name__ == "__main__":

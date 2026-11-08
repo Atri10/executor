@@ -110,7 +110,7 @@ def needs_context(task: str = TASK, question: str = "which db?",
 
 def merge(plan: str = PLAN, sha: str = "abc1234", **extra) -> dict:
     return {"kind": "merge", "v": "v1", "plan": plan, "merge_sha": sha,
-            "branch": f"plan/{plan}", **extra}
+            "branch": f"initiative/{INIT}", **extra}
 
 
 GOOD: dict[str, dict] = {

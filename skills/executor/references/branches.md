@@ -49,8 +49,9 @@ exemption is in force.
 | **G2 base-branch purity** — the head is not contained in the branch the dispatch forked from (no commit on the integration line) | `report` | `commit_on_base` |
 | **G3 ownership** — `task/<TASK-ID>` contains the head, and `report.branch` (when present) names it | `report` | `branch_mismatch` |
 | **G4 merge ancestry** — the merge contains every task head of the plan it claims | `merge` | `merge_not_descendant` |
-| **G5 merge branch** — `merge.branch` exists, is `plan/<PLAN-ID>` or `initiative/<INIT-ID>`, and contains `merge_sha` | `merge` | `merge_branch_mismatch` |
+| **G5 merge branch** — `merge.branch` exists, is `initiative/<INIT-ID>`, and contains `merge_sha` | `merge` | `merge_branch_mismatch` |
 | **G6 commit subjects** — every subject in `base..head` matches the convention below | `report` | `bad_commit_message` |
+| **G7 implementation base** — an implementation dispatches from the tip of `plan/<PLAN-ID>`; a missing plan branch is refused | `dispatch` (impl) | `missing_plan_branch` |
 
 The commit-subject convention, enforced verbatim:
 
@@ -65,7 +66,7 @@ so the worker can see what will be checked.
 
 | Rule | Why it is not in the engine |
 |---|---|
-| Fork mechanics (`initiative/` from base, `plan/` from initiative, `task/` from the plan tip) | the engine checks the *consequence* (G1, G3), not how the branch was created; `git branch` mutation is the skill's job |
+| Fork mechanics (`initiative/` from base, `plan/` from initiative, `task/` from the plan tip) | the engine checks the *consequence* (G1, G3, G7), not how the branch was created; `git branch` mutation is the skill's job |
 | Worktree choice for concurrent tasks | a local workflow decision; no journal object describes it |
 | Merge ordering across plans | the human/pump owns it; the engine judges one merge at a time |
 | One-task-per-branch isolation | a task branch that forks from the plan tip legitimately contains every earlier merged task, so ancestry cannot tell a fork from contamination. G3 is the enforceable core: the head must live on the task's own branch |

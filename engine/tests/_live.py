@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 import _payloads as PL
-from executor.engine import create_initiative, emit_next, ingest
+from executor.engine import create_initiative, emit_next, fold, ingest
 from executor.store import read_events
 
 _GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -115,7 +115,9 @@ class Live:
         self.init.events.append(ev)
         return ev
 
-    def act(self, now: float | None = None) -> dict:
+    def act(self, now: float | None = None, provision: bool = True) -> dict:
+        if provision:
+            self._provision_plans()
         return emit_next(self.init, now=now)
 
     def answer(self, act: dict) -> dict:
@@ -127,7 +129,11 @@ class Live:
             return PL.audit(target=ent, rnd=ctx["round"])
         if role in ("impl", "fix"):
             branch = f"task/{ent}"
-            return PL.report(task=ent, commits=(self.land_change(branch),),
+            if self.git("branch", "--list", branch) == "":
+                self.branch_at(branch, base=act.get("base"))
+            else:
+                self.git("checkout", "-q", branch)
+            return PL.report(task=ent, commits=(self.land_change(),),
                              branch=branch)
         if role == "review":
             return PL.verdict(task=ent, rnd=ctx["round"], base=ctx["base"],
@@ -137,11 +143,25 @@ class Live:
             return PL.evidence(criterion=ent, commit=self.git("rev-parse", "HEAD"))
         raise AssertionError(f"no cooperative answer for role {role!r}")
 
-    def run(self, stop, limit: int = 200) -> dict:
+    def _provision_plans(self) -> None:
+        """What the orchestrator does before a plan's first implementation: create
+        `plan/<PLAN-ID>` at the current tip. Idempotent, so every task of a plan
+        starts from the same base."""
+        from executor.engine import fold
+        branched = self.__dict__.setdefault("_branched", set())
+        for plan in fold(self.init.events)["plan_order"]:
+            if plan in branched:
+                continue
+            if self.git("branch", "--list", f"plan/{plan}") == "":
+                self.git("branch", f"plan/{plan}", "HEAD")
+            branched.add(plan)
+
+    def run(self, stop, limit: int = 200, provision: bool = True) -> dict:
         """Poll and answer until `stop(action)` holds, or until the engine asks
-        for something a cooperative worker cannot give (ASK, HALT, ESCALATE)."""
+        for something a cooperative worker cannot give (ASK, HALT, ESCALATE).
+        `provision=False` runs with no plan branches, to test their absence."""
         for _ in range(limit):
-            act = self.act()
+            act = self.act(provision=provision)
             if stop(act):
                 return act
             kind = act["action"]
@@ -152,11 +172,30 @@ class Live:
             elif kind == "GATE":
                 ingest(self.init, PL.gate(phase=act["phase"]), actor="human")
             elif kind == "MERGE":
-                branch = f"plan/{act['plan']}"
-                self.branch_at(branch)
-                ingest(self.init, PL.merge(plan=act["plan"],
+                # The contract G5 now enforces: task heads land on the plan, and
+                # the plan lands on the initiative branch as a merge commit.
+                plan = act["plan"]
+                init_branch = f"initiative/{self.init.id}"
+                plan_branch = f"plan/{plan}"
+                if self.git("branch", "--list", init_branch) == "":
+                    self.git("branch", init_branch, "HEAD")
+                tasks = fold(self.init.events)["tasks"]
+                self.git("checkout", "-q", plan_branch)
+                for tid in sorted(tasks):
+                    if tasks[tid].get("plan") != plan:
+                        continue
+                    task_branch = f"task/{tid}"
+                    if self.git("branch", "--list", task_branch) == "":
+                        continue
+                    merged = hermetic_git(self.root, "merge-base", "--is-ancestor",
+                                          task_branch, plan_branch).returncode == 0
+                    if not merged:
+                        self.git("merge", "-q", "--no-ff", "-m", f"merge({tid})", task_branch)
+                self.git("checkout", "-q", init_branch)
+                self.git("merge", "-q", "--no-ff", "-m", f"merge({plan})", plan_branch)
+                ingest(self.init, PL.merge(plan=plan,
                                            sha=self.git("rev-parse", "HEAD"),
-                                           branch=branch))
+                                           branch=init_branch))
             else:
                 return act
         raise AssertionError("the run did not settle within the poll limit")
