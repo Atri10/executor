@@ -19,6 +19,11 @@ jobs:
     # other, and UTF-8 output under a legacy console. A Linux-only gate
     # catches none of them.
     runs-on: ${{ matrix.os }}
+    # A racing or hung suite must fail fast. The v2.2.0 run spent 33 minutes on
+    # Windows inside a provisioning race before reporting, and 45 minutes in
+    # total; a red job is useful in minutes, not hours. Ubuntu finishes in ~3,
+    # macOS in ~7.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

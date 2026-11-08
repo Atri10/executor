@@ -118,6 +118,31 @@ class Concurrency(LiveCase):
         self.assertEqual(dispatched, {opened})
         self.assertEqual(verify_chain(events), [])
 
+    def test_polls_that_start_together_do_not_race_the_provisioning(self):
+        """A barrier makes every poll enter `_provision_plans` at once. The
+        harness creates branches and a docs commit there; a shared index file or
+        a check-then-create branch leaves one thread failing with a git lock or
+        an existing-branch error, and the dispatch never lands. Threads swallow
+        exceptions, so this asserts on them directly."""
+        errors: list[BaseException] = []
+        barrier = threading.Barrier(8)
+
+        def work():
+            try:
+                barrier.wait(timeout=10)
+                self.live.act()
+            except BaseException as exc:          # a thread would print and die
+                errors.append(exc)
+
+        threads = [threading.Thread(target=work) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        kinds = [e["kind"] for e in self.live.events()]
+        self.assertEqual(kinds.count("task_dispatched"), 1)
+
 
 class OpenDispatches(LiveCase):
     def test_the_journal_lists_what_a_worker_may_still_answer(self):
