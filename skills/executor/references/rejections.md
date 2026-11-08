@@ -64,6 +64,10 @@ means something the protocol forbids.
 | `merge_not_descendant` | `$.merge_sha` | The merge does not contain a task head of the plan it claims | Merging the plan branch at its task heads and reporting that commit |
 | `merge_branch_mismatch` | `$.branch` | The merge names no branch, names one that is not `initiative/<INIT-ID>`, or is not contained in the branch it names. A merge onto the plan branch alone never reaches the initiative | Merging the plan into `initiative/<INIT-ID>` and naming that branch |
 | `missing_plan_branch` | `$.plan` | An implementation was dispatched before `plan/<PLAN-ID>` exists, so it would start from an arbitrary base | Creating `plan/<PLAN-ID>` at the initiative branch tip, then dispatching again |
+| `initiative_branch_missing` | `$.plan` | No `initiative/<INIT-ID>` branch exists, so the plan has no integration line to fork from | Creating the initiative branch at the base tip and committing its projections |
+| `projections_uncommitted` | `$.plan` | The plan's documents were never committed on `initiative/<INIT-ID>` | Committing `docs/executor/<INIT-ID>/plans/<PLAN-ID>/` on the initiative branch |
+| `dependency_not_contained` | `$.plan` | The dispatch base lacks the reported head of a task this one depends on | Merging the dependency into the plan branch, then dispatching again |
+| `integration_incomplete` | `$.phase` | Handoff was approved while a plan was unmerged or missing from `initiative/<INIT-ID>` | Merging every plan into the initiative branch before handoff |
 | `change_not_applied` | `$.constraints`, `$.requirements` | A redraft dispatched to absorb a change does not carry an id the change names | Carrying every changed id in the redraft, or withdrawing the change |
 
 ## Journal and store — `store.py`

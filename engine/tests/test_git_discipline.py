@@ -6,6 +6,7 @@ import unittest
 
 import _payloads as PL
 from _live import Live
+import executor.engine as E
 from executor.engine import fold, ingest
 from executor.paths import prompt_file
 from executor.store import Rejection, append_event, make_event
@@ -173,6 +174,106 @@ class PlanBase(unittest.TestCase):
             self.live.run(lambda a: a["action"] == "DISPATCH" and a["role"] == "impl",
                           provision=False)
         self.assertEqual(err.exception.code, "missing_plan_branch")
+
+
+class PlanDocs(unittest.TestCase):
+    """A plan is cut after its documents are committed on the initiative line."""
+
+    def setUp(self) -> None:
+        self.live = Live()
+        self.addCleanup(self.live.close)
+        self.head = self.live.git("rev-parse", "HEAD")
+        self.plan = f"{self.live.init.id}-P01"
+
+    def test_refused_before_the_initiative_branch_exists(self):
+        with self.assertRaises(Rejection) as err:
+            E._require_plan_docs(self.live.init, self.plan, self.head)
+        self.assertEqual(err.exception.code, "initiative_branch_missing")
+
+    def test_refused_when_no_plan_document_was_ever_committed(self):
+        self.live.git("branch", f"initiative/{self.live.init.id}", "HEAD")
+        with self.assertRaises(Rejection) as err:
+            E._require_plan_docs(self.live.init, self.plan, self.head)
+        self.assertEqual(err.exception.code, "projections_uncommitted")
+
+    def test_accepted_once_the_documents_are_committed(self):
+        self.live.git("branch", f"initiative/{self.live.init.id}", "HEAD")
+        E._project(self.live.init)
+        self.live._docs_commit(f"initiative/{self.live.init.id}", "docs: plan")
+        plan = fold(self.live.init.events)["plan_order"]
+        if plan:
+            E._require_plan_docs(self.live.init, plan[0], self.head)
+
+    def test_a_missing_initiative_branch_has_no_documents(self):
+        self.assertEqual(
+            E._plan_docs_commit(self.live.root, self.live.init.id, self.plan), "")
+
+
+class Dependencies(unittest.TestCase):
+    """A base that lacks a dependency's head cannot start the dependent task."""
+
+    def setUp(self) -> None:
+        self.live = Live()
+        self.addCleanup(self.live.close)
+
+    def test_a_head_outside_the_base_is_reported(self):
+        base = self.live.git("rev-parse", "HEAD")
+        head = self.live.land_change()
+        self.assertEqual(E._deps_in_base(self.live.root, {"T1": head}, base), ["T1"])
+
+    def test_a_head_inside_the_base_is_accepted(self):
+        head = self.live.land_change()
+        self.assertEqual(E._deps_in_base(self.live.root, {"T1": head}, head), [])
+
+    def test_a_dependent_task_refuses_a_base_without_its_dependency(self):
+        base = self.live.git("rev-parse", "HEAD")
+        head = self.live.land_change()
+        s = {"tasks": {"T2": {"plan": "INIT-0001-P01", "depends_on": ["T1"]}},
+             "reports": {"INIT-0001-P01-T1": {"commits": [head]}}}
+        with self.assertRaises(Rejection) as err:
+            E._require_dependencies(self.live.init, s, "T2", base)
+        self.assertEqual(err.exception.code, "dependency_not_contained")
+
+    def test_a_task_without_dependencies_is_unaffected(self):
+        s = {"tasks": {"T2": {"plan": "INIT-0001-P01", "depends_on": []}},
+             "reports": {}}
+        E._require_dependencies(self.live.init, s, "T2",
+                                self.live.git("rev-parse", "HEAD"))
+
+    def test_a_dependency_that_has_not_reported_is_not_checked(self):
+        s = {"tasks": {"T2": {"plan": "INIT-0001-P01", "depends_on": ["T9"]}},
+             "reports": {}}
+        E._require_dependencies(self.live.init, s, "T2",
+                                self.live.git("rev-parse", "HEAD"))
+
+
+class Integration(unittest.TestCase):
+    """Handoff must not sign off work that never reached the initiative line."""
+
+    def setUp(self) -> None:
+        self.live = Live()
+        self.addCleanup(self.live.close)
+        self.head = self.live.git("rev-parse", "HEAD")
+        self.plan = f"{self.live.init.id}-P01"
+
+    def test_an_unmerged_plan_blocks_handoff(self):
+        s = {"plans": {self.plan: {"status": "planned", "merge_sha": ""}}}
+        with self.assertRaises(Rejection) as err:
+            E._require_integration_complete(self.live.init, s)
+        self.assertEqual(err.exception.code, "integration_incomplete")
+
+    def test_a_merge_contained_in_the_initiative_branch_is_accepted(self):
+        self.live.git("branch", f"initiative/{self.live.init.id}", self.head)
+        s = {"plans": {self.plan: {"status": "merged", "merge_sha": self.head}}}
+        E._require_integration_complete(self.live.init, s)
+
+    def test_a_merge_outside_the_initiative_branch_is_reported(self):
+        self.live.git("branch", f"initiative/{self.live.init.id}", self.head)
+        elsewhere = self.live.land_change()
+        s = {"plans": {self.plan: {"status": "merged", "merge_sha": elsewhere}}}
+        with self.assertRaises(Rejection) as err:
+            E._require_integration_complete(self.live.init, s)
+        self.assertEqual(err.exception.code, "integration_incomplete")
 
 
 if __name__ == "__main__":

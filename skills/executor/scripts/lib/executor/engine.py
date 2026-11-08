@@ -31,7 +31,7 @@ from .paths import (ARTIFACT_SEGMENTS, artifact_file, audit_file,
                     dispatch_id, dispatch_key, dispatches_dir,
                     docs_artifact_file, docs_artifact_md, docs_change_md,
                     docs_export_journal, docs_index_file, docs_index_md,
-                    docs_init_dir, docs_plan_file, docs_plan_md,
+                    docs_init_dir, docs_plan_dir, docs_plan_file, docs_plan_md,
                     docs_report_file, docs_root, docs_task_md,
                     docs_verdict_file, fix_package_file, fix_report_file,
                     is_dispatch_id, journal_file, payload_file,
@@ -145,6 +145,83 @@ def path_at_rev(root: Path, rev: str, path: str) -> bool:
             and subprocess.run(["git", "-C", str(root), "cat-file", "-e",
                                 f"{rev}:{path}"],
                                capture_output=True).returncode == 0)
+
+
+def _plan_docs_commit(root: Path, init_id: str, pid: str) -> str:
+    """The first commit on the initiative branch that touched this plan's folder:
+    a plan must be cut after its documents exist, but updating them later is
+    legitimate."""
+    branch = f"initiative/{init_id}"
+    if not rev_exists(root, branch):
+        return ""
+    rel = docs_plan_dir(root, init_id, pid).relative_to(root).as_posix()
+    done = subprocess.run(["git", "-C", str(root), "log", "--reverse",
+                           "--format=%H", branch, "--", rel],
+                          capture_output=True, text=True)
+    lines = [line for line in done.stdout.splitlines() if line]
+    return lines[0] if done.returncode == 0 and lines else ""
+
+
+def _require_plan_docs(init: Initiative, pid: str, base: str) -> None:
+    """G8. The plan's documents must be committed on the initiative branch before
+    its branch exists. Building on documents that were never committed is how a run
+    loses its plan. Lineage is not checked: nothing records the initiative tip at
+    plan approval, so a fork point cannot be verified without inventing one."""
+    branch = f"initiative/{init.id}"
+    if not rev_exists(init.root, branch):
+        raise Rejection("initiative_branch_missing", "$.plan", f"branch {branch}",
+                        "absent", f"create {branch} at the base tip and commit "
+                                  f"docs/executor/{init.id}/ before implementing")
+    if not _plan_docs_commit(init.root, init.id, pid):
+        raise Rejection("projections_uncommitted", "$.plan",
+                        f"the plan document of {pid} committed on {branch}",
+                        "none", f"commit docs/executor/{init.id}/plans/{pid}/ "
+                                f"on {branch} before implementing")
+
+
+def _deps_in_base(root: Path, heads: dict[str, str], base: str) -> list[str]:
+    """The dependencies whose head is not in `base`. Empty means the base carries
+    the work the task depends on."""
+    return sorted(t for t, h in heads.items()
+                  if h and not _is_ancestor(root, _resolve(root, h), base))
+
+
+def _require_dependencies(init: Initiative, s: dict, tid: str, base: str) -> None:
+    """G9. A task must not start on a base that lacks a dependency's reported
+    head; otherwise parallel work silently drops what it was built on."""
+    t = s["tasks"][tid]
+    heads = {}
+    for ref in t.get("depends_on") or []:
+        dep = ref if ref in s["tasks"] else f"{t['plan']}-{ref}"
+        commits = (s["reports"].get(dep) or {}).get("commits") or []
+        if commits:
+            heads[dep] = commits[-1]
+    missing = _deps_in_base(init.root, heads, base)
+    if missing:
+        raise Rejection("dependency_not_contained", "$.plan",
+                        "a base containing every dependency head",
+                        ", ".join(missing),
+                        "merge the dependency into the plan branch, then "
+                        "dispatch again")
+
+
+def _require_integration_complete(init: Initiative, s: dict) -> None:
+    """G10. Handoff signs off a run whose plans actually reached the initiative
+    branch. A plan marked merged but absent from that line is the reported
+    "plan branch never merged"."""
+    branch = f"initiative/{init.id}"
+    missing = []
+    for pid, p in sorted(s["plans"].items()):
+        sha = p.get("merge_sha") or ""
+        if p.get("status") != "merged" or not sha:
+            missing.append(pid)
+        elif branch not in _branches_containing(init.root, sha):
+            missing.append(pid)
+    if missing:
+        raise Rejection("integration_incomplete", "$.phase",
+                        f"{branch} carrying every plan merge",
+                        ", ".join(missing),
+                        f"merge each plan into {branch} before handoff")
 
 
 def _plan_base(root: Path, pid: str) -> str:
@@ -964,6 +1041,8 @@ def _change_advance(init: Initiative, s: dict, c: dict, now: float):
         if not _ready(s, row):
             continue
         base = _plan_base(init.root, row["plan"])
+        _require_plan_docs(init, row["plan"], base)
+        _require_dependencies(init, s, tid, base)
         return _dispatch(init, s, "impl", tid, "report", now=now,
                          base=base, context=ctx)
     for cid in radius["criteria"]:
@@ -1189,6 +1268,8 @@ def _plan_step(init: Initiative, s: dict, pid: str, now: float):
             if pre is not None:
                 return pre
             base = _plan_base(init.root, pid)
+            _require_plan_docs(init, pid, base)
+            _require_dependencies(init, s, tid, base)
             return _dispatch(init, s, "impl", tid, "report", now=now,
                              base=base)
         if st in ("needs_context", "blocked"):
@@ -1561,6 +1642,8 @@ def _check_free(init: Initiative, s: dict, p: dict) -> str:
                 s["phase_state"].get(p["phase"]) != "gate_pending":
             raise Rejection("no_open_gate", "$.phase",
                             f"{s['phase']} with its gate pending", p["phase"])
+        if p["phase"] == "handoff":
+            _require_integration_complete(init, s)
         return p["phase"]
     if k == "resume":
         if not s["halt"]:
