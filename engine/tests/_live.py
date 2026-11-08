@@ -149,11 +149,14 @@ class Live:
         starts from the same base."""
         from executor.engine import fold
         branched = self.__dict__.setdefault("_branched", set())
+        init_branch = f"initiative/{self.init.id}"
+        if self.git("branch", "--list", init_branch) == "":
+            self.git("branch", init_branch, "HEAD")
         for plan in fold(self.init.events)["plan_order"]:
             if plan in branched:
                 continue
             if self.git("branch", "--list", f"plan/{plan}") == "":
-                self.git("branch", f"plan/{plan}", "HEAD")
+                self.git("branch", f"plan/{plan}", init_branch)
             branched.add(plan)
 
     def run(self, stop, limit: int = 200, provision: bool = True) -> dict:

@@ -91,7 +91,8 @@ PICK_PHASES = frozenset({"design", "specification"})
 NEVER_AUTO = PICK_PHASES | {"handoff"}
 
 
-RULES_VERSION = "v2"
+RULES_VERSION = "v3"
+SUPPORTED_RULES = frozenset({"v2", "v3"})
 
 _held = threading.local()
 
@@ -962,8 +963,9 @@ def _change_advance(init: Initiative, s: dict, c: dict, now: float):
             continue                    # already redone since the change
         if not _ready(s, row):
             continue
+        base = _plan_base(init.root, row["plan"])
         return _dispatch(init, s, "impl", tid, "report", now=now,
-                         base=_plan_base(init.root, row["plan"]), context=ctx)
+                         base=base, context=ctx)
     for cid in radius["criteria"]:
         runs = s["evidence"].get(cid, [])
         if runs and runs[-1]["verdict"] == "proven":
@@ -1186,8 +1188,9 @@ def _plan_step(init: Initiative, s: dict, pid: str, now: float):
             pre = _preflight(init, s, pid)
             if pre is not None:
                 return pre
+            base = _plan_base(init.root, pid)
             return _dispatch(init, s, "impl", tid, "report", now=now,
-                             base=_plan_base(init.root, pid))
+                             base=base)
         if st in ("needs_context", "blocked"):
             return _action("ASK", init.id, topic=t.get("question", tid),
                            task=tid)
@@ -1674,7 +1677,7 @@ def _check_git_discipline(init: Initiative, p: dict, sl: dict) -> None:
     before this engine carries no `rules` marker and is judged by the rules it
     was asked under, so an upgrade never rejects the work it inherited."""
     ctx = sl["context"]
-    if ctx.get("rules") != RULES_VERSION:
+    if ctx.get("rules") not in SUPPORTED_RULES:
         return
     commits = p["commits"]          # non-empty: _check_advances ran first
     head = _resolve(init.root, commits[-1])
