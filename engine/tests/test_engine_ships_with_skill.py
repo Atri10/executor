@@ -244,10 +244,14 @@ class InstalledSkillRuns(unittest.TestCase):
                      "Windows has no exec bit; the python3 spelling is the "
                      "portable one")
     def test_the_exec_bit_runs_it_directly(self):
-        """Where the exec bit survived the copy, the bare form works."""
-        proc = subprocess.run(
-            [str(self.installed / "scripts" / "executor"), "--version"],
-            cwd=self.project, env=self.env, capture_output=True, text=True)
+        """Where the exec bit survived the copy, the bare form works. A temp
+        mount marked noexec cannot run it at all, whatever the bit says."""
+        try:
+            proc = subprocess.run(
+                [str(self.installed / "scripts" / "executor"), "--version"],
+                cwd=self.project, env=self.env, capture_output=True, text=True)
+        except PermissionError as exc:
+            self.skipTest(f"temp mount forbids execution: {exc}")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertRegex(proc.stdout.strip(), r"^\d+\.\d+\.\d+$")
 

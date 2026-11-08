@@ -158,10 +158,13 @@ class MergeContract(LiveCase):
         merge = self.live.run(lambda a: a["action"] == "MERGE")
         self.assertEqual(merge["plan"], PL.PLAN)
         head = self.live.git("rev-parse", "HEAD")
-        # merge direction: the merge lands on the plan branch (rule G5)
-        self.live.branch_at(f"plan/{PL.PLAN}")
+        # merge direction: the merge lands on the initiative branch (rule G5)
+        self.live.branch_at(f"initiative/{self.init.id}")
         ingest(self.init, PL.merge(plan=PL.PLAN, sha=head))
         self.assertRefused("already_merged", PL.merge(plan=PL.PLAN, sha=head))
+
+    def test_a_merge_for_an_unknown_plan_is_refused(self):
+        self.assertRefused("unknown_entity", PL.merge(plan="INIT-0001-P09"))
 
 
 if __name__ == "__main__":

@@ -146,8 +146,17 @@ def path_at_rev(root: Path, rev: str, path: str) -> bool:
                                capture_output=True).returncode == 0)
 
 
-def _head(root: Path) -> str:
-    return _git(root, "rev-parse", "HEAD").strip()
+def _plan_base(root: Path, pid: str) -> str:
+    """The tip of `plan/<PLAN-ID>`: the one base every implementation of a plan
+    starts from. A missing branch is refused, never replaced by HEAD: HEAD is
+    whatever branch happens to be checked out, which is how a plan ended up with
+    thirteen different bases."""
+    ref = f"plan/{pid}"
+    if not rev_exists(root, ref):
+        raise Rejection("missing_plan_branch", "$.plan", f"branch {ref}",
+                        "absent", f"create {ref} at the initiative branch tip "
+                                  f"before dispatching its tasks")
+    return _git(root, "rev-parse", ref).strip()
 
 
 BRANCH_CONVENTION = re.compile(
@@ -954,7 +963,7 @@ def _change_advance(init: Initiative, s: dict, c: dict, now: float):
         if not _ready(s, row):
             continue
         return _dispatch(init, s, "impl", tid, "report", now=now,
-                         base=_head(init.root), context=ctx)
+                         base=_plan_base(init.root, row["plan"]), context=ctx)
     for cid in radius["criteria"]:
         runs = s["evidence"].get(cid, [])
         if runs and runs[-1]["verdict"] == "proven":
@@ -1178,7 +1187,7 @@ def _plan_step(init: Initiative, s: dict, pid: str, now: float):
             if pre is not None:
                 return pre
             return _dispatch(init, s, "impl", tid, "report", now=now,
-                             base=_head(init.root))
+                             base=_plan_base(init.root, pid))
         if st in ("needs_context", "blocked"):
             return _action("ASK", init.id, topic=t.get("question", tid),
                            task=tid)
@@ -1781,12 +1790,14 @@ def _check_merge(init: Initiative, s: dict, p: dict) -> None:
         raise Rejection("unknown_rev", "$.merge_sha",
                         "a resolvable merge commit", p["merge_sha"])
     merge_sha = _resolve(init.root, p["merge_sha"])
-    allowed = {f"plan/{p['plan']}", f"initiative/{init.id}"}
+    allowed = {f"initiative/{init.id}"}
     branch = p.get("branch") or ""
     if branch not in allowed:
         raise Rejection("merge_branch_mismatch", "$.branch",
-                        "|".join(sorted(allowed)), branch or "missing",
-                        "merge on the plan branch and name it")
+                        f"initiative/{init.id}", branch or "missing",
+                        f"merge the plan into initiative/{init.id} and name it; "
+                        f"a plan merged only onto its own branch never reaches "
+                        f"the initiative")
     if branch not in _branches_containing(init.root, merge_sha):
         raise Rejection("merge_branch_mismatch", "$.branch",
                         f"a branch containing {merge_sha[:12]}", branch,
