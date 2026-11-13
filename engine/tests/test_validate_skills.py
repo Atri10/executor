@@ -225,7 +225,8 @@ class DiagnosticsArePortable(unittest.TestCase):
         out: list[str] = []
         proc = subprocess.run(
             [sys.executable, str(REPO / "scripts" / "validate_skills.py"),
-             str(root)], capture_output=True, text=True, cwd=REPO)
+             str(root)], capture_output=True, text=True, encoding="utf-8",
+            cwd=REPO)
         out += proc.stdout.splitlines() + proc.stderr.splitlines()
         return out
 

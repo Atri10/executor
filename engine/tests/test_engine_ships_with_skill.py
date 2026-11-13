@@ -218,7 +218,8 @@ class InstalledSkillRuns(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(self.installed / "scripts" / "executor"),
              *argv],
-            cwd=self.project, env=self.env, capture_output=True, text=True)
+            cwd=self.project, env=self.env, capture_output=True, text=True,
+            encoding="utf-8")
 
     def test_version_runs_with_no_pythonpath_and_no_clone(self):
         proc = self.run_launcher("--version")
@@ -249,7 +250,8 @@ class InstalledSkillRuns(unittest.TestCase):
         try:
             proc = subprocess.run(
                 [str(self.installed / "scripts" / "executor"), "--version"],
-                cwd=self.project, env=self.env, capture_output=True, text=True)
+                cwd=self.project, env=self.env, capture_output=True, text=True,
+                encoding="utf-8")
         except PermissionError as exc:
             self.skipTest(f"temp mount forbids execution: {exc}")
         self.assertEqual(proc.returncode, 0, proc.stderr)

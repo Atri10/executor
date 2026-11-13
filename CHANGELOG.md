@@ -7,6 +7,13 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+### Fixed
+
+- A Windows checkout keeps LF bytes, so the explorer's pinned vendor libraries
+  still match their SHA-256 manifest when `core.autocrlf` is on. Without a
+  `.gitattributes`, Git for Windows rewrote `engine/executor/web/vendor/` to
+  CRLF and every `executor views` page was refused as changed.
+
 ## [2.2.0] — 2026-11-08
 
 ### Added

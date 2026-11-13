@@ -38,7 +38,8 @@ def hermetic_git(root: Path, *args: str) -> subprocess.CompletedProcess:
     """One git call in a test repository. The caller decides what a failure means,
     so a test can assert on a non-zero return code."""
     return subprocess.run(["git", "-C", str(root), *_GIT_IDENTITY, *args],
-                          capture_output=True, text=True, env=_GIT_ENV)
+                          capture_output=True, text=True, encoding="utf-8",
+                          env=_GIT_ENV)
 
 
 def _artifact(kind: str, ent: str) -> dict:
@@ -153,7 +154,7 @@ class Live:
         done = subprocess.run(["git", "-C", str(self.root), *_GIT_IDENTITY,
                                "commit-tree", tree, "-p", into, "-p", head,
                                "-m", message], capture_output=True, text=True,
-                              env=_GIT_ENV)
+                               encoding="utf-8", env=_GIT_ENV)
         done.check_returncode()
         return done.stdout.strip()
 
@@ -171,7 +172,8 @@ class Live:
 
         def run(*args: str) -> str:
             done = subprocess.run(["git", "-C", str(self.root), *_GIT_IDENTITY,
-                                   *args], capture_output=True, text=True, env=env)
+                                   *args], capture_output=True, text=True,
+                                  encoding="utf-8", env=env)
             if done.returncode != 0:
                 raise AssertionError(done.stderr)
             return done.stdout.strip()

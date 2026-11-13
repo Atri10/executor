@@ -172,7 +172,8 @@ class PayloadSkeletonsValidate(unittest.TestCase):
     def skeletons(self) -> list[tuple[str, dict]]:
         out = []
         for p in sorted((REPO / "skills").rglob("*.md")):
-            for m in re.finditer(r"```json\n(.*?)```", p.read_text(), re.S):
+            for m in re.finditer(r"```json\n(.*?)```",
+                                 p.read_text(encoding="utf-8"), re.S):
                 block = m.group(1)
                 depth, start = 0, None
                 for i, ch in enumerate(block):

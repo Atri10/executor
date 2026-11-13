@@ -1,0 +1,6 @@
+# The explorer's vendored libraries are pinned by the SHA-256 of their bytes,
+# and the suite reads committed documents as UTF-8 text. A checkout must hold
+# LF bytes on every platform: Git for Windows has core.autocrlf=true by
+# default, which would rewrite vendor/ to CRLF and make the engine refuse
+# every explorer page.
+* text=auto eol=lf
