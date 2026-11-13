@@ -83,7 +83,8 @@ class CanonicalLayout(LiveCase):
                 "constraints": [{"id": "C1", "constraint": "under 200ms",
                                  "observable": "p99"}]}
         ingest(self.init, spec)
-        md = docs_artifact_md(self.live.root, INIT, spec["id"]).read_text()
+        md = docs_artifact_md(self.live.root, INIT,
+                              spec["id"]).read_text(encoding="utf-8")
         self.assertIn("### R1", md)
         self.assertIn("**C1**", md)
 

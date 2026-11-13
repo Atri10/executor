@@ -57,7 +57,8 @@ class TestStore(Base):
     def test_meta_written(self):
         m = (self.idir / "meta" / "meta.json")
         self.assertTrue(m.exists())
-        self.assertEqual(m.read_text().__contains__("engine_version"), True)
+        self.assertEqual(
+            m.read_text(encoding="utf-8").__contains__("engine_version"), True)
 
     def test_chain_links(self):
         self.ev("phase_entered", "INIT-0001", {"phase": "intake"})

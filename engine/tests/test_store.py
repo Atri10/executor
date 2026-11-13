@@ -457,7 +457,7 @@ class StoreLockTests(TmpCase):
     def test_the_lock_works_when_it_lands_on_descriptor_zero(self):
         r = subprocess.run(
             [sys.executable, "-c", FD0_CHILD, str(ENGINE), str(self.idir)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
             stdin=subprocess.DEVNULL)
         self.assertEqual((r.returncode, r.stderr), (0, ""))
 
