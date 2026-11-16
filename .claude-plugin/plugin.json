@@ -1,6 +1,6 @@
 {
   "name": "executor",
-  "version": "2.1.1",
+  "version": "2.2.1",
   "description": "Initiative-scoped workflow engine and skill library for coding agents: journaled state, typed engine actions, enforced git discipline, and 13 phase skills from discovery through handoff.",
   "author": {
     "name": "Atri10",

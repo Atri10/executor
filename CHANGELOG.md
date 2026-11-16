@@ -7,12 +7,23 @@ project is tagged; between releases, entries are dated and `main` moves.
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-11-16
+
 ### Fixed
 
 - A Windows checkout keeps LF bytes, so the explorer's pinned vendor libraries
   still match their SHA-256 manifest when `core.autocrlf` is on. Without a
   `.gitattributes`, Git for Windows rewrote `engine/executor/web/vendor/` to
   CRLF and every `executor views` page was refused as changed.
+- The plugin manifests report `2.2.1`. They had stayed at `2.1.1` through the
+  2.2.0 release, so the marketplace showed a version two releases behind.
+
+### Changed
+
+- CI runs the engine suite in four shards on Windows, so a failure reports in
+  minutes instead of spending the job budget in a hang; a race in plan
+  provisioning under concurrent polls is fixed, and tests decode git and CLI
+  output as UTF-8 rather than the host codec. No engine behavior changed.
 
 ## [2.2.0] — 2026-11-08
 
